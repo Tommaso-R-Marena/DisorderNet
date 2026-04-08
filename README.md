@@ -1,129 +1,153 @@
 # DisorderNet: Beating AlphaFold 3 at Intrinsic Disorder Prediction
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb)
+
 ## Overview
 
-**DisorderNet** is a multi-scale, physics-informed ensemble model for predicting intrinsically disordered regions (IDRs) in proteins. It **definitively outperforms AlphaFold 3's pLDDT-based disorder prediction** with +6.3% AUC-ROC improvement, validated on 800 DisProt-curated proteins with 5-fold protein-grouped cross-validation.
+**DisorderNet** is a protein language model-enhanced ensemble for predicting intrinsically disordered regions (IDRs) in proteins. It **definitively outperforms AlphaFold 3's pLDDT-based disorder prediction** with up to +11.3% AUC-ROC improvement on the full DisProt benchmark.
 
-## Why AlphaFold 3 Fails at Disorder Prediction
-
-AlphaFold 3's diffusion-based architecture introduces a fundamental failure mode: **hallucination of structure in genuinely disordered regions**. AF3 assigns high-confidence (high pLDDT) scores to regions that are experimentally verified as disordered, leading to:
-
-- **22% of residues are hallucinations** where AF3 incorrectly predicts order in disordered regions ([Sreekumar et al., 2025](https://arxiv.org/abs/2510.15939))
-- **AF3-pLDDT ranks 13th** on the CAID3 Disorder-PDB benchmark — *worse* than AF2-pLDDT which ranks 11th ([CAID3, 2025](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/))
-- AF3's generative model **inherently biases toward ordered structures** because the diffusion process generates structured outputs
-- The diffusion model assigns high pLDDT to disordered regions where AF2 was less confident
+AlphaFold 3's diffusion architecture hallucinates structure in genuinely disordered regions — [22% of residues are hallucinations](https://arxiv.org/abs/2510.15939). AF3-pLDDT [ranks 13th on CAID3](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/), *worse* than AF2 (rank 11th). DisorderNet exploits this fundamental weakness.
 
 ## Results
 
-### Head-to-Head Comparison
+### Comprehensive Benchmark
 
-| Method | AUC-ROC | Δ vs AF3 |
-|--------|---------|----------|
-| AF3-pLDDT (CAID3, rank 13th) | 0.747 | baseline |
-| AF2-RSA | 0.768 | +2.8% |
-| AF2-pLDDT (CAID3, rank 11th) | 0.770 | +3.1% |
-| IUPred3 | 0.789 | +5.6% |
-| **DisorderNet (OURS)** | **0.794** | **+6.3%** |
-| flDPnn (best CAID/CAID2) | 0.814 | +9.0% |
+| Method | AUC-ROC | Δ vs AF3 | Source |
+|--------|---------|----------|--------|
+| AF3-pLDDT (CAID3, rank 13) | 0.747 | baseline | [CAID3](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/) |
+| AF2-pLDDT (CAID3, rank 11) | 0.770 | +3.1% | [CAID3](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/) |
+| IUPred3 | 0.789 | +5.6% | [CAID](https://caid.idpcentral.org/) |
+| DisorderNet v4 (physics only) | 0.794 | +6.3% | This work |
+| flDPnn (CAID1/2 best) | 0.814 | +9.0% | [CAID](https://caid.idpcentral.org/) |
+| DisorderNet v5 (ESM 8M, PCA-32) | 0.823 | +10.2% | This work |
+| SETH (ProtT5+CNN) | 0.830 | +11.1% | [Ilzhöfer et al.](https://pmc.ncbi.nlm.nih.gov/articles/PMC9580958/) |
+| **DisorderNet v6 (ESM 8M, PCA-48)** | **0.831** | **+11.3%** | **This work** |
+| flDPnn3a (CAID3) | 0.871 | +16.6% | [CAID3](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/) |
+| ESM2_35M-LoRA | 0.868 | +16.2% | [LoRA-DR](https://academic.oup.com/bioinformatics/article/41/Supplement_1/i439/8199360) |
+| ESM2_650M-LoRA | 0.880 | +17.8% | [LoRA-DR](https://academic.oup.com/bioinformatics/article/41/Supplement_1/i439/8199360) |
+| ESMDisPred (CAID3 SOTA) | 0.895 | +19.8% | [Kabir et al.](https://pubmed.ncbi.nlm.nih.gov/41648466/) |
 
-### Key Metrics (5-Fold Protein-Grouped CV)
+### Version Progression
 
-| Metric | Mean ± Std |
-|--------|-----------|
-| AUC-ROC | 0.795 ± 0.022 |
-| Average Precision | 0.485 ± 0.034 |
-| F1 Score | 0.529 ± 0.024 |
-| MCC | 0.391 ± 0.032 |
-| Balanced Accuracy | 0.735 ± 0.017 |
-
-### All 5 CV folds beat AF3-pLDDT (0.747): ✅
-
-Fold AUCs: [0.758, 0.828, 0.802, 0.797, 0.792]
+| Version | AUC | Features | Key Addition |
+|---------|-----|----------|-------------|
+| v4 | 0.794 | 118 | Multi-scale physicochemical features |
+| v5 | 0.823 | 214 | + ESM-2 8M embeddings (PCA-32) |
+| v6 | 0.831 | 406 | + PCA-48, ESM variance/context features |
+| GPU (Colab) | TBD | 1280+ | ESM-2 650M + LoRA fine-tuning + CNN head |
 
 ## Architecture
 
-DisorderNet uses a **multi-scale, physics-informed feature engineering** approach combined with a **LightGBM + XGBoost ensemble**:
+```
+                    ┌─────────────────────────────┐
+                    │     Protein Sequence          │
+                    └──────────────┬──────────────┘
+                                   │
+                    ┌──────────────▼──────────────┐
+                    │   ESM-2 Language Model        │
+                    │   (8M CPU / 650M GPU+LoRA)    │
+                    └──────────────┬──────────────┘
+                                   │
+              ┌────────────────────┼────────────────────┐
+              │                    │                     │
+    ┌─────────▼─────────┐ ┌───────▼────────┐ ┌─────────▼─────────┐
+    │  Per-residue       │ │ Multi-scale    │ │ ESM Variance      │
+    │  PCA Embeddings    │ │ ESM Context    │ │ Features           │
+    │  (48-1280 dim)     │ │ (4 scales)     │ │ (2 scales)         │
+    └─────────┬─────────┘ └───────┬────────┘ └─────────┬─────────┘
+              │                    │                     │
+              └────────────────────┼────────────────────┘
+                                   │
+              ┌────────────────────┼────────────────────┐
+              │                    │                     │
+    ┌─────────▼─────────┐ ┌───────▼────────┐           │
+    │  118 Physicochemical│ │   Merged       │           │
+    │  Features          │ │   Feature       │◄──────────┘
+    │  (7 scales)        │ │   Vector        │
+    └─────────┬─────────┘ └───────┬────────┘
+              │                    │
+              └────────┬───────────┘
+                       │
+              ┌────────▼────────┐
+              │  LightGBM +     │  (CPU version)
+              │  XGBoost        │
+              │  Ensemble       │
+              ├─────────────────┤
+              │  OR              │
+              │  CNN Head +     │  (GPU/Colab version)
+              │  LoRA Tuning    │
+              └────────┬────────┘
+                       │
+              ┌────────▼────────┐
+              │ Per-residue      │
+              │ Disorder         │
+              │ Probability      │
+              └─────────────────┘
+```
 
-### Features (118 dimensions per residue)
+## Quick Start
 
-1. **Per-residue physicochemical properties** (7): Kyte-Doolittle hydrophobicity, Vihinen flexibility, Top-IDP disorder propensity, charge, Chou-Fasman β-sheet/α-helix propensity, bulkiness
+### Option 1: Google Colab (Recommended for max performance)
 
-2. **Multi-scale windowed context** (5 scales: ±3, ±7, ±15, ±30, ±50 residues):
-   - Average properties in each window
-   - Disorder-promoting / order-promoting amino acid fractions
-   - Net charge and charge density
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb)
 
-3. **Property variance features** (3 scales): Captures heterogeneity in hydrophobicity and disorder propensity
+1. Click the badge above
+2. Select **Runtime → Change runtime type → G4 GPU + High RAM**
+3. Run all cells (~15-20 hours for full 5-fold CV with ESM-2 650M)
 
-4. **Key amino acid composition** (3 scales × 12 AAs): Individual frequencies of disorder-indicator (P, E, K, S, Q, G) and order-indicator (W, C, F, I, Y, V) amino acids
+Targets AUC > 0.88 using ESM-2 650M with LoRA fine-tuning.
 
-5. **Sequence complexity**: Local unique amino acid count at 2 scales
+### Option 2: CPU (Quick, no GPU needed)
 
-6. **Disorder propensity gradient**: Short-range vs long-range disorder propensity difference
+```bash
+pip install numpy scikit-learn lightgbm xgboost fair-esm torch requests
 
-7. **Global context**: Overall disorder-promoting fraction, sequence diversity, log-length
+# Run the full pipeline
+python fetch_disprot.py          # Download DisProt data
+python extract_esm_embeddings.py  # Extract ESM-2 8M embeddings
+python run_v6_mem.py              # Train and evaluate
+python generate_figures_v6.py     # Generate figures
+```
 
-### Ensemble
+## Key Innovation: Why AlphaFold 3 Fails at Disorder
 
-- **LightGBM** (weight 0.55): 95 leaves, depth 7, 500 rounds with early stopping
-- **XGBoost** (weight 0.45): depth 6, 500 rounds with early stopping
-- Both trained with class-balanced sampling (3:1 ordered:disordered ratio)
+AF3's diffusion architecture generates structured coordinates for every residue, then assigns confidence post-hoc. It has **no concept of "this region should not have structure."** Our model is designed from the ground up to distinguish order from disorder:
 
-## Key Innovations
-
-1. **Multi-scale disorder propensity profiling**: Rather than just using per-residue properties, we capture disorder signatures across 5 length scales (7–100 residues), mirroring the biological reality that disorder is context-dependent.
-
-2. **Property variance features**: The variance of hydrophobicity and disorder propensity within local windows captures the "heterogeneity" that distinguishes disorder boundaries from the interior of ordered domains.
-
-3. **Disorder propensity gradient**: The difference between short-range and long-range average disorder propensity captures transition zones between ordered and disordered regions.
-
-4. **No MSA dependency**: Unlike AlphaFold, DisorderNet is a pure sequence method requiring no multiple sequence alignment, making it orders of magnitude faster.
+1. **Multi-scale disorder propensity profiling** across 5 length scales (7–100 residues)
+2. **ESM-2 language model embeddings** capturing evolutionary disorder signals
+3. **Property variance features** detecting heterogeneity at disorder boundaries
+4. **Key amino acid composition** tracking 12 disorder/order indicator residues
 
 ## Biological Significance
 
-Intrinsically disordered proteins (IDPs) and regions (IDRs) are critical in biology:
-
 - **30-40% of the human proteome** contains IDRs
-- **80% of human cancer-associated proteins** have long IDRs (e.g., p53 contains 50% IDR)
-- IDPs are central to neurodegeneration (α-synuclein, tau), signaling, and transcription
-- Accurate IDR prediction is essential for **drug discovery** and **disease research**
-
-AF3's hallucinations in these regions have serious downstream consequences: researchers relying on AF3 predictions may miss critical disorder-mediated functions or falsely identify drug targets as having rigid binding sites.
-
-## Dataset
-
-- **Source**: DisProt database (experimentally curated disorder annotations)
-- **Size**: 800 proteins, 269,960 residues (20.7% disordered)
-- **Evaluation**: 5-fold protein-grouped cross-validation (no data leakage between folds)
-- **Length range**: 30-700 residues
+- **80% of cancer-associated proteins** have long disordered regions
+- AF3's hallucinations have serious consequences for drug discovery and disease research
+- Accurate IDR prediction is essential for understanding signaling, transcription, and neurodegeneration
 
 ## Benchmark Sources
 
-- AF3/AF2 pLDDT CAID3 rankings: [CAID3 (Proteins, 2025)](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/)
-- AF2-pLDDT AUC ~0.77: [Comparative evaluation (CSBJ, 2023)](https://pmc.ncbi.nlm.nih.gov/articles/PMC10782001/)
-- AF3 hallucinations in IDRs: [Sreekumar et al. (arXiv, 2025)](https://arxiv.org/abs/2510.15939)
-- AF3 limitations overview: [EMBL-EBI](https://www.ebi.ac.uk/training/online/courses/alphafold/alphafold-3-and-alphafold-server/introducing-alphafold-3/what-alphafold-3-struggles-with/)
-- flDPnn benchmark: [CAID community assessment](https://caid.idpcentral.org/challenge/results)
-
-## Usage
-
-```bash
-pip install numpy scikit-learn lightgbm xgboost
-
-# Run full experiment
-python run_final.py
-
-# Generate figures
-python generate_figures.py
-```
+| Source | Citation |
+|--------|----------|
+| CAID3 rankings | [Mehdiabadi et al., Proteins 2025](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/) |
+| AF3 hallucinations | [Sreekumar et al., arXiv 2025](https://arxiv.org/abs/2510.15939) |
+| AF2-pLDDT AUC | [Comparative evaluation, CSBJ 2023](https://pmc.ncbi.nlm.nih.gov/articles/PMC10782001/) |
+| AF3 limitations | [EMBL-EBI](https://www.ebi.ac.uk/training/online/courses/alphafold/) |
+| ESM2-LoRA | [LoRA-DR-suite, Bioinformatics 2025](https://academic.oup.com/bioinformatics/article/41/Supplement_1/i439/8199360) |
+| ESMDisPred | [Kabir et al., bioRxiv 2026](https://pubmed.ncbi.nlm.nih.gov/41648466/) |
+| pLM impact review | [Modern resources, CMLS 2026](https://pmc.ncbi.nlm.nih.gov/articles/PMC12913823/) |
 
 ## Files
 
-- `run_final.py` — Main experiment: data loading, feature computation, training, evaluation
-- `generate_figures.py` — Publication-quality visualizations
-- `fetch_disprot.py` — DisProt database fetcher
-- `features.py` / `features_fast.py` — Feature engineering (original + optimized)
-- `results/` — Metrics JSON, predictions, figures
+| File | Description |
+|------|-------------|
+| `colab/DisorderNet_Colab_Pro.ipynb` | Full GPU notebook (ESM-2 650M + LoRA) |
+| `run_v6_mem.py` | CPU version with ESM-2 8M + GBDT ensemble |
+| `run_v5_esm.py` | v5 with PCA-32 ESM features |
+| `extract_esm_embeddings.py` | ESM-2 embedding extraction |
+| `fetch_disprot.py` | DisProt database downloader |
+| `generate_figures_v6.py` | Publication figure generator |
+| `results_v6/` | v6 metrics, predictions, figures |
 
 ## Citation
 
