@@ -17,21 +17,20 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from colab.af_plddt import plddt_to_disorder_score
 from colab.biological_utility import align_fold_predictions
 
-# Published DisProt/CAID benchmark AUCs (see README)
+from colab.benchmark_tables import (
+    LITERATURE_REFERENCE_BENCHMARKS,
+    OUR_DISPROT_CPU_V6,
+    rank_against_literature,
+)
+
+# Legacy alias — literature reference only (NOT head-to-head)
 PUBLISHED_BENCHMARKS: list[dict] = [
-    {"method": "AF3-pLDDT (CAID3)", "auc": 0.747, "source": "CAID3"},
-    {"method": "AF2-pLDDT (CAID3)", "auc": 0.770, "source": "CAID3"},
-    {"method": "IUPred3", "auc": 0.789, "source": "CAID"},
-    {"method": "DisorderNet v4", "auc": 0.794, "source": "This work (CPU)"},
-    {"method": "flDPnn", "auc": 0.814, "source": "CAID"},
-    {"method": "DisorderNet v5", "auc": 0.823, "source": "This work (CPU)"},
-    {"method": "SETH (ProtT5+CNN)", "auc": 0.830, "source": "Literature"},
-    {"method": "DisorderNet v6", "auc": 0.831, "source": "This work (CPU)"},
-    {"method": "flDPnn3a (CAID3)", "auc": 0.871, "source": "CAID3"},
-    {"method": "ESM2_35M-LoRA", "auc": 0.868, "source": "LoRA-DR"},
-    {"method": "ESM2_650M-LoRA", "auc": 0.880, "source": "LoRA-DR"},
-    {"method": "ESMDisPred (CAID3 SOTA)", "auc": 0.895, "source": "CAID3"},
+    {"method": b["method"], "auc": b["auc"], "source": b["source"]}
+    for b in LITERATURE_REFERENCE_BENCHMARKS
 ]
+PUBLISHED_BENCHMARKS.extend([
+    {"method": OUR_DISPROT_CPU_V6["method"], "auc": OUR_DISPROT_CPU_V6["auc"], "source": OUR_DISPROT_CPU_V6["source"]},
+])
 
 
 def fuse_disorder_score(
@@ -322,7 +321,8 @@ def run_structure_calibration_report(
 
 
 def build_benchmark_ranking(our_auc: float, benchmarks: Optional[list[dict]] = None) -> dict:
-    """Rank DisorderNet GPU AUC against published methods."""
+    """Rank DisorderNet GPU AUC against literature reference points (not head-to-head)."""
+    literature_rank = rank_against_literature(our_auc)
     benchmarks = benchmarks or PUBLISHED_BENCHMARKS
     rows = []
     for b in benchmarks:
@@ -333,7 +333,7 @@ def build_benchmark_ranking(our_auc: float, benchmarks: Optional[list[dict]] = N
         })
     rows.sort(key=lambda x: x["auc"], reverse=True)
 
-    rank = 1 + sum(1 for r in rows if r["auc"] > our_auc)
+    rank = literature_rank["literature_rank_if_comparable"]
     beats_af3 = our_auc > 0.747
     beats_af2 = our_auc > 0.770
     beats_v6 = our_auc > 0.831
@@ -342,6 +342,8 @@ def build_benchmark_ranking(our_auc: float, benchmarks: Optional[list[dict]] = N
         "our_auc": float(our_auc),
         "rank_among_published": rank,
         "n_methods": len(rows),
+        "literature_comparison_note": literature_rank["note"],
+        "comparable_head_to_head": False,
         "beats_af3_plddt": beats_af3,
         "beats_af2_plddt": beats_af2,
         "beats_disordernet_v6": beats_v6,
@@ -360,6 +362,9 @@ def run_phase3_integrated_report(
     calibration_report: dict,
     af3_report: Optional[dict] = None,
     af2_af3_comparison: Optional[dict] = None,
+    caid_report: Optional[dict] = None,
+    statistical_validation: Optional[dict] = None,
+    benchmark_report: Optional[dict] = None,
 ) -> dict:
     """Manuscript-ready synthesis across Phases 0–2."""
     our_auc = float(cv_pooled.get("auc", 0.0))
@@ -410,6 +415,9 @@ def run_phase3_integrated_report(
         "insufficient_data": False,
         "headline": headline,
         "benchmark_ranking": benchmark,
+        "benchmark_tables": benchmark_report,
+        "caid_evaluation": caid_report,
+        "statistical_validation": statistical_validation,
         "phase_summaries": phase_summaries,
         "af2_af3_comparison": af2_af3_comparison,
         "structure_calibration": calibration_report,
@@ -417,7 +425,10 @@ def run_phase3_integrated_report(
 
 
 def _build_headline(benchmark: dict, phases: dict, calibration: dict) -> str:
-    parts = [f"GPU AUC {benchmark['our_auc']:.3f} ranks #{benchmark['rank_among_published']}/{benchmark['n_methods']}"]
+    parts = [
+        f"GPU AUC {benchmark['our_auc']:.3f} "
+        f"(contextual lit. rank #{benchmark['rank_among_published']}/{benchmark['n_methods']}, not head-to-head)",
+    ]
     if benchmark["beats_af3_plddt"]:
         parts.append(f"+{benchmark['delta_vs_af3']:.1%} vs AF3-pLDDT")
     p2 = phases.get("phase2_af_rescue", {})
@@ -445,8 +456,10 @@ def print_phase3_report(report: dict) -> None:
     print(f"  {report.get('headline', '')}")
 
     bench = report["benchmark_ranking"]
-    print(f"\n── Published benchmark ranking ──")
-    print(f"  Our AUC     : {bench['our_auc']:.4f}  (rank {bench['rank_among_published']}/{bench['n_methods']})")
+    print(f"\n── Literature reference ranking (NOT head-to-head) ──")
+    print(f"  Our AUC     : {bench['our_auc']:.4f}  (contextual rank {bench['rank_among_published']}/{bench['n_methods']})")
+    if bench.get("literature_comparison_note"):
+        print(f"  Note        : {bench['literature_comparison_note']}")
     print(f"  vs AF3-pLDDT: {bench['delta_vs_af3']:+.4f}")
     print(f"  vs AF2-pLDDT: {bench['delta_vs_af2']:+.4f}")
     print(f"  vs v6 CPU   : {bench['delta_vs_v6']:+.4f}")

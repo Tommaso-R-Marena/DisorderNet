@@ -5,7 +5,9 @@
 
 ## Overview
 
-**DisorderNet** is a protein language model-enhanced ensemble for predicting intrinsically disordered regions (IDRs) in proteins. It **definitively outperforms AlphaFold 3's pLDDT-based disorder prediction** with up to +11.3% AUC-ROC improvement on the full DisProt benchmark.
+**DisorderNet** is a protein language model-enhanced ensemble for predicting intrinsically disordered regions (IDRs) in proteins. On our DisProt 5-fold CV, the CPU model (v6) reaches **0.831 AUC-ROC**; the GPU Colab path (ESM-2 650M + LoRA) targets **≥0.88** pending a full benchmark run.
+
+Compared to **literature reference points** (different protocols — not head-to-head), dedicated disorder predictors substantially outperform using AlphaFold pLDDT as a disorder proxy: AF3-pLDDT scores **0.747** on CAID3 (rank 13), while current disorder SOTA (ESMDisPred) reaches **0.895**. DisorderNet's distinctive contribution is quantifying and correcting **AlphaFold hallucinations** in genuinely disordered regions.
 
 AlphaFold 3's diffusion architecture hallucinates structure in genuinely disordered regions — [22% of residues are hallucinations](https://arxiv.org/abs/2510.15939). AF3-pLDDT [ranks 13th on CAID3](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/), *worse* than AF2 (rank 11th). DisorderNet exploits this fundamental weakness.
 
@@ -13,8 +15,33 @@ AlphaFold 3's diffusion architecture hallucinates structure in genuinely disorde
 
 ### Comprehensive Benchmark
 
-| Method | AUC-ROC | Δ vs AF3 | Source |
-|--------|---------|----------|--------|
+**Important:** Table A lists published reference AUCs from CAID/DisProt studies (different splits/protocols). Table B lists **our** runs on the same in-repo DisProt 5-fold protein-grouped CV. Do not treat Table A rows as head-to-head comparisons.
+
+#### Table A — Literature reference (not head-to-head)
+
+| Method | AUC-ROC | Source | Protocol |
+|--------|---------|--------|----------|
+| AF3-pLDDT (CAID3, rank 13) | 0.747 | [CAID3](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/) | CAID3 eval set |
+| AF2-pLDDT (CAID3, rank 11) | 0.770 | [CAID3](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/) | CAID3 eval set |
+| IUPred3 | 0.789 | [CAID](https://caid.idpcentral.org/) | CAID benchmark |
+| flDPnn | 0.814 | [CAID](https://caid.idpcentral.org/) | CAID benchmark |
+| SETH (ProtT5+CNN) | 0.830 | [Ilzhöfer et al.](https://pmc.ncbi.nlm.nih.gov/articles/PMC9580958/) | Published |
+| **DisorderNet v6 (CPU)** | **0.831** | **This repo** | DisProt 5-fold CV |
+| ESM2_650M-LoRA | 0.880 | [LoRA-DR](https://academic.oup.com/bioinformatics/article/41/Supplement_1/i439/8199360) | CAID1 |
+| flDPnn3a (CAID3) | 0.871 | [CAID3](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/) | CAID3 eval set |
+| ESMDisPred (CAID3 SOTA) | 0.895 | [Kabir et al.](https://pubmed.ncbi.nlm.nih.gov/41648466/) | CAID3 eval set |
+
+#### Table B — Our DisProt CV (directly comparable within table)
+
+| Method | AUC-ROC | AP | Status |
+|--------|---------|-----|--------|
+| DisorderNet v6 (ESM-2 8M + GBDT) | 0.831 | 0.537 | Verified (`results_v6/metrics.json`) |
+| DisorderNet GPU (ESM-2 650M + LoRA) | TBD | TBD | Pending full Colab A100 run |
+
+#### Legacy combined view (reference only)
+
+| Method | AUC-ROC | Δ vs AF3 (ref.) | Source |
+|--------|---------|-----------------|--------|
 | AF3-pLDDT (CAID3, rank 13) | 0.747 | baseline | [CAID3](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/) |
 | AF2-pLDDT (CAID3, rank 11) | 0.770 | +3.1% | [CAID3](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/) |
 | IUPred3 | 0.789 | +5.6% | [CAID](https://caid.idpcentral.org/) |
@@ -151,6 +178,9 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/af3_colab.py` | Colab/Drive setup for AF3 weights and optional subset runs |
 | `colab/af_hallucination.py` | Phase 2 hallucination rescue metrics |
 | `colab/phase3_synthesis.py` | Phase 3 fusion calibration & integrated report |
+| `colab/benchmark_tables.py` | Matched vs literature benchmark tables (Tier 1) |
+| `colab/caid_reporting.py` | CAID-style metrics + stratified evaluation |
+| `colab/statistical_validation.py` | Per-fold paired tests & bootstrap CIs |
 
 ### Running tests
 
@@ -202,6 +232,16 @@ After AF rescue analysis, the notebook runs `colab/phase3_synthesis.py` to:
 - **Synthesize** cross-phase headline across Phases 0–2
 
 Outputs: `phase3_integrated_report.json`, `fig8_phase3_synthesis.png`.
+
+### Evaluation rigor (Tier 1)
+
+The Colab notebook reports:
+
+- **Matched benchmark tables** — literature reference (Table A) vs our DisProt CV (Table B)
+- **CAID-style metrics** — AUC, AP, F1_max, MCC; stratified by IDR fraction, length, organism
+- **Per-fold statistics** — paired DisorderNet vs inverse-pLDDT sign tests on AF-covered residues; bootstrap CIs
+
+Outputs: `caid_evaluation_report.json`, `statistical_validation_report.json`.
 
 | `run_v6_mem.py` | CPU version with ESM-2 8M + GBDT ensemble |
 | `run_v5_esm.py` | v5 with PCA-32 ESM features |

@@ -84,6 +84,7 @@ class TestBenchmark:
         r = build_benchmark_ranking(0.85)
         assert r["rank_among_published"] >= 1
         assert r["beats_af3_plddt"]
+        assert r["comparable_head_to_head"] is False
         assert r["delta_vs_af3"] == pytest.approx(0.103)
 
 
