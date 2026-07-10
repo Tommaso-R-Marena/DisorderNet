@@ -66,6 +66,8 @@ class TestProcessDisprot:
         assert p1["n_dis"] == 10
         assert sum(p1["labels"][30:40]) == 10
         assert sum(p1["labels"][:30]) == 0
+        assert len(p1["functional_regions"]) >= 2
+        assert sum(p1["transition_mask"][49:55]) > 0
 
     def test_too_short_skipped(self):
         cfg = TrainConfig(min_seq_len=50)

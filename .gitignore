@@ -10,3 +10,4 @@ cv_results.json
 disordernet_gpu_results_*.json
 fig*.pdf
 fig*.png
+biological_utility_report.json

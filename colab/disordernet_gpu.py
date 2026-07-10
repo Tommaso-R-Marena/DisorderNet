@@ -58,6 +58,35 @@ ORDER_TERMS = frozenset({
     "order to disorder",
 })
 
+# Disorder↔order transition regions (evaluated separately)
+TRANSITION_TERMS = frozenset({
+    "disorder to order",
+    "order to disorder",
+})
+
+# Functional terms tracked for biological-utility enrichment (non-disorder labels)
+FUNCTIONAL_TERM_GROUPS = {
+    "protein binding": frozenset({"protein binding"}),
+    "nucleic acid binding": frozenset({
+        "dna binding", "rna binding", "nucleic acid binding",
+    }),
+    "post-translational regulation": frozenset({
+        "phosphorylation display site",
+        "molecular function regulator",
+        "molecular function inhibitor activity",
+        "molecular function activator activity",
+    }),
+    "condensate / assembly": frozenset({
+        "molecular condensate scaffold activity",
+        "self-assembly",
+        "amyloid fibril formation",
+    }),
+    "lipid / small molecule binding": frozenset({
+        "lipid binding", "small molecule binding", "metal ion binding",
+        "calcium ion binding", "ion binding",
+    }),
+}
+
 
 @dataclass
 class TrainConfig:
@@ -255,13 +284,21 @@ def fetch_disprot(cache_path: str = "disprot_raw.json") -> list:
     return all_entries
 
 
-def _region_is_disorder(term_name: Optional[str]) -> bool:
+def _normalize_term(term_name: Optional[str]) -> str:
     if not term_name:
-        return False
-    t = term_name.strip().lower()
-    if t in ORDER_TERMS:
+        return ""
+    return term_name.strip().lower()
+
+
+def _region_is_disorder(term_name: Optional[str]) -> bool:
+    t = _normalize_term(term_name)
+    if not t or t in ORDER_TERMS:
         return False
     return t in DISORDER_TERMS
+
+
+def _region_is_transition(term_name: Optional[str]) -> bool:
+    return _normalize_term(term_name) in TRANSITION_TERMS
 
 
 def process_disprot(
@@ -285,18 +322,39 @@ def process_disprot(
             continue
 
         labels = [0] * len(seq)
+        transition_mask = [0] * len(seq)
+        functional_regions: list = []
         has_disorder_term = False
 
         for region in entry.get("regions", []):
-            term = region.get("term_name") or region.get("type") or ""
-            if not _region_is_disorder(term):
-                continue
-            has_disorder_term = True
+            term_raw = region.get("term_name") or region.get("type") or ""
+            term = _normalize_term(term_raw)
             start = region.get("start", 0)
             end = region.get("end", 0)
-            if start and end:
-                for i in range(start - 1, min(end, len(seq))):
-                    labels[i] = 1
+            if not (start and end):
+                continue
+
+            s0 = start - 1
+            e0 = min(end, len(seq))
+
+            if term and term not in ORDER_TERMS:
+                functional_regions.append({
+                    "start": int(start),
+                    "end": int(end),
+                    "term_name": term_raw.strip() if term_raw else term,
+                    "term_norm": term,
+                })
+
+            if _region_is_transition(term_raw):
+                for i in range(s0, e0):
+                    transition_mask[i] = 1
+
+            if not _region_is_disorder(term_raw):
+                continue
+
+            has_disorder_term = True
+            for i in range(s0, e0):
+                labels[i] = 1
 
         if not has_disorder_term:
             skipped["no_disorder_annotation"] += 1
@@ -318,6 +376,9 @@ def process_disprot(
             "length": len(seq),
             "n_dis": n_dis,
             "frac_dis": n_dis / len(seq),
+            "functional_regions": functional_regions,
+            "transition_mask": transition_mask,
+            "n_functional_regions": len(functional_regions),
         })
 
     return proteins, skipped

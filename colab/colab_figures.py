@@ -226,3 +226,61 @@ def generate_all_figures(
 
     print("Saved fig1–fig4 (pdf + png)")
     return {"opt_thresh": opt_thresh, "f1": our_f1, "mcc": our_mcc}
+
+
+def generate_biological_utility_figure(
+    bio_report: dict,
+    prefix: str = "",
+) -> None:
+    """Figure 5 — functional enrichment + segment metrics."""
+    _style()
+    p = prefix
+    func = bio_report.get("functional_enrichment", {})
+    seg = bio_report.get("segment_metrics", {})
+
+    fig, (ax_func, ax_seg) = plt.subplots(1, 2, figsize=(13, 5.5))
+    fig.suptitle("Biological Utility Beyond AUC", fontsize=14, fontweight="bold")
+
+    if func:
+        names = list(func.keys())
+        recalls = [func[n]["recall_at_function"] for n in names]
+        enrichments = [func[n]["enrichment_vs_disorder_rate"] for n in names]
+        y = np.arange(len(names))
+        ax_func.barh(y, recalls, color=C_OURS, alpha=0.85, height=0.55, label="Recall@function")
+        ax_func.set_yticks(y)
+        ax_func.set_yticklabels([n.replace(" ", "\n") for n in names], fontsize=9)
+        ax_func.set_xlabel("Recall@function")
+        ax_func.set_title("Functional Site Recovery")
+        ax_func.set_xlim(0, 1.05)
+        for yi, (r, e) in enumerate(zip(recalls, enrichments)):
+            ax_func.text(r + 0.02, yi, f"{e:.1f}x", va="center", fontsize=8, color="#374151")
+    else:
+        ax_func.text(0.5, 0.5, "No functional annotations", ha="center", va="center")
+        ax_func.set_axis_off()
+
+    seg_names = ["Precision", "Recall", "F1", "MDR recall", "Mean IoU"]
+    seg_vals = [
+        seg.get("segment_precision", 0),
+        seg.get("segment_recall", 0),
+        seg.get("segment_f1", 0),
+        seg.get("mdr_recall", 0),
+        seg.get("mean_segment_iou", 0),
+    ]
+    colors = [C_OURS, C_V6, "#F59E0B", C_SOTA, C_OTHERS]
+    x = np.arange(len(seg_names))
+    bars = ax_seg.bar(x, seg_vals, color=colors, edgecolor="white", alpha=0.88)
+    ax_seg.set_xticks(x)
+    ax_seg.set_xticklabels(seg_names, rotation=20, ha="right")
+    ax_seg.set_ylabel("Score")
+    ax_seg.set_ylim(0, 1.05)
+    ax_seg.set_title("Region-Level Segment Metrics")
+    for bar, val in zip(bars, seg_vals):
+        ax_seg.text(bar.get_x() + bar.get_width() / 2, val + 0.02, f"{val:.3f}",
+                    ha="center", fontsize=9)
+
+    fig.tight_layout()
+    fig.savefig(f"{p}fig5_biological_utility.pdf")
+    fig.savefig(f"{p}fig5_biological_utility.png")
+    plt.close(fig)
+    print("Saved fig5_biological_utility.{pdf,png}")
+
