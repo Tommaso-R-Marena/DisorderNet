@@ -124,3 +124,45 @@ class TestAf2Af3ComparisonFigure:
         }
         generate_af2_af3_comparison_figure(comparison, prefix=str(tmp_path / "out_"))
         assert (tmp_path / "out_fig7_af2_af3_comparison.png").exists()
+
+
+class TestPhase3Figure:
+    def test_writes_fig8(self, tmp_path: Path):
+        from colab.colab_figures import generate_phase3_figure
+
+        report = {
+            "insufficient_data": False,
+            "headline": "GPU AUC 0.880 ranks #3/12",
+            "benchmark_ranking": {
+                "our_auc": 0.88,
+                "rank_among_published": 3,
+                "n_methods": 12,
+                "delta_vs_af3": 0.133,
+                "delta_vs_sota_esmdispred": -0.015,
+                "table": [
+                    {"method": "AF3-pLDDT", "auc": 0.747},
+                    {"method": "DisorderNet v6", "auc": 0.831},
+                    {"method": "ESM2_650M-LoRA", "auc": 0.88},
+                ],
+            },
+            "phase_summaries": {
+                "phase1_biological_utility": {"segment_f1": 0.55},
+                "phase2_af_rescue": {"available": True, "hallucination_rate": 0.22, "rescue_rate": 0.7},
+                "phase3_calibration": {"fusion_auc": 0.87, "fusion_alpha": 0.6},
+            },
+            "structure_calibration": {
+                "insufficient_data": False,
+                "calibration": {
+                    "plddt_baseline": {"auc": 0.74},
+                    "disordernet": {"auc": 0.86},
+                    "fusion": {"auc": 0.87},
+                    "calibrated_plddt": {"auc": 0.75},
+                    "hallucination_reduction": {
+                        "raw_n_hallucinated": 100,
+                        "calibrated_n_hallucinated": 40,
+                    },
+                },
+            },
+        }
+        generate_phase3_figure(report, prefix=str(tmp_path / "out_"))
+        assert (tmp_path / "out_fig8_phase3_synthesis.png").exists()
