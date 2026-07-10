@@ -146,6 +146,8 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/disordernet_gpu.py` | Colab training module (data, model, CV loop) |
 | `colab/colab_figures.py` | Publication figure generator for GPU runs |
 | `colab/biological_utility.py` | Phase 1 biological utility (segments, functional enrichment) |
+| `colab/af_plddt.py` | AlphaFold DB pLDDT fetch + alignment |
+| `colab/af_hallucination.py` | Phase 2 hallucination rescue metrics |
 
 ### Running tests
 
@@ -163,6 +165,16 @@ After GPU cross-validation, the notebook runs `colab/biological_utility.py` to r
 - **Transition zones** — performance at disorder↔order boundaries
 
 Outputs: `biological_utility_report.json` and `fig5_biological_utility.png`.
+
+### AlphaFold hallucination rescue (Phase 2)
+
+After CV, the notebook fetches **AlphaFold DB pLDDT** (AF2 models) for DisProt UniProt accessions and reports:
+
+- **Hallucination rate** — disordered residues where AF assigns high pLDDT (≥70)
+- **Rescue rate** — fraction of hallucinations DisorderNet correctly flags
+- **Δ AUC** — DisorderNet vs inverse-pLDDT baseline on AF-covered residues
+
+Outputs: `af_rescue_report.json`, `fig6_af_rescue.png`, cached pLDDT in `af_plddt_cache/`.
 | `run_v6_mem.py` | CPU version with ESM-2 8M + GBDT ensemble |
 | `run_v5_esm.py` | v5 with PCA-32 ESM features |
 | `extract_esm_embeddings.py` | ESM-2 embedding extraction |

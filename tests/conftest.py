@@ -21,6 +21,7 @@ def sample_disprot_entries() -> list:
     return [
         {
             "disprot_id": "DP_TEST01",
+            "acc": "P12345",
             "sequence": seq_a,
             "regions": [
                 {"start": 31, "end": 40, "term_name": "disorder"},
@@ -50,6 +51,7 @@ def sample_disprot_entries() -> list:
         },
         {
             "disprot_id": "DP_TEST06",
+            "acc": "P99999",
             "sequence": seq_a,
             "regions": [{"start": 1, "end": 5, "term_name": "flexible linker"}],
         },

@@ -83,3 +83,21 @@ class TestBiologicalUtilityFigure:
         generate_biological_utility_figure(report, prefix=str(tmp_path / "out_"))
         assert (tmp_path / "out_fig5_biological_utility.png").exists()
         assert (tmp_path / "out_fig5_biological_utility.pdf").exists()
+
+
+class TestAfRescueFigure:
+    def test_writes_fig6(self, tmp_path: Path):
+        from colab.colab_figures import generate_af_rescue_figure
+
+        report = {
+            "insufficient_data": False,
+            "pooled": {
+                "hallucination_rate": 0.22,
+                "rescue_rate": 0.75,
+                "rescue_of_disordered": 0.18,
+            },
+            "plddt_baseline": {"auc": 0.74},
+            "disordernet_on_af_subset": {"auc": 0.86},
+        }
+        generate_af_rescue_figure(report, prefix=str(tmp_path / "out_"))
+        assert (tmp_path / "out_fig6_af_rescue.png").exists()
