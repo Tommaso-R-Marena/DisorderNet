@@ -57,3 +57,29 @@ class TestGenerateFigures:
         assert (tmp_path / "out_fig2_benchmark.png").exists()
         assert (tmp_path / "out_fig3_progression.png").exists()
         assert (tmp_path / "out_fig4_stability.png").exists()
+
+
+class TestBiologicalUtilityFigure:
+    def test_writes_fig5(self, tmp_path: Path):
+        from colab.colab_figures import generate_biological_utility_figure
+
+        report = {
+            "functional_enrichment": {
+                "protein binding": {
+                    "recall_at_function": 0.82,
+                    "precision_at_idr": 0.61,
+                    "enrichment_vs_disorder_rate": 2.3,
+                    "n_residues": 500,
+                },
+            },
+            "segment_metrics": {
+                "segment_precision": 0.71,
+                "segment_recall": 0.76,
+                "segment_f1": 0.73,
+                "mdr_recall": 0.69,
+                "mean_segment_iou": 0.66,
+            },
+        }
+        generate_biological_utility_figure(report, prefix=str(tmp_path / "out_"))
+        assert (tmp_path / "out_fig5_biological_utility.png").exists()
+        assert (tmp_path / "out_fig5_biological_utility.pdf").exists()

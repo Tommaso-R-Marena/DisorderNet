@@ -116,7 +116,8 @@ class TestFullReport:
         for fold_idx, (_, val_idx) in enumerate(gkf.split(groups, groups=groups)):
             val_proteins = [proteins[i] for i in val_idx]
             labels = np.concatenate([np.array(p["labels"], dtype=np.float32) for p in val_proteins])
-            probs = np.clip(labels * 0.7 + np.random.rand(len(labels)) * 0.3, 0, 1)
+            # Mixed labels so sklearn metrics are well-defined
+            probs = np.clip(labels * 0.6 + np.random.rand(len(labels)) * 0.4, 0, 1)
             fold_results.append({
                 "fold": fold_idx + 1,
                 "val_probs": probs.astype(np.float32),
