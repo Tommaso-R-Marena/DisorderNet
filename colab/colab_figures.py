@@ -284,3 +284,52 @@ def generate_biological_utility_figure(
     plt.close(fig)
     print("Saved fig5_biological_utility.{pdf,png}")
 
+
+def generate_af_rescue_figure(af_report: dict, prefix: str = "") -> None:
+    """Figure 6 — AlphaFold hallucination rescue summary."""
+    _style()
+    if af_report.get("insufficient_data"):
+        print("Skipping fig6: insufficient AlphaFold pLDDT data")
+        return
+
+    p = af_report["pooled"]
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    fig.suptitle("Phase 2: AlphaFold pLDDT Hallucination Rescue", fontsize=14, fontweight="bold")
+
+    # Panel 1: hallucination vs rescue
+    cats = ["Hallucination\nrate", "Rescue\nrate", "Rescue /\nall disordered"]
+    vals = [p["hallucination_rate"], p["rescue_rate"], p["rescue_of_disordered"]]
+    colors = [C_AF3, C_OURS, C_V6]
+    bars = ax1.bar(cats, vals, color=colors, edgecolor="white", alpha=0.9)
+    ax1.set_ylim(0, 1.05)
+    ax1.set_ylabel("Fraction")
+    ax1.set_title("AF2 High-pLDDT Hallucinations in IDRs")
+    for bar, val in zip(bars, vals):
+        ax1.text(bar.get_x() + bar.get_width() / 2, val + 0.02, f"{val:.3f}",
+                 ha="center", fontsize=10)
+
+    # Panel 2: AUC comparison
+    base_auc = af_report["plddt_baseline"].get("auc")
+    dn_auc = af_report["disordernet_on_af_subset"].get("auc")
+    if base_auc is not None and dn_auc is not None:
+        names = ["AF2 pLDDT\nbaseline", "DisorderNet"]
+        aucs = [base_auc, dn_auc]
+        bars2 = ax2.bar(names, aucs, color=[C_AF3, C_OURS], edgecolor="white", alpha=0.9)
+        ax2.axhline(0.747, ls=":", color=C_AF3, lw=1.5, label="AF3-pLDDT CAID3 (0.747)")
+        ax2.set_ylim(0.5, 1.0)
+        ax2.set_ylabel("AUC-ROC")
+        ax2.set_title("Disorder Prediction (AF-covered residues)")
+        for bar, val in zip(bars2, aucs):
+            ax2.text(bar.get_x() + bar.get_width() / 2, val + 0.01, f"{val:.3f}",
+                     ha="center", fontsize=10, fontweight="bold")
+        ax2.legend(loc="lower right", fontsize=8)
+    else:
+        ax2.text(0.5, 0.5, "AUC not available", ha="center", va="center")
+        ax2.set_axis_off()
+
+    fig.tight_layout()
+    fig.savefig(f"{prefix}fig6_af_rescue.pdf")
+    fig.savefig(f"{prefix}fig6_af_rescue.png")
+    plt.close(fig)
+    print("Saved fig6_af_rescue.{pdf,png}")
+

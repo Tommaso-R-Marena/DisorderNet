@@ -371,6 +371,7 @@ def process_disprot(
 
         proteins.append({
             "id": entry.get("disprot_id", ""),
+            "uniprot_acc": (entry.get("acc") or "").strip(),
             "sequence": seq,
             "labels": labels,
             "length": len(seq),
