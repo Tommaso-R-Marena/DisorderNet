@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+*.pt
+checkpoints/
+disprot_raw.json
+cv_results.json
+disordernet_gpu_results_*.json
+fig*.pdf
+fig*.png

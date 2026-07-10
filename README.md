@@ -92,10 +92,10 @@ AlphaFold 3's diffusion architecture hallucinates structure in genuinely disorde
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb)
 
 1. Click the badge above
-2. Select **Runtime → Change runtime type → G4 GPU + High RAM**
-3. Run all cells (~15-20 hours for full 5-fold CV with ESM-2 650M)
+2. Select **Runtime → Change runtime type → GPU (A100 or L4) + High RAM**
+3. Run all cells (~12–18 hours for full 5-fold CV with ESM-2 650M)
 
-Targets AUC > 0.88 using ESM-2 650M with LoRA fine-tuning.
+The notebook auto-tunes batch size to your GPU VRAM, uses mixed precision (bfloat16 on A100), filters DisProt annotations by disorder-related terms, and shows live per-epoch metrics. Set `MOUNT_DRIVE = True` to persist checkpoints across sessions.
 
 ### Option 2: CPU (Quick, no GPU needed)
 
@@ -142,6 +142,15 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | File | Description |
 |------|-------------|
 | `colab/DisorderNet_Colab_Pro.ipynb` | Full GPU notebook (ESM-2 650M + LoRA) |
+| `colab/disordernet_gpu.py` | Colab training module (data, model, CV loop) |
+| `colab/colab_figures.py` | Publication figure generator for GPU runs |
+
+### Running tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/ -v
+```
 | `run_v6_mem.py` | CPU version with ESM-2 8M + GBDT ensemble |
 | `run_v5_esm.py` | v5 with PCA-32 ESM features |
 | `extract_esm_embeddings.py` | ESM-2 embedding extraction |
