@@ -147,6 +147,8 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/colab_figures.py` | Publication figure generator for GPU runs |
 | `colab/biological_utility.py` | Phase 1 biological utility (segments, functional enrichment) |
 | `colab/af_plddt.py` | AlphaFold DB pLDDT fetch + alignment |
+| `colab/af3_plddt.py` | AlphaFold 3 pLDDT ingest from Drive outputs |
+| `colab/af3_colab.py` | Colab/Drive setup for AF3 weights and optional subset runs |
 | `colab/af_hallucination.py` | Phase 2 hallucination rescue metrics |
 
 ### Running tests
@@ -175,6 +177,18 @@ After CV, the notebook fetches **AlphaFold DB pLDDT** (AF2 models) for DisProt U
 - **Δ AUC** — DisorderNet vs inverse-pLDDT baseline on AF-covered residues
 
 Outputs: `af_rescue_report.json`, `fig6_af_rescue.png`, cached pLDDT in `af_plddt_cache/`.
+
+### AlphaFold 3 on Colab (Phase 2b, optional)
+
+AF3 model weights **must not** be committed to GitHub (license + multi-GB size). The supported workflow:
+
+1. Upload `af3.bin` to Google Drive: `MyDrive/DisorderNet/af3/af3.bin`
+2. Place AF3 job outputs under `MyDrive/DisorderNet/af3/outputs/` (or run a small subset on Colab A100)
+3. Set `AF3_MODE = "ingest"` in notebook Cell 11
+
+The notebook compares AF2 (AlphaFold DB) vs AF3 hallucination rates and DisorderNet rescue on overlapping proteins.
+
+Outputs: `af3_rescue_report.json`, `af2_af3_comparison.json`, `fig7_af2_af3_comparison.png`, cache in `af3_plddt_cache/`.
 | `run_v6_mem.py` | CPU version with ESM-2 8M + GBDT ensemble |
 | `run_v5_esm.py` | v5 with PCA-32 ESM features |
 | `extract_esm_embeddings.py` | ESM-2 embedding extraction |
