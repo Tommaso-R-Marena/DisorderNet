@@ -11,4 +11,7 @@ disordernet_gpu_results_*.json
 fig*.pdf
 fig*.png
 af_plddt_cache/
+af3_plddt_cache/
 af_rescue_report.json
+af3_rescue_report.json
+af2_af3_comparison.json

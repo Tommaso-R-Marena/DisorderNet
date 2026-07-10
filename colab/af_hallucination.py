@@ -105,6 +105,7 @@ def run_af_rescue_report(
     threshold: float = 0.5,
     high_plddt_threshold: float = 70.0,
     n_folds: int = 5,
+    source: str = "AlphaFold DB (AF2 models)",
 ) -> dict:
     """
     Pooled Phase 2 report: hallucination rescue + pLDDT baseline comparison.
@@ -178,7 +179,7 @@ def run_af_rescue_report(
         "coverage_fraction": proteins_with_plddt / max(len(aligned), 1),
         "threshold": float(threshold),
         "high_plddt_threshold": float(high_plddt_threshold),
-        "source": "AlphaFold DB (AF2 models)",
+        "source": source,
         "pooled": pooled_halluc,
         "plddt_baseline": plddt_baseline,
         "disordernet_on_af_subset": {
@@ -193,6 +194,81 @@ def run_af_rescue_report(
             "n_proteins": len(per_protein),
         },
     }
+
+
+def run_af2_af3_comparison_report(
+    af2_report: dict,
+    af3_report: dict,
+) -> dict:
+    """Summarize AF2 vs AF3 hallucination rescue on overlapping protein coverage."""
+    if af2_report.get("insufficient_data") or af3_report.get("insufficient_data"):
+        return {
+            "insufficient_data": True,
+            "af2_proteins": af2_report.get("proteins_with_plddt", 0),
+            "af3_proteins": af3_report.get("proteins_with_plddt", 0),
+        }
+
+    a2 = af2_report["pooled"]
+    a3 = af3_report["pooled"]
+    b2 = af2_report["plddt_baseline"].get("auc")
+    b3 = af3_report["plddt_baseline"].get("auc")
+    d2 = af2_report["disordernet_on_af_subset"].get("auc")
+    d3 = af3_report["disordernet_on_af_subset"].get("auc")
+
+    return {
+        "insufficient_data": False,
+        "af2": {
+            "source": af2_report.get("source"),
+            "proteins_with_plddt": af2_report["proteins_with_plddt"],
+            "hallucination_rate": a2["hallucination_rate"],
+            "rescue_rate": a2["rescue_rate"],
+            "plddt_baseline_auc": b2,
+            "disordernet_auc": d2,
+            "delta_auc": af2_report.get("delta_auc_vs_plddt_baseline"),
+        },
+        "af3": {
+            "source": af3_report.get("source"),
+            "proteins_with_plddt": af3_report["proteins_with_plddt"],
+            "hallucination_rate": a3["hallucination_rate"],
+            "rescue_rate": a3["rescue_rate"],
+            "plddt_baseline_auc": b3,
+            "disordernet_auc": d3,
+            "delta_auc": af3_report.get("delta_auc_vs_plddt_baseline"),
+        },
+        "delta_hallucination_af3_minus_af2": a3["hallucination_rate"] - a2["hallucination_rate"],
+        "delta_rescue_af3_minus_af2": a3["rescue_rate"] - a2["rescue_rate"],
+    }
+
+
+def fetch_and_run_af3_rescue_report(
+    proteins: list,
+    fold_results: list,
+    af3_output_root: str,
+    threshold: float = 0.5,
+    high_plddt_threshold: float = 70.0,
+    n_folds: int = 5,
+    cache_dir: str = "af3_plddt_cache",
+) -> tuple[dict, dict[str, np.ndarray]]:
+    """Load AF3 pLDDT from Drive outputs then run Phase 2b report."""
+    from colab.af3_plddt import DEFAULT_AF3_CACHE_DIR, load_af3_plddt_batch
+
+    cache_dir = cache_dir or DEFAULT_AF3_CACHE_DIR
+    plddt_by_protein = load_af3_plddt_batch(
+        proteins, output_root=af3_output_root, cache_dir=cache_dir, verbose=True,
+    )
+    report = run_af_rescue_report(
+        proteins=proteins,
+        fold_results=fold_results,
+        plddt_by_protein=plddt_by_protein,
+        threshold=threshold,
+        high_plddt_threshold=high_plddt_threshold,
+        n_folds=n_folds,
+        source="AlphaFold 3 (local/Drive outputs)",
+    )
+    report["n_plddt_loaded"] = len(plddt_by_protein)
+    report["af3_output_root"] = af3_output_root
+    report["cache_dir"] = cache_dir
+    return report, plddt_by_protein
 
 
 def fetch_and_run_af_rescue_report(
@@ -215,6 +291,7 @@ def fetch_and_run_af_rescue_report(
         threshold=threshold,
         high_plddt_threshold=high_plddt_threshold,
         n_folds=n_folds,
+        source="AlphaFold DB (AF2 models)",
     )
     report["n_plddt_fetched"] = len(plddt_by_protein)
     report["cache_dir"] = cache_dir
@@ -275,4 +352,40 @@ def print_af_rescue_report(report: dict) -> None:
 def save_af_rescue_report(report: dict, path: str = "af_rescue_report.json") -> str:
     with open(path, "w") as f:
         json.dump(report, f, indent=2)
+    return path
+
+
+def print_af2_af3_comparison(comparison: dict) -> None:
+    """Pretty-print AF2 vs AF3 side-by-side."""
+    print(f"\n{'═' * 64}")
+    print(" AF2 vs AF3 HALLUCINATION RESCUE (Phase 2b)")
+    print(f"{'═' * 64}")
+    if comparison.get("insufficient_data"):
+        print("  Insufficient data for AF2/AF3 comparison.")
+        print(f"  AF2 proteins: {comparison.get('af2_proteins', 0)}")
+        print(f"  AF3 proteins: {comparison.get('af3_proteins', 0)}")
+        print(f"{'═' * 64}")
+        return
+
+    for key, label in [("af2", "AF2 (AlphaFold DB)"), ("af3", "AF3 (Drive outputs)")]:
+        r = comparison[key]
+        print(f"\n── {label} ({r['proteins_with_plddt']} proteins) ──")
+        print(f"  Hallucination rate : {r['hallucination_rate']:.3f}")
+        print(f"  Rescue rate        : {r['rescue_rate']:.3f}")
+        if r["plddt_baseline_auc"] is not None:
+            print(f"  pLDDT baseline AUC : {r['plddt_baseline_auc']:.4f}")
+        if r["disordernet_auc"] is not None:
+            print(f"  DisorderNet AUC    : {r['disordernet_auc']:.4f}")
+        if r["delta_auc"] is not None:
+            print(f"  Δ AUC              : {r['delta_auc']:+.4f}")
+
+    print(f"\n── AF3 − AF2 ──")
+    print(f"  Δ hallucination rate: {comparison['delta_hallucination_af3_minus_af2']:+.3f}")
+    print(f"  Δ rescue rate       : {comparison['delta_rescue_af3_minus_af2']:+.3f}")
+    print(f"{'═' * 64}")
+
+
+def save_af2_af3_comparison(comparison: dict, path: str = "af2_af3_comparison.json") -> str:
+    with open(path, "w") as f:
+        json.dump(comparison, f, indent=2)
     return path
