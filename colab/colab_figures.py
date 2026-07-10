@@ -402,3 +402,113 @@ def generate_af2_af3_comparison_figure(
     plt.close(fig)
     print("Saved fig7_af2_af3_comparison.{pdf,png}")
 
+
+def generate_phase3_figure(phase3_report: dict, prefix: str = "") -> None:
+    """Figure 8 — Phase 3 integrated synthesis dashboard."""
+    _style()
+    if phase3_report.get("insufficient_data"):
+        print("Skipping fig8: insufficient Phase 3 data")
+        return
+
+    fig = plt.figure(figsize=(14, 10))
+    gs = gridspec.GridSpec(2, 2, figure=fig, hspace=0.35, wspace=0.3)
+    fig.suptitle("Phase 3: Integrated Synthesis & Structure Calibration", fontsize=14, fontweight="bold")
+
+    bench = phase3_report["benchmark_ranking"]
+    cal_rep = phase3_report.get("structure_calibration", {})
+    cal = cal_rep.get("calibration", {}) if not cal_rep.get("insufficient_data") else {}
+
+    # Panel A: benchmark ladder (top methods + ours)
+    ax1 = fig.add_subplot(gs[0, 0])
+    table = bench["table"]
+    show = [r for r in table if r["auc"] >= 0.78 or r["method"].startswith("DisorderNet")]
+    show = sorted(show, key=lambda x: x["auc"])[-8:]
+    names = [r["method"].replace("DisorderNet ", "DN ")[:22] for r in show]
+    aucs = [r["auc"] for r in show]
+    colors = [C_OURS if "GPU" in r["method"] or r["auc"] == bench["our_auc"] else C_OTHERS for r in show]
+    if bench["our_auc"] not in aucs:
+        names.append("DisorderNet GPU")
+        aucs.append(bench["our_auc"])
+        colors.append(C_OURS)
+    y_pos = np.arange(len(names))
+    ax1.barh(y_pos, aucs, color=colors, edgecolor="white", alpha=0.9)
+    ax1.set_yticks(y_pos)
+    ax1.set_yticklabels(names, fontsize=9)
+    ax1.set_xlim(0.72, 0.92)
+    ax1.set_xlabel("AUC-ROC")
+    ax1.set_title("Benchmark Ranking")
+    ax1.axvline(0.747, ls=":", color=C_AF3, lw=1, alpha=0.7)
+    ax1.axvline(0.895, ls=":", color=C_SOTA, lw=1, alpha=0.7)
+
+    # Panel B: calibration AUC comparison
+    ax2 = fig.add_subplot(gs[0, 1])
+    if cal and cal.get("plddt_baseline", {}).get("auc") is not None:
+        methods = ["pLDDT\nbaseline", "DisorderNet", "Fusion", "Calibrated\npLDDT"]
+        vals = [
+            cal["plddt_baseline"]["auc"],
+            cal["disordernet"]["auc"],
+            cal["fusion"]["auc"],
+            cal["calibrated_plddt"]["auc"],
+        ]
+        bars = ax2.bar(methods, vals, color=[C_AF3, C_OURS, C_V6, C_SOTA], edgecolor="white", alpha=0.9)
+        ax2.set_ylim(0.5, 1.0)
+        ax2.set_ylabel("AUC-ROC")
+        ax2.set_title("AF-Covered Residue Subset")
+        for bar, val in zip(bars, vals):
+            if val is not None:
+                ax2.text(bar.get_x() + bar.get_width() / 2, (val or 0) + 0.01,
+                         f"{val:.3f}", ha="center", fontsize=9, fontweight="bold")
+    else:
+        ax2.text(0.5, 0.5, "Calibration N/A", ha="center", va="center")
+        ax2.set_axis_off()
+
+    # Panel C: hallucination reduction
+    ax3 = fig.add_subplot(gs[1, 0])
+    hr = cal.get("hallucination_reduction", {})
+    if hr.get("raw_n_hallucinated", 0) > 0:
+        cats = ["Raw AF\nhallucinations", "After DN\ncalibration"]
+        vals_h = [hr["raw_n_hallucinated"], hr["calibrated_n_hallucinated"]]
+        bars3 = ax3.bar(cats, vals_h, color=[C_AF3, C_OURS], edgecolor="white", alpha=0.9)
+        ax3.set_ylabel("Residue count")
+        ax3.set_title("Hallucination Reduction")
+        for bar, val in zip(bars3, vals_h):
+            ax3.text(bar.get_x() + bar.get_width() / 2, val + max(vals_h) * 0.02,
+                     f"{val:,}", ha="center", fontsize=10)
+    else:
+        ps = phase3_report.get("phase_summaries", {}).get("phase2_af_rescue", {})
+        if ps.get("available"):
+            ax3.bar(["Hallucination", "Rescue"], [ps.get("hallucination_rate", 0), ps.get("rescue_rate", 0)],
+                    color=[C_AF3, C_OURS], alpha=0.9)
+            ax3.set_ylim(0, 1.05)
+            ax3.set_title("Phase 2 AF Rescue")
+        else:
+            ax3.text(0.5, 0.5, "Hallucination data N/A", ha="center", va="center")
+            ax3.set_axis_off()
+
+    # Panel D: cross-phase summary text
+    ax4 = fig.add_subplot(gs[1, 1])
+    ax4.axis("off")
+    ps = phase3_report.get("phase_summaries", {})
+    lines = [
+        phase3_report.get("headline", ""),
+        "",
+        f"Rank: #{bench['rank_among_published']} / {bench['n_methods']}",
+        f"Δ vs AF3: {bench['delta_vs_af3']:+.3f}",
+        f"Δ vs SOTA: {bench['delta_vs_sota_esmdispred']:+.3f}",
+    ]
+    p1 = ps.get("phase1_biological_utility", {})
+    if p1.get("segment_f1") is not None:
+        lines.append(f"Segment F1: {p1['segment_f1']:.3f}")
+    p3 = ps.get("phase3_calibration", {})
+    if p3.get("fusion_auc") is not None:
+        lines.append(f"Fusion AUC: {p3['fusion_auc']:.3f} (α={p3.get('fusion_alpha', 0):.2f})")
+    ax4.text(0.05, 0.95, "\n".join(lines), va="top", fontsize=10,
+             family="monospace", transform=ax4.transAxes,
+             bbox=dict(boxstyle="round", facecolor="#F8FAFC", edgecolor="#CBD5E1"))
+
+    p = prefix
+    fig.savefig(f"{p}fig8_phase3_synthesis.pdf")
+    fig.savefig(f"{p}fig8_phase3_synthesis.png")
+    plt.close(fig)
+    print("Saved fig8_phase3_synthesis.{pdf,png}")
+
