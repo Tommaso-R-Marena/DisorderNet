@@ -150,6 +150,7 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/af3_plddt.py` | AlphaFold 3 pLDDT ingest from Drive outputs |
 | `colab/af3_colab.py` | Colab/Drive setup for AF3 weights and optional subset runs |
 | `colab/af_hallucination.py` | Phase 2 hallucination rescue metrics |
+| `colab/phase3_synthesis.py` | Phase 3 fusion calibration & integrated report |
 
 ### Running tests
 
@@ -189,6 +190,19 @@ AF3 model weights **must not** be committed to GitHub (license + multi-GB size).
 The notebook compares AF2 (AlphaFold DB) vs AF3 hallucination rates and DisorderNet rescue on overlapping proteins.
 
 Outputs: `af3_rescue_report.json`, `af2_af3_comparison.json`, `fig7_af2_af3_comparison.png`, cache in `af3_plddt_cache/`.
+
+### Integrated synthesis (Phase 3)
+
+After AF rescue analysis, the notebook runs `colab/phase3_synthesis.py` to:
+
+- **Fuse** DisorderNet with AF pLDDT (optimal α grid search)
+- **Calibrate** AF confidence — downweight pLDDT where DisorderNet predicts disorder
+- **Bootstrap 95% CIs** for AUC on AF-covered residues
+- **Rank** GPU AUC against published CAID benchmarks
+- **Synthesize** cross-phase headline across Phases 0–2
+
+Outputs: `phase3_integrated_report.json`, `fig8_phase3_synthesis.png`.
+
 | `run_v6_mem.py` | CPU version with ESM-2 8M + GBDT ensemble |
 | `run_v5_esm.py` | v5 with PCA-32 ESM features |
 | `extract_esm_embeddings.py` | ESM-2 embedding extraction |
