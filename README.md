@@ -1,5 +1,6 @@
 # DisorderNet: Beating AlphaFold 3 at Intrinsic Disorder Prediction
 
+[![Tests](https://github.com/Tommaso-R-Marena/DisorderNet/actions/workflows/test.yml/badge.svg)](https://github.com/Tommaso-R-Marena/DisorderNet/actions/workflows/test.yml)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb)
 
 ## Overview
@@ -144,6 +145,7 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/DisorderNet_Colab_Pro.ipynb` | Full GPU notebook (ESM-2 650M + LoRA) |
 | `colab/disordernet_gpu.py` | Colab training module (data, model, CV loop) |
 | `colab/colab_figures.py` | Publication figure generator for GPU runs |
+| `colab/biological_utility.py` | Phase 1 biological utility (segments, functional enrichment) |
 
 ### Running tests
 
@@ -151,6 +153,16 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
+
+### Biological utility (Phase 1)
+
+After GPU cross-validation, the notebook runs `colab/biological_utility.py` to report:
+
+- **Segment metrics** — region F1, MDR recall, boundary error
+- **Functional enrichment** — recovery of binding sites, PTMs, condensate scaffolds
+- **Transition zones** — performance at disorder↔order boundaries
+
+Outputs: `biological_utility_report.json` and `fig5_biological_utility.png`.
 | `run_v6_mem.py` | CPU version with ESM-2 8M + GBDT ensemble |
 | `run_v5_esm.py` | v5 with PCA-32 ESM features |
 | `extract_esm_embeddings.py` | ESM-2 embedding extraction |
