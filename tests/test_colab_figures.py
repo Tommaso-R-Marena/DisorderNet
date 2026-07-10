@@ -101,3 +101,26 @@ class TestAfRescueFigure:
         }
         generate_af_rescue_figure(report, prefix=str(tmp_path / "out_"))
         assert (tmp_path / "out_fig6_af_rescue.png").exists()
+
+
+class TestAf2Af3ComparisonFigure:
+    def test_writes_fig7(self, tmp_path: Path):
+        from colab.colab_figures import generate_af2_af3_comparison_figure
+
+        comparison = {
+            "insufficient_data": False,
+            "af2": {
+                "hallucination_rate": 0.3,
+                "rescue_rate": 0.5,
+                "plddt_baseline_auc": 0.74,
+                "disordernet_auc": 0.85,
+            },
+            "af3": {
+                "hallucination_rate": 0.25,
+                "rescue_rate": 0.55,
+                "plddt_baseline_auc": 0.76,
+                "disordernet_auc": 0.87,
+            },
+        }
+        generate_af2_af3_comparison_figure(comparison, prefix=str(tmp_path / "out_"))
+        assert (tmp_path / "out_fig7_af2_af3_comparison.png").exists()

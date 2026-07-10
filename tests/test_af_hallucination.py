@@ -8,6 +8,7 @@ import pytest
 from colab.af_hallucination import (
     compute_hallucination_metrics,
     compute_plddt_baseline_auc,
+    run_af2_af3_comparison_report,
     run_af_rescue_report,
     save_af_rescue_report,
 )
@@ -75,3 +76,29 @@ class TestAfRescueReport:
 
         path = save_af_rescue_report(report, str(tmp_path / "af.json"))
         assert (tmp_path / "af.json").exists()
+
+
+class TestAf2Af3Comparison:
+    def test_comparison_delta(self):
+        af2 = {
+            "insufficient_data": False,
+            "source": "AF2",
+            "proteins_with_plddt": 10,
+            "pooled": {"hallucination_rate": 0.4, "rescue_rate": 0.5},
+            "plddt_baseline": {"auc": 0.7},
+            "disordernet_on_af_subset": {"auc": 0.8},
+            "delta_auc_vs_plddt_baseline": 0.1,
+        }
+        af3 = {
+            "insufficient_data": False,
+            "source": "AF3",
+            "proteins_with_plddt": 8,
+            "pooled": {"hallucination_rate": 0.35, "rescue_rate": 0.6},
+            "plddt_baseline": {"auc": 0.72},
+            "disordernet_on_af_subset": {"auc": 0.82},
+            "delta_auc_vs_plddt_baseline": 0.1,
+        }
+        cmp = run_af2_af3_comparison_report(af2, af3)
+        assert not cmp["insufficient_data"]
+        assert cmp["delta_hallucination_af3_minus_af2"] == pytest.approx(-0.05)
+        assert cmp["delta_rescue_af3_minus_af2"] == pytest.approx(0.1)

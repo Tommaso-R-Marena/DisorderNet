@@ -333,3 +333,72 @@ def generate_af_rescue_figure(af_report: dict, prefix: str = "") -> None:
     plt.close(fig)
     print("Saved fig6_af_rescue.{pdf,png}")
 
+
+def generate_af2_af3_comparison_figure(
+    comparison: dict,
+    af2_report: Optional[dict] = None,
+    af3_report: Optional[dict] = None,
+    prefix: str = "",
+) -> None:
+    """Figure 7 — AF2 vs AF3 hallucination rescue comparison."""
+    _style()
+    if comparison.get("insufficient_data"):
+        print("Skipping fig7: insufficient AF2/AF3 comparison data")
+        return
+
+    fig, axes = plt.subplots(1, 3, figsize=(14, 5))
+    fig.suptitle("Phase 2b: AF2 vs AF3 Hallucination Rescue", fontsize=14, fontweight="bold")
+
+    labels = ["AF2\n(AlphaFold DB)", "AF3\n(Drive)"]
+    a2 = comparison["af2"]
+    a3 = comparison["af3"]
+
+    # Panel 1: hallucination rates
+    ax1 = axes[0]
+    vals = [a2["hallucination_rate"], a3["hallucination_rate"]]
+    bars = ax1.bar(labels, vals, color=[C_AF3, C_V6], edgecolor="white", alpha=0.9)
+    ax1.set_ylim(0, 1.05)
+    ax1.set_ylabel("Fraction")
+    ax1.set_title("Hallucination Rate (IDR + high pLDDT)")
+    for bar, val in zip(bars, vals):
+        ax1.text(bar.get_x() + bar.get_width() / 2, val + 0.02, f"{val:.3f}",
+                 ha="center", fontsize=10)
+
+    # Panel 2: rescue rates
+    ax2 = axes[1]
+    vals2 = [a2["rescue_rate"], a3["rescue_rate"]]
+    bars2 = ax2.bar(labels, vals2, color=[C_AF3, C_OURS], edgecolor="white", alpha=0.9)
+    ax2.set_ylim(0, 1.05)
+    ax2.set_ylabel("Fraction")
+    ax2.set_title("Rescue Rate (DisorderNet flags hallucinations)")
+    for bar, val in zip(bars2, vals2):
+        ax2.text(bar.get_x() + bar.get_width() / 2, val + 0.02, f"{val:.3f}",
+                 ha="center", fontsize=10)
+
+    # Panel 3: AUC comparison
+    ax3 = axes[2]
+    names = ["pLDDT\nbaseline", "DisorderNet"]
+    x = np.arange(len(names))
+    w = 0.35
+    af2_aucs = [a2.get("plddt_baseline_auc") or 0, a2.get("disordernet_auc") or 0]
+    af3_aucs = [a3.get("plddt_baseline_auc") or 0, a3.get("disordernet_auc") or 0]
+    if any(af2_aucs) or any(af3_aucs):
+        ax3.bar(x - w / 2, af2_aucs, w, label="AF2", color=C_AF3, alpha=0.9)
+        ax3.bar(x + w / 2, af3_aucs, w, label="AF3", color=C_V6, alpha=0.9)
+        ax3.set_xticks(x)
+        ax3.set_xticklabels(names)
+        ax3.set_ylim(0.5, 1.0)
+        ax3.set_ylabel("AUC-ROC")
+        ax3.set_title("Disorder Prediction")
+        ax3.legend(loc="lower right", fontsize=8)
+    else:
+        ax3.text(0.5, 0.5, "AUC not available", ha="center", va="center")
+        ax3.set_axis_off()
+
+    fig.tight_layout()
+    p = prefix
+    fig.savefig(f"{p}fig7_af2_af3_comparison.pdf")
+    fig.savefig(f"{p}fig7_af2_af3_comparison.png")
+    plt.close(fig)
+    print("Saved fig7_af2_af3_comparison.{pdf,png}")
+
