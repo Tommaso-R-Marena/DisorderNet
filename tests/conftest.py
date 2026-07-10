@@ -24,7 +24,8 @@ def sample_disprot_entries() -> list:
             "sequence": seq_a,
             "regions": [
                 {"start": 31, "end": 40, "term_name": "disorder"},
-                {"start": 35, "end": 38, "term_name": "protein binding"},  # ignored
+                {"start": 35, "end": 38, "term_name": "protein binding"},
+                {"start": 50, "end": 55, "term_name": "disorder to order"},
             ],
         },
         {
