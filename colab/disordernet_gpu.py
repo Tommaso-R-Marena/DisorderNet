@@ -18,7 +18,6 @@ import os
 import subprocess
 import sys
 import time
-import warnings
 from collections import Counter
 from dataclasses import dataclass, field, asdict
 from typing import Callable, Iterator, Optional
@@ -27,7 +26,6 @@ import numpy as np
 import requests
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from sklearn.metrics import (
     average_precision_score,
     f1_score,
@@ -590,7 +588,7 @@ def eval_epoch(
         labels = labels.to(device, non_blocking=True)
         mask = mask.to(device, non_blocking=True)
 
-        with autocast(device_type="cuda", dtype=amp_dtype, enabled=device.type == "cuda"):
+        with autocast(device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda"):
             logits = model(tokens)
 
         loss = criterion(logits[mask], labels[mask]).mean()
@@ -698,7 +696,7 @@ def train_fold(
             labels = labels.to(device, non_blocking=True)
             mask = mask.to(device, non_blocking=True)
 
-            with autocast(device_type="cuda", dtype=amp_dtype, enabled=device.type == "cuda"):
+            with autocast(device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda"):
                 logits = fold_model(tokens)
                 loss = criterion(logits[mask], labels[mask]).mean() / cfg.accum_steps
 
