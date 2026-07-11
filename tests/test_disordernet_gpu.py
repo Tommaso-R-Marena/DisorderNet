@@ -98,6 +98,11 @@ class TestTrainConfig:
         cfg = TrainConfig(batch_size=4, accum_steps=4)
         assert cfg.effective_batch() == 16
 
+    def test_from_profile_max(self):
+        cfg = TrainConfig.from_profile("max")
+        assert cfg.lora_rank == 32
+        assert cfg.physico_dim == 48
+
 
 class TestLoRALinear:
     def test_forward_shape_and_frozen_base(self):
