@@ -93,8 +93,10 @@ class MockESM(nn.Module):
     def forward(self, tokens, repr_layers=None, return_contacts=False):
         batch, length = tokens.shape
         hidden = torch.randn(batch, length, self._dim, device=tokens.device)
-        layer_idx = repr_layers[0] if repr_layers else len(self.layers)
-        return {"representations": {layer_idx: hidden}}
+        if repr_layers is None:
+            repr_layers = [len(self.layers)]
+        reps = {i: hidden for i in repr_layers}
+        return {"representations": reps}
 
 
 @pytest.fixture

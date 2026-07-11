@@ -19,6 +19,8 @@ from colab.disordernet_gpu import (
     DisProtDataset,
     _auto_batch_size,
     _compute_pos_weight,
+    _disorder_loss,
+    _label_boundary_mask,
     _region_is_disorder,
     _warmup_cosine_scheduler,
     disprot_collate,
@@ -118,13 +120,26 @@ class TestDisorderCNNHead:
 
 class TestDisorderNetGPU:
     def test_lora_injection_and_forward(self, mock_esm):
-        cfg = TrainConfig(lora_layers=2, lora_rank=4)
+        cfg = TrainConfig(lora_layers=2, lora_rank=4, lora_on_k=True, use_physico_features=False)
         model = DisorderNetGPU(mock_esm, cfg, verbose=False)
-        assert len(model._lora_modules) == 4  # 2 layers × (q, v)
+        assert len(model._lora_modules) == 6  # 2 layers × (q, v, k)
 
         tokens = torch.randint(0, 20, (2, 32))
         logits = model(tokens)
         assert logits.shape == (2, 30)  # strip BOS/EOS
+
+    def test_lora_injection_without_k(self, mock_esm):
+        cfg = TrainConfig(lora_layers=2, lora_rank=4, lora_on_k=False, use_physico_features=False)
+        model = DisorderNetGPU(mock_esm, cfg, verbose=False)
+        assert len(model._lora_modules) == 4
+
+    def test_physico_forward(self, mock_esm):
+        cfg = TrainConfig(lora_layers=2, use_physico_features=True, physico_dim=16)
+        model = DisorderNetGPU(mock_esm, cfg, verbose=False)
+        tokens = torch.randint(0, 20, (2, 32))
+        aa_idx = torch.randint(0, 20, (2, 30))
+        logits = model(tokens, aa_idx=aa_idx)
+        assert logits.shape == (2, 30)
 
     def test_train_keeps_esm_in_eval(self, mock_esm):
         cfg = TrainConfig(lora_layers=1)
@@ -137,13 +152,17 @@ class TestDisorderNetGPU:
 class TestDataset:
     def test_collate_padding(self):
         batch = [
-            (torch.arange(12), torch.zeros(10), torch.ones(10, dtype=torch.bool), "a"),
-            (torch.arange(8), torch.ones(6), torch.ones(6, dtype=torch.bool), "b"),
+            (torch.arange(12), torch.zeros(10), torch.ones(10, dtype=torch.bool),
+             torch.zeros(10, dtype=torch.long), torch.ones(10), "a"),
+            (torch.arange(8), torch.ones(6), torch.ones(6, dtype=torch.bool),
+             torch.zeros(6, dtype=torch.long), torch.ones(6), "b"),
         ]
-        tok, lab, msk, ids = disprot_collate(batch)
+        tok, lab, msk, aa, wt, ids = disprot_collate(batch)
         assert tok.shape == (2, 12)
         assert lab.shape == (2, 10)
         assert msk.shape == (2, 10)
+        assert aa.shape == (2, 10)
+        assert wt.shape == (2, 10)
         assert ids == ["a", "b"]
         assert msk[1, 6:].sum() == 0
 
@@ -157,16 +176,34 @@ class TestDataset:
         assert "P1" in cache
         ds2 = DisProtDataset(proteins, mock_batch_converter, cache)
         assert len(ds2) == 2
-        tok, lab, msk, pid = ds2[0]
+        tok, lab, msk, aa, wt, pid = ds2[0]
         assert pid == "P1"
         assert lab.shape[0] == msk.sum()
+        assert aa.shape[0] == lab.shape[0]
 
 
 class TestPosWeight:
-    def test_capped_at_ten(self):
+    def test_capped_at_twelve(self):
         proteins = [{"n_dis": 1, "length": 1000}]
         pw = _compute_pos_weight(proteins, torch.device("cpu"))
-        assert pw.item() == 10.0
+        assert pw.item() == 12.0
+
+
+class TestBoundaryAndLoss:
+    def test_boundary_mask_flags_transitions(self):
+        labels = [0, 0, 1, 1, 1, 0, 0]
+        m = _label_boundary_mask(labels, radius=1)
+        assert m[1] == 1.0
+        assert m[2] == 1.0
+        assert m[5] == 1.0
+
+    def test_focal_loss_finite(self):
+        cfg = TrainConfig(use_focal_loss=True)
+        logits = torch.randn(8)
+        labels = torch.tensor([0., 1., 0., 1., 1., 0., 1., 0.])
+        w = torch.tensor([0., 1., 0., 0., 1., 0., 0., 0.])
+        loss = _disorder_loss(logits, labels, None, w, cfg)
+        assert loss.item() > 0
 
 
 class TestScheduler:
@@ -192,7 +229,7 @@ class TestFetchDisprot:
 
 class TestEvalEpoch:
     def test_cpu_eval_with_tiny_model(self, mock_esm):
-        cfg = TrainConfig(lora_layers=1, num_workers=0)
+        cfg = TrainConfig(lora_layers=1, num_workers=0, use_physico_features=False)
         model = DisorderNetGPU(mock_esm, cfg, verbose=False)
         proteins = [
             {"id": "P1", "sequence": "ACDE", "labels": [0, 1, 1, 0]},
@@ -208,7 +245,7 @@ class TestEvalEpoch:
         ds = DisProtDataset(proteins, converter)
         dl = DataLoader(ds, batch_size=2, collate_fn=disprot_collate, num_workers=0)
         metrics = eval_epoch(
-            model, dl, torch.device("cpu"), torch.float32,
+            model, dl, torch.device("cpu"), torch.float32, cfg=cfg,
         )
         assert 0.0 <= metrics["auc"] <= 1.0
         assert "probs" in metrics
