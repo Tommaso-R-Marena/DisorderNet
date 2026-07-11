@@ -180,7 +180,7 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/phase3_synthesis.py` | Phase 3 fusion calibration & integrated report |
 | `colab/benchmark_tables.py` | Matched vs literature benchmark tables (Tier 1) |
 | `colab/caid_reporting.py` | CAID-style metrics + stratified evaluation |
-| `colab/statistical_validation.py` | Per-fold paired tests & bootstrap CIs |
+| `colab/inference_fusion.py` | Post-CV AF pLDDT fusion (α-blend inference boost) |
 
 ### Running tests
 

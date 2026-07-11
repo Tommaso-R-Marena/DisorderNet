@@ -177,6 +177,32 @@ class TrainConfig:
     def effective_batch(self) -> int:
         return self.batch_size * self.accum_steps
 
+    @classmethod
+    def from_profile(cls, profile: str = "balanced", **overrides) -> "TrainConfig":
+        """
+        Training quality presets.
+
+        balanced — default v2 (rank 16, 20 epochs)
+        max      — higher capacity (rank 32, 25 epochs, larger physico stream)
+        """
+        presets: dict[str, dict] = {
+            "balanced": {},
+            "max": {
+                "lora_rank": 32,
+                "lora_alpha": 64,
+                "num_epochs": 25,
+                "patience": 8,
+                "lr_lora": 5e-5,
+                "lr_head": 3e-4,
+                "boundary_weight": 3.0,
+                "physico_dim": 48,
+                "focal_gamma": 2.5,
+            },
+        }
+        if profile not in presets:
+            raise ValueError(f"Unknown profile '{profile}'. Choose: {list(presets)}")
+        return cls(**{**presets[profile], **overrides})
+
 
 # ---------------------------------------------------------------------------
 # Environment
