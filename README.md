@@ -62,7 +62,7 @@ AlphaFold 3's diffusion architecture hallucinates structure in genuinely disorde
 | v4 | 0.794 | 118 | Multi-scale physicochemical features |
 | v5 | 0.823 | 214 | + ESM-2 8M embeddings (PCA-32) |
 | v6 | 0.831 | 406 | + PCA-48, ESM variance/context features |
-| GPU (Colab) | TBD | 1280+ | ESM-2 650M + LoRA fine-tuning + CNN head |
+| GPU (Colab) | TBD → target ≥0.83 | 1280+phys | ESM-2 650M + LoRA (Q/K/V) + multi-scale CNN + focal loss |
 
 ## Architecture
 
