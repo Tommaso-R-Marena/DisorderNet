@@ -87,6 +87,40 @@ FUNCTIONAL_TERM_GROUPS = {
     }),
 }
 
+# Amino acid alphabet for lightweight physicochemical features (matches v6 CPU path)
+AA_ALPHABET = "ACDEFGHIKLMNPQRSTVWY"
+AA_TO_IDX = {a: i for i, a in enumerate(AA_ALPHABET)}
+# Kyte-Doolittle hydro, charge proxy, disorder propensity (Uversky-style scale subset)
+_AA_HYDRO = torch.tensor(
+    [1.8, 2.5, -3.5, -3.5, 2.8, -0.4, -3.2, 4.5, -3.9, 3.8, 1.9, -3.5, -1.6,
+     -3.5, -4.5, -0.8, -0.7, 4.2, -0.9, -1.3],
+    dtype=torch.float32,
+)
+_AA_CHARGE = torch.tensor(
+    [0, 0, -1, -1, 0, 0, 0.1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+    dtype=torch.float32,
+)
+_AA_DISPROP = torch.tensor(
+    [0.06, -0.02, 0.192, 0.736, -0.697, 0.166, 0.303, -0.486, 0.586, -0.326,
+     -0.397, 0.007, 0.987, 0.318, 0.18, 0.341, 0.059, -0.121, -0.884, -0.510],
+    dtype=torch.float32,
+)
+
+
+def _label_boundary_mask(labels: list[int], radius: int = 2) -> list[float]:
+    """Weight residues near disorder↔order transitions (improves segment F1)."""
+    n = len(labels)
+    if n == 0:
+        return []
+    lab = np.asarray(labels, dtype=np.int8)
+    core = np.zeros(n, dtype=np.bool_)
+    for i in range(1, n):
+        if lab[i] != lab[i - 1]:
+            lo = max(0, i - radius)
+            hi = min(n, i + radius)
+            core[lo:hi] = True
+    return core.astype(np.float32).tolist()
+
 
 @dataclass
 class TrainConfig:
@@ -100,19 +134,29 @@ class TrainConfig:
 
     batch_size: int = 4
     accum_steps: int = 4
-    num_epochs: int = 15
-    lr_lora: float = 1e-4
-    lr_head: float = 5e-4
+    num_epochs: int = 20
+    lr_lora: float = 8e-5
+    lr_head: float = 4e-4
     weight_decay: float = 1e-2
-    patience: int = 4
+    patience: int = 6
     max_grad_norm: float = 1.0
-    warmup_frac: float = 0.1
+    warmup_frac: float = 0.08
 
-    lora_layers: int = 8
-    lora_rank: int = 8
-    lora_alpha: int = 16
+    lora_layers: int = 12
+    lora_rank: int = 16
+    lora_alpha: int = 32
     lora_dropout: float = 0.05
-    head_dropout: float = 0.10
+    lora_on_k: bool = True
+    head_dropout: float = 0.12
+
+    # Loss & features (v2 performance defaults)
+    use_focal_loss: bool = True
+    focal_gamma: float = 2.0
+    boundary_weight: float = 2.5
+    boundary_radius: int = 2
+    use_physico_features: bool = True
+    physico_dim: int = 32
+    esm_fusion_layers: int = 4
 
     n_folds: int = 5
     num_workers: int = 2
@@ -444,8 +488,101 @@ class LoRALinear(nn.Module):
         return self.original(x) + (self.lora_dropout(x) @ self.lora_A @ self.lora_B) * self.scaling
 
 
+class PhysicoFeatureEncoder(nn.Module):
+    """Lightweight sequence physics (v6-style) fused with ESM embeddings."""
+
+    def __init__(self, out_dim: int = 32):
+        super().__init__()
+        self.register_buffer("hydro", _AA_HYDRO)
+        self.register_buffer("charge", _AA_CHARGE)
+        self.register_buffer("disprop", _AA_DISPROP)
+        self.net = nn.Sequential(
+            nn.Conv1d(23, 64, kernel_size=9, padding=4),
+            nn.GELU(),
+            nn.Conv1d(64, out_dim, kernel_size=5, padding=2),
+            nn.GELU(),
+        )
+
+    def forward(self, aa_idx: torch.Tensor) -> torch.Tensor:
+        """aa_idx: (B, L) integer indices 0–19."""
+        aa_idx = aa_idx.clamp(0, 19)
+        onehot = torch.nn.functional.one_hot(aa_idx, num_classes=20).float()
+        props = torch.stack([
+            self.hydro[aa_idx],
+            self.charge[aa_idx],
+            self.disprop[aa_idx],
+        ], dim=-1)
+        x = torch.cat([onehot, props], dim=-1).permute(0, 2, 1)
+        return self.net(x).permute(0, 2, 1)
+
+
+class ESMLayerFusion(nn.Module):
+    """Learned fusion of the last N ESM layer representations."""
+
+    def __init__(self, n_layers: int, dim: int = 1280):
+        super().__init__()
+        self.weights = nn.Parameter(torch.zeros(n_layers))
+        self.norm = nn.LayerNorm(dim)
+
+    def forward(self, layer_stack: torch.Tensor) -> torch.Tensor:
+        """layer_stack: (B, L, D, N_layers)."""
+        w = torch.softmax(self.weights, dim=0)
+        fused = (layer_stack * w.view(1, 1, 1, -1)).sum(dim=-1)
+        return self.norm(fused)
+
+
 class DisorderCNNHead(nn.Module):
-    """3-layer 1D CNN head with residual skip."""
+    """Multi-scale dilated 1D CNN — sharper IDR boundaries than single-kernel stack."""
+
+    def __init__(self, in_dim: int = 1280, dropout: float = 0.12):
+        super().__init__()
+        mid = 384
+        self.branches = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv1d(in_dim, mid, kernel_size=7, padding=3, dilation=1),
+                nn.BatchNorm1d(mid),
+                nn.GELU(),
+            ),
+            nn.Sequential(
+                nn.Conv1d(in_dim, mid, kernel_size=5, padding=6, dilation=3),
+                nn.BatchNorm1d(mid),
+                nn.GELU(),
+            ),
+            nn.Sequential(
+                nn.Conv1d(in_dim, mid, kernel_size=3, padding=8, dilation=8),
+                nn.BatchNorm1d(mid),
+                nn.GELU(),
+            ),
+        ])
+        self.merge = nn.Sequential(
+            nn.Conv1d(mid * 3, 256, kernel_size=3, padding=1),
+            nn.BatchNorm1d(256),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Conv1d(256, 1, kernel_size=1),
+        )
+        self.skip = nn.Conv1d(in_dim, 1, kernel_size=1)
+        self._init_weights()
+
+    def _init_weights(self) -> None:
+        for m in self.modules():
+            if isinstance(m, nn.Conv1d):
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.BatchNorm1d):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.permute(0, 2, 1)
+        parts = [b(x) for b in self.branches]
+        merged = self.merge(torch.cat(parts, dim=1))
+        return (merged + self.skip(x)).squeeze(1)
+
+
+class DisorderCNNHeadLegacy(nn.Module):
+    """Previous 3-layer CNN (kept for reference / tests)."""
 
     def __init__(self, in_dim: int = 1280, dropout: float = 0.10):
         super().__init__()
@@ -461,17 +598,6 @@ class DisorderCNNHead(nn.Module):
             nn.Conv1d(256, 1, kernel_size=5, padding=2),
         )
         self.skip = nn.Conv1d(in_dim, 1, kernel_size=1)
-        self._init_weights()
-
-    def _init_weights(self) -> None:
-        for m in self.modules():
-            if isinstance(m, nn.Conv1d):
-                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.BatchNorm1d):
-                nn.init.ones_(m.weight)
-                nn.init.zeros_(m.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.permute(0, 2, 1)
@@ -502,10 +628,13 @@ class DisorderNetGPU(nn.Module):
         n_layers = len(self.esm.layers)
         start = n_layers - cfg.lora_layers
         self._lora_modules: list[LoRALinear] = []
+        proj_names = ["q_proj", "v_proj"]
+        if cfg.lora_on_k:
+            proj_names.append("k_proj")
 
         for layer_idx in range(start, n_layers):
             attn = self.esm.layers[layer_idx].self_attn
-            for proj_name in ("q_proj", "v_proj"):
+            for proj_name in proj_names:
                 proj = getattr(attn, proj_name, None)
                 if isinstance(proj, nn.Linear):
                     lora = LoRALinear(
@@ -514,7 +643,19 @@ class DisorderNetGPU(nn.Module):
                     setattr(attn, proj_name, lora)
                     self._lora_modules.append(lora)
 
-        self.head = DisorderCNNHead(in_dim=1280, dropout=cfg.head_dropout)
+        fusion_n = min(cfg.esm_fusion_layers, n_layers)
+        self._fusion_layer_ids = list(range(n_layers - fusion_n, n_layers))
+        self.layer_fusion = ESMLayerFusion(fusion_n, dim=1280)
+
+        self.use_physico = cfg.use_physico_features
+        if self.use_physico:
+            self.physico = PhysicoFeatureEncoder(cfg.physico_dim)
+            head_in = 1280 + cfg.physico_dim
+        else:
+            self.physico = None
+            head_in = 1280
+
+        self.head = DisorderCNNHead(in_dim=head_in, dropout=cfg.head_dropout)
 
         if verbose:
             total = sum(p.numel() for p in self.parameters())
@@ -540,11 +681,25 @@ class DisorderNetGPU(nn.Module):
             yield m.lora_B
 
     def get_head_params(self) -> Iterator[nn.Parameter]:
-        return self.head.parameters()
+        params = list(self.head.parameters())
+        params.extend(self.layer_fusion.parameters())
+        if self.physico is not None:
+            params.extend(self.physico.parameters())
+        return iter(params)
 
-    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
-        out = self.esm(tokens, repr_layers=[33], return_contacts=False)
-        embeddings = out["representations"][33][:, 1:-1, :]
+    def forward(self, tokens: torch.Tensor, aa_idx: Optional[torch.Tensor] = None) -> torch.Tensor:
+        out = self.esm(tokens, repr_layers=self._fusion_layer_ids, return_contacts=False)
+        layer_hiddens = [
+            out["representations"][i][:, 1:-1, :] for i in self._fusion_layer_ids
+        ]
+        stack = torch.stack(layer_hiddens, dim=-1)
+        embeddings = self.layer_fusion(stack)
+
+        if self.physico is not None:
+            if aa_idx is None:
+                raise ValueError("aa_idx required when use_physico_features=True")
+            embeddings = torch.cat([embeddings, self.physico(aa_idx)], dim=-1)
+
         return self.head(embeddings)
 
 
@@ -570,17 +725,33 @@ def load_esm_model(device: torch.device):
 class DisProtDataset(Dataset):
     """Pre-tokenizes all proteins once to avoid repeated batch_converter calls."""
 
-    def __init__(self, proteins: list, batch_converter, cache: Optional[dict] = None):
+    def __init__(
+        self,
+        proteins: list,
+        batch_converter,
+        cache: Optional[dict] = None,
+        boundary_radius: int = 2,
+    ):
         self.proteins = proteins
         self._cache = cache if cache is not None else {}
+        self.boundary_radius = boundary_radius
 
         missing = [p for p in proteins if p["id"] not in self._cache]
         if missing:
             for p in tqdm(missing, desc="Tokenizing", leave=False):
                 _, _, tokens = batch_converter([(p["id"], p["sequence"])])
+                labels = p["labels"]
+                boundary = _label_boundary_mask(labels, radius=self.boundary_radius)
+                trans = p.get("transition_mask") or [0] * len(labels)
+                is_boundary = [
+                    1.0 if (boundary[i] or trans[i]) else 0.0 for i in range(len(labels))
+                ]
+                aa_idx = [AA_TO_IDX.get(c, 0) for c in p["sequence"]]
                 self._cache[p["id"]] = {
                     "tokens": tokens.squeeze(0),
-                    "labels": torch.tensor(p["labels"], dtype=torch.float32),
+                    "labels": torch.tensor(labels, dtype=torch.float32),
+                    "aa_idx": torch.tensor(aa_idx, dtype=torch.long),
+                    "sample_weight": torch.tensor(is_boundary, dtype=torch.float32),
                 }
 
     def __len__(self) -> int:
@@ -591,11 +762,18 @@ class DisProtDataset(Dataset):
         item = self._cache[p["id"]]
         labels = item["labels"]
         mask = torch.ones(labels.shape[0], dtype=torch.bool)
-        return item["tokens"], labels, mask, p["id"]
+        return (
+            item["tokens"],
+            labels,
+            mask,
+            item["aa_idx"],
+            item["sample_weight"],
+            p["id"],
+        )
 
 
 def disprot_collate(batch):
-    tokens_list, labels_list, mask_list, ids = zip(*batch)
+    tokens_list, labels_list, mask_list, aa_list, weight_list, ids = zip(*batch)
     max_tok = max(t.shape[0] for t in tokens_list)
     max_seq = max_tok - 2
     pad_idx = 1
@@ -603,14 +781,20 @@ def disprot_collate(batch):
     tokens_padded = torch.full((len(batch), max_tok), pad_idx, dtype=torch.long)
     labels_padded = torch.zeros(len(batch), max_seq, dtype=torch.float32)
     mask_padded = torch.zeros(len(batch), max_seq, dtype=torch.bool)
+    aa_padded = torch.zeros(len(batch), max_seq, dtype=torch.long)
+    weight_padded = torch.ones(len(batch), max_seq, dtype=torch.float32)
 
-    for i, (tok, lab, msk) in enumerate(zip(tokens_list, labels_list, mask_list)):
+    for i, (tok, lab, msk, aa, wt) in enumerate(
+        zip(tokens_list, labels_list, mask_list, aa_list, weight_list)
+    ):
         lt, ls = tok.shape[0], lab.shape[0]
         tokens_padded[i, :lt] = tok
         labels_padded[i, :ls] = lab
         mask_padded[i, :ls] = msk
+        aa_padded[i, :ls] = aa
+        weight_padded[i, :ls] = wt
 
-    return tokens_padded, labels_padded, mask_padded, list(ids)
+    return tokens_padded, labels_padded, mask_padded, aa_padded, weight_padded, list(ids)
 
 
 # ---------------------------------------------------------------------------
@@ -619,8 +803,35 @@ def disprot_collate(batch):
 def _compute_pos_weight(proteins: list, device: torch.device) -> torch.Tensor:
     total_pos = sum(p["n_dis"] for p in proteins)
     total_neg = sum(p["length"] - p["n_dis"] for p in proteins)
-    pw = min(total_neg / max(total_pos, 1), 10.0)
+    pw = min(total_neg / max(total_pos, 1), 12.0)
     return torch.tensor([pw], device=device)
+
+
+def _disorder_loss(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    pos_weight: Optional[torch.Tensor],
+    sample_weight: Optional[torch.Tensor],
+    cfg: TrainConfig,
+) -> torch.Tensor:
+    """Focal or BCE loss with optional per-residue boundary weights."""
+    if cfg.use_focal_loss:
+        bce = nn.functional.binary_cross_entropy_with_logits(
+            logits, labels, pos_weight=pos_weight, reduction="none",
+        )
+        probs = torch.sigmoid(logits)
+        pt = torch.where(labels > 0.5, probs, 1.0 - probs)
+        loss = bce * ((1.0 - pt) ** cfg.focal_gamma)
+    else:
+        loss = nn.functional.binary_cross_entropy_with_logits(
+            logits, labels, pos_weight=pos_weight, reduction="none",
+        )
+
+    if sample_weight is not None:
+        bw = 1.0 + (cfg.boundary_weight - 1.0) * sample_weight
+        loss = loss * bw
+
+    return loss.mean()
 
 
 def _warmup_cosine_scheduler(optimizer, total_steps: int, warmup_steps: int):
@@ -640,21 +851,30 @@ def eval_epoch(
     device: torch.device,
     amp_dtype: torch.dtype,
     pos_weight: Optional[torch.Tensor] = None,
+    cfg: Optional[TrainConfig] = None,
 ) -> dict:
     model.eval()
     all_probs, all_labels = [], []
     total_loss, n_batches = 0.0, 0
-    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight, reduction="none")
 
-    for tokens, labels, mask, _ in loader:
+    for tokens, labels, mask, aa_idx, sample_weight, _ in loader:
         tokens = tokens.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
         mask = mask.to(device, non_blocking=True)
+        aa_idx = aa_idx.to(device, non_blocking=True)
+        sample_weight = sample_weight.to(device, non_blocking=True)
 
         with autocast(device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda"):
-            logits = model(tokens)
+            logits = model(tokens, aa_idx=aa_idx if getattr(model, "use_physico", False) else None)
 
-        loss = criterion(logits[mask], labels[mask]).mean()
+        if cfg is not None:
+            loss = _disorder_loss(
+                logits[mask], labels[mask], pos_weight, sample_weight[mask], cfg,
+            )
+        else:
+            loss = nn.functional.binary_cross_entropy_with_logits(
+                logits[mask], labels[mask], pos_weight=pos_weight,
+            )
         total_loss += loss.item()
         n_batches += 1
 
@@ -698,8 +918,12 @@ def train_fold(
 
     fold_model = DisorderNetGPU(esm_backbone, cfg, verbose=True).to(device)
 
-    train_ds = DisProtDataset(proteins_train, batch_converter, token_cache)
-    val_ds = DisProtDataset(proteins_val, batch_converter, token_cache)
+    train_ds = DisProtDataset(
+        proteins_train, batch_converter, token_cache, boundary_radius=cfg.boundary_radius,
+    )
+    val_ds = DisProtDataset(
+        proteins_val, batch_converter, token_cache, boundary_radius=cfg.boundary_radius,
+    )
 
     loader_kw = dict(
         batch_size=cfg.batch_size,
@@ -728,9 +952,9 @@ def train_fold(
     scheduler = _warmup_cosine_scheduler(optimizer, total_steps, warmup_steps)
 
     pos_weight = _compute_pos_weight(proteins_train, device)
-    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight, reduction="none")
     scaler = GradScaler(device="cuda", enabled=(amp_dtype == torch.float16))
 
+    best_score = -1.0
     best_auc = -1.0
     best_ap = 0.0
     best_state: Optional[dict] = None
@@ -754,14 +978,18 @@ def train_fold(
             leave=False,
         )
 
-        for step, (tokens, labels, mask, _) in enumerate(pbar):
+        for step, (tokens, labels, mask, aa_idx, sample_weight, _) in enumerate(pbar):
             tokens = tokens.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             mask = mask.to(device, non_blocking=True)
+            aa_idx = aa_idx.to(device, non_blocking=True)
+            sample_weight = sample_weight.to(device, non_blocking=True)
 
             with autocast(device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda"):
-                logits = fold_model(tokens)
-                loss = criterion(logits[mask], labels[mask]).mean() / cfg.accum_steps
+                logits = fold_model(tokens, aa_idx=aa_idx if fold_model.use_physico else None)
+                loss = _disorder_loss(
+                    logits[mask], labels[mask], pos_weight, sample_weight[mask], cfg,
+                ) / cfg.accum_steps
 
             if amp_dtype == torch.float16:
                 scaler.scale(loss).backward()
@@ -793,7 +1021,7 @@ def train_fold(
             pbar.set_postfix(loss=f"{loss.item() * cfg.accum_steps:.4f}")
 
         avg_train_loss = train_loss / max(n_batches, 1)
-        val_metrics = eval_epoch(fold_model, val_dl, device, amp_dtype, pos_weight)
+        val_metrics = eval_epoch(fold_model, val_dl, device, amp_dtype, pos_weight, cfg)
         epoch_time = time.time() - epoch_t0
         elapsed = time.time() - fold_t0
         eta_h = (elapsed / (epoch + 1)) * (cfg.num_epochs - epoch - 1) / 3600
@@ -812,7 +1040,9 @@ def train_fold(
         history.append(row)
 
         marker = ""
-        if val_metrics["auc"] > best_auc:
+        composite = 0.7 * val_metrics["auc"] + 0.3 * val_metrics["ap"]
+        if composite > best_score:
+            best_score = composite
             best_auc = val_metrics["auc"]
             best_ap = val_metrics["ap"]
             best_state = copy.deepcopy(fold_model.state_dict())
