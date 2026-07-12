@@ -9,6 +9,7 @@ from sklearn.model_selection import GroupKFold
 from colab.disordernet_gpu import TrainConfig, process_disprot
 from colab.inference_fusion import (
     apply_plddt_fusion_to_cv,
+    build_combined_plddt_map,
     compute_pooled_metrics,
     fuse_aligned_predictions,
 )
@@ -54,6 +55,13 @@ class TestInferenceFusion:
         assert report["after"]["pooled"]["auc"] is not None
         pooled = compute_pooled_metrics(fused_folds)
         assert len(pooled["all_probs"]) == len(pooled["all_labels"])
+
+    def test_combined_plddt_map(self):
+        af2 = {"P1": np.array([50.0, 60.0], dtype=np.float32)}
+        af3 = {"P1": np.array([75.0, 85.0], dtype=np.float32)}
+        combined, stats = build_combined_plddt_map(af2, af3, prefer="af3")
+        assert combined["P1"][0] == 75.0
+        assert stats["from_af3_preferred"] == 1
 
     def test_train_config_profiles(self):
         balanced = TrainConfig.from_profile("balanced")

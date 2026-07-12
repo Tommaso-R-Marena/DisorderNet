@@ -36,7 +36,7 @@ AlphaFold 3's diffusion architecture hallucinates structure in genuinely disorde
 | Method | AUC-ROC | AP | Status |
 |--------|---------|-----|--------|
 | DisorderNet v6 (ESM-2 8M + GBDT) | 0.831 | 0.537 | Verified (`results_v6/metrics.json`) |
-| DisorderNet GPU (ESM-2 650M + LoRA) | TBD | TBD | Pending full Colab A100 run |
+| DisorderNet GPU (ESM-2 650M + LoRA) | 0.817 | — | Verified Colab A100 (`disordernet_gpu_results_*.json`) |
 
 #### Legacy combined view (reference only)
 
@@ -62,7 +62,7 @@ AlphaFold 3's diffusion architecture hallucinates structure in genuinely disorde
 | v4 | 0.794 | 118 | Multi-scale physicochemical features |
 | v5 | 0.823 | 214 | + ESM-2 8M embeddings (PCA-32) |
 | v6 | 0.831 | 406 | + PCA-48, ESM variance/context features |
-| GPU (Colab) | TBD → target ≥0.83 | 1280+phys | ESM-2 650M + LoRA (Q/K/V) + multi-scale CNN + focal loss |
+| GPU (Colab) | 0.817 (0.831 AF-fusion subset) | 1280+phys | ESM-2 650M + LoRA + segment-aware ES + v6 ensemble |
 
 ## Architecture
 
@@ -180,7 +180,8 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/phase3_synthesis.py` | Phase 3 fusion calibration & integrated report |
 | `colab/benchmark_tables.py` | Matched vs literature benchmark tables (Tier 1) |
 | `colab/caid_reporting.py` | CAID-style metrics + stratified evaluation |
-| `colab/inference_fusion.py` | Post-CV AF pLDDT fusion (α-blend inference boost) |
+| `colab/inference_fusion.py` | Post-CV AF pLDDT fusion (α-blend; AF2+AF3 combined map) |
+| `colab/downstream_refresh.py` | Refresh CAID/bio/benchmark after fusion updates |
 
 ### Running tests
 
