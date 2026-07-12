@@ -313,12 +313,17 @@ def run_biological_utility_report(
     n_folds: int = 5,
     min_region_len: int = 5,
     iou_threshold: float = 0.5,
+    apply_postprocess: bool = True,
+    postprocess_min_len: int = 5,
+    postprocess_max_gap: int = 3,
 ) -> dict:
     """
     Compute pooled biological-utility metrics across all CV folds.
     """
     if threshold is None:
         threshold = 0.5
+
+    from colab.segment_postprocess import probs_to_postprocessed_binary
 
     aligned = align_fold_predictions(proteins, fold_results, n_folds=n_folds)
 
@@ -332,7 +337,16 @@ def run_biological_utility_report(
         p = item["protein"]
         labels = item["labels"]
         probs = item["probs"]
-        preds = (probs >= threshold).astype(np.int8)
+        preds = (
+            probs_to_postprocessed_binary(
+                probs,
+                threshold=threshold,
+                min_len=postprocess_min_len,
+                max_gap=postprocess_max_gap,
+            )
+            if apply_postprocess
+            else (probs >= threshold).astype(np.int8)
+        )
 
         all_seg.append(compute_segment_metrics(
             labels, preds, iou_threshold=iou_threshold, min_region_len=min_region_len,
@@ -364,6 +378,9 @@ def run_biological_utility_report(
         "total_pred_segments": int(sum(s.n_pred_segments for s in all_seg)),
         "min_region_len": min_region_len,
         "iou_threshold": iou_threshold,
+        "apply_postprocess": apply_postprocess,
+        "postprocess_min_len": postprocess_min_len,
+        "postprocess_max_gap": postprocess_max_gap,
     }
 
     # Pooled functional enrichment (weighted by n_residues)

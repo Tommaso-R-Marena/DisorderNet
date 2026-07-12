@@ -103,6 +103,24 @@ def fetch_afdb_metadata(uniprot_acc: str) -> Optional[dict]:
         return None
 
 
+def load_cached_plddt(
+    uniprot_acc: str,
+    target_sequence: str,
+    cache_dir: str = DEFAULT_CACHE_DIR,
+) -> Optional[np.ndarray]:
+    """Load pLDDT from local cache only (no network). Returns None if missing."""
+    if not uniprot_acc:
+        return None
+    cache_path = os.path.join(cache_dir, f"{uniprot_acc.upper()}.json")
+    if not os.path.exists(cache_path):
+        return None
+    with open(cache_path) as f:
+        cached = json.load(f)
+    if cached.get("target_sequence") != target_sequence or "plddt" not in cached:
+        return None
+    return np.asarray(cached["plddt"], dtype=np.float32)
+
+
 def fetch_plddt_for_uniprot(
     uniprot_acc: str,
     target_sequence: str,
