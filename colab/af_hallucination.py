@@ -389,3 +389,344 @@ def save_af2_af3_comparison(comparison: dict, path: str = "af2_af3_comparison.js
     with open(path, "w") as f:
         json.dump(comparison, f, indent=2)
     return path
+
+
+def _collect_af_subset_arrays(
+    proteins: list,
+    fold_results: list,
+    plddt_by_protein: dict[str, np.ndarray],
+    n_folds: int = 5,
+) -> tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], int]:
+    """Concatenate labels, DisorderNet probs, pLDDT on AF-covered residues."""
+    aligned = align_fold_predictions(proteins, fold_results, n_folds=n_folds)
+    labels_list: list = []
+    probs_list: list = []
+    plddt_list: list = []
+    n_proteins = 0
+
+    for item in aligned:
+        pid = item["id"]
+        if pid not in plddt_by_protein:
+            continue
+        plddt = np.asarray(plddt_by_protein[pid], dtype=np.float32)
+        if len(plddt) != len(item["probs"]):
+            continue
+        valid = ~np.isnan(plddt)
+        if valid.sum() < 5:
+            continue
+        labels_list.append(item["labels"][valid])
+        probs_list.append(item["probs"][valid])
+        plddt_list.append(plddt[valid])
+        n_proteins += 1
+
+    if not labels_list:
+        return None, None, None, 0
+
+    return (
+        np.concatenate(labels_list),
+        np.concatenate(probs_list),
+        np.concatenate(plddt_list),
+        n_proteins,
+    )
+
+
+def _collect_overlap_arrays(
+    proteins: list,
+    fold_results: list,
+    plddt_af2: dict[str, np.ndarray],
+    plddt_af3: dict[str, np.ndarray],
+    n_folds: int = 5,
+) -> tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], int]:
+    """Residues where both AF2 and AF3 pLDDT are available (same proteins)."""
+    aligned = align_fold_predictions(proteins, fold_results, n_folds=n_folds)
+    labels_list: list = []
+    probs_list: list = []
+    af2_list: list = []
+    af3_list: list = []
+    n_proteins = 0
+
+    for item in aligned:
+        pid = item["id"]
+        if pid not in plddt_af2 or pid not in plddt_af3:
+            continue
+        p2 = np.asarray(plddt_af2[pid], dtype=np.float32)
+        p3 = np.asarray(plddt_af3[pid], dtype=np.float32)
+        if len(p2) != len(item["probs"]) or len(p3) != len(p2):
+            continue
+        valid = (~np.isnan(p2)) & (~np.isnan(p3))
+        if valid.sum() < 5:
+            continue
+        labels_list.append(item["labels"][valid])
+        probs_list.append(item["probs"][valid])
+        af2_list.append(p2[valid])
+        af3_list.append(p3[valid])
+        n_proteins += 1
+
+    if not labels_list:
+        return None, None, None, None, 0
+
+    return (
+        np.concatenate(labels_list),
+        np.concatenate(probs_list),
+        np.concatenate(af2_list),
+        np.concatenate(af3_list),
+        n_proteins,
+    )
+
+
+def compute_fusion_lift_vs_plddt(
+    proteins: list,
+    fold_results_gpu: list,
+    plddt_by_protein: dict[str, np.ndarray],
+    fusion_alpha: float = 0.5,
+    n_folds: int = 5,
+) -> dict:
+    """
+    Δ AUC of fused predictions vs inverse-pLDDT baseline on AF-covered residues.
+    """
+    from colab.phase3_synthesis import fuse_disorder_score
+
+    labels, gpu_probs, plddt, n_proteins = _collect_af_subset_arrays(
+        proteins, fold_results_gpu, plddt_by_protein, n_folds=n_folds,
+    )
+    if labels is None or gpu_probs is None or plddt is None:
+        return {"insufficient_data": True, "n_proteins": 0, "n_residues": 0}
+
+    if len(np.unique(labels)) < 2:
+        return {"insufficient_data": True, "n_proteins": n_proteins, "n_residues": int(len(labels))}
+
+    baseline_scores = plddt_to_disorder_score(plddt)
+    fused_scores = fuse_disorder_score(gpu_probs, plddt, alpha=fusion_alpha)
+
+    baseline_auc = float(roc_auc_score(labels, baseline_scores))
+    gpu_auc = float(roc_auc_score(labels, gpu_probs))
+    fused_auc = float(roc_auc_score(labels, fused_scores))
+
+    return {
+        "insufficient_data": False,
+        "n_proteins": n_proteins,
+        "n_residues": int(len(labels)),
+        "fusion_alpha": float(fusion_alpha),
+        "plddt_baseline_auc": baseline_auc,
+        "gpu_auc": gpu_auc,
+        "fused_auc": fused_auc,
+        "delta_fused_vs_plddt": fused_auc - baseline_auc,
+        "delta_gpu_vs_plddt": gpu_auc - baseline_auc,
+        "delta_fused_vs_gpu": fused_auc - gpu_auc,
+    }
+
+
+def run_af2_af3_breakthrough_summary(
+    proteins: list,
+    fold_results_gpu: list,
+    af2_report: dict,
+    af3_report: dict,
+    af2_af3_comparison: dict,
+    plddt_af2_by_protein: dict[str, np.ndarray],
+    plddt_af3_by_protein: dict[str, np.ndarray],
+    fusion_alpha: Optional[float] = None,
+    fusion_report: Optional[dict] = None,
+    threshold: float = 0.5,
+    high_plddt_threshold: float = 70.0,
+    n_folds: int = 5,
+) -> dict:
+    """
+    Three headline comparisons for breakthrough assessment after AF3 run.
+
+    1. AF3 vs AF2 hallucination rate (pooled + same-protein overlap)
+    2. DisorderNet rescue vs AF3 vs AF2 (rescue rate + Δ AUC)
+    3. Fusion lift vs pLDDT baseline: larger on AF3 than AF2?
+    """
+    if fusion_alpha is None and fusion_report:
+        fusion_alpha = fusion_report.get("fusion_alpha", 0.5)
+    if fusion_alpha is None:
+        fusion_alpha = 0.5
+
+    summary: dict = {
+        "insufficient_data": True,
+        "fusion_alpha": float(fusion_alpha),
+    }
+
+    # ── Comparison 1: hallucination rate ──────────────────────────────────
+    comp1: dict = {"insufficient_data": True}
+    if not af2_af3_comparison.get("insufficient_data"):
+        a2 = af2_af3_comparison["af2"]
+        a3 = af2_af3_comparison["af3"]
+        delta_h = af2_af3_comparison["delta_hallucination_af3_minus_af2"]
+        comp1 = {
+            "insufficient_data": False,
+            "af2_hallucination_rate": a2["hallucination_rate"],
+            "af3_hallucination_rate": a3["hallucination_rate"],
+            "delta_af3_minus_af2": delta_h,
+            "af3_hallucinates_more": delta_h > 0,
+            "n_af2_proteins": a2["proteins_with_plddt"],
+            "n_af3_proteins": a3["proteins_with_plddt"],
+        }
+
+    labels_ov, probs_ov, plddt2_ov, plddt3_ov, n_ov_proteins = _collect_overlap_arrays(
+        proteins, fold_results_gpu, plddt_af2_by_protein, plddt_af3_by_protein, n_folds=n_folds,
+    )
+    if labels_ov is not None and probs_ov is not None and plddt2_ov is not None and plddt3_ov is not None:
+        m2 = compute_hallucination_metrics(
+            labels_ov, probs_ov, plddt2_ov, threshold, high_plddt_threshold,
+        )
+        m3 = compute_hallucination_metrics(
+            labels_ov, probs_ov, plddt3_ov, threshold, high_plddt_threshold,
+        )
+        comp1["overlap"] = {
+            "n_proteins": n_ov_proteins,
+            "n_residues": m2["n_residues"],
+            "af2_hallucination_rate": m2["hallucination_rate"],
+            "af3_hallucination_rate": m3["hallucination_rate"],
+            "delta_af3_minus_af2": m3["hallucination_rate"] - m2["hallucination_rate"],
+            "af3_hallucinates_more": m3["hallucination_rate"] > m2["hallucination_rate"],
+        }
+
+    summary["comparison_1_hallucination"] = comp1
+
+    # ── Comparison 2: DisorderNet rescue ──────────────────────────────────
+    comp2: dict = {"insufficient_data": True}
+    if not af2_af3_comparison.get("insufficient_data"):
+        a2 = af2_af3_comparison["af2"]
+        a3 = af2_af3_comparison["af3"]
+        d_rescue = af2_af3_comparison["delta_rescue_af3_minus_af2"]
+        d_auc2 = a2.get("delta_auc")
+        d_auc3 = a3.get("delta_auc")
+        comp2 = {
+            "insufficient_data": False,
+            "af2_rescue_rate": a2["rescue_rate"],
+            "af3_rescue_rate": a3["rescue_rate"],
+            "delta_rescue_af3_minus_af2": d_rescue,
+            "af2_disordernet_delta_auc": d_auc2,
+            "af3_disordernet_delta_auc": d_auc3,
+            "disordernet_rescue_better_on_af3": (
+                d_rescue > 0 or (d_auc3 is not None and d_auc2 is not None and d_auc3 > d_auc2)
+            ),
+        }
+        if labels_ov is not None and probs_ov is not None and plddt2_ov is not None and plddt3_ov is not None:
+            m2 = compute_hallucination_metrics(
+                labels_ov, probs_ov, plddt2_ov, threshold, high_plddt_threshold,
+            )
+            m3 = compute_hallucination_metrics(
+                labels_ov, probs_ov, plddt3_ov, threshold, high_plddt_threshold,
+            )
+            comp2["overlap"] = {
+                "af2_rescue_rate": m2["rescue_rate"],
+                "af3_rescue_rate": m3["rescue_rate"],
+                "delta_rescue_af3_minus_af2": m3["rescue_rate"] - m2["rescue_rate"],
+            }
+
+    summary["comparison_2_rescue"] = comp2
+
+    # ── Comparison 3: fusion lift vs pLDDT baseline ───────────────────────
+    lift_af2 = compute_fusion_lift_vs_plddt(
+        proteins, fold_results_gpu, plddt_af2_by_protein, fusion_alpha, n_folds,
+    )
+    lift_af3 = compute_fusion_lift_vs_plddt(
+        proteins, fold_results_gpu, plddt_af3_by_protein, fusion_alpha, n_folds,
+    )
+
+    comp3: dict = {"insufficient_data": True}
+    if not lift_af2.get("insufficient_data") and not lift_af3.get("insufficient_data"):
+        d2 = lift_af2["delta_fused_vs_plddt"]
+        d3 = lift_af3["delta_fused_vs_plddt"]
+        comp3 = {
+            "insufficient_data": False,
+            "fusion_alpha": float(fusion_alpha),
+            "af2": lift_af2,
+            "af3": lift_af3,
+            "delta_lift_af3_minus_af2": d3 - d2,
+            "fusion_beats_plddt_more_on_af3": d3 > d2,
+        }
+    elif not lift_af2.get("insufficient_data"):
+        comp3 = {"insufficient_data": True, "af2_only": lift_af2, "af3": lift_af3}
+    elif not lift_af3.get("insufficient_data"):
+        comp3 = {"insufficient_data": True, "af2": lift_af2, "af3_only": lift_af3}
+
+    summary["comparison_3_fusion_lift"] = comp3
+    summary["insufficient_data"] = (
+        comp1.get("insufficient_data", True)
+        and comp2.get("insufficient_data", True)
+        and comp3.get("insufficient_data", True)
+    )
+    return summary
+
+
+def print_af2_af3_breakthrough_summary(summary: dict) -> None:
+    """Print the three headline AF2 vs AF3 breakthrough comparisons."""
+    print(f"\n{'═' * 64}")
+    print(" AF2 vs AF3 BREAKTHROUGH SUMMARY (Cell 11b)")
+    print(f"{'═' * 64}")
+
+    if summary.get("insufficient_data"):
+        print("  Insufficient data — run Cells 10, 10b, and 11 with AF3 outputs first.")
+        print(f"{'═' * 64}")
+        return
+
+    print(f"  Fusion α (for comp. 3): {summary.get('fusion_alpha', 0.5):.2f}")
+
+    # 1. Hallucination
+    c1 = summary.get("comparison_1_hallucination", {})
+    print(f"\n── 1. AF3 vs AF2 hallucination rate (disordered + pLDDT ≥ 70) ──")
+    if c1.get("insufficient_data"):
+        print("  Insufficient data.")
+    else:
+        print(f"  AF2 pooled rate     : {c1['af2_hallucination_rate']:.3f}  "
+              f"({c1['n_af2_proteins']} proteins)")
+        print(f"  AF3 pooled rate     : {c1['af3_hallucination_rate']:.3f}  "
+              f"({c1['n_af3_proteins']} proteins)")
+        print(f"  Δ AF3 − AF2         : {c1['delta_af3_minus_af2']:+.3f}  "
+              f"({'AF3 worse' if c1['af3_hallucinates_more'] else 'AF3 better or equal'})")
+        ov = c1.get("overlap")
+        if ov:
+            print(f"  Same-protein overlap ({ov['n_proteins']} proteins, {ov['n_residues']:,} res):")
+            print(f"    AF2 rate          : {ov['af2_hallucination_rate']:.3f}")
+            print(f"    AF3 rate          : {ov['af3_hallucination_rate']:.3f}")
+            print(f"    Δ AF3 − AF2       : {ov['delta_af3_minus_af2']:+.3f}")
+
+    # 2. Rescue
+    c2 = summary.get("comparison_2_rescue", {})
+    print(f"\n── 2. DisorderNet rescue: AF3 vs AF2 ──")
+    if c2.get("insufficient_data"):
+        print("  Insufficient data.")
+    else:
+        print(f"  AF2 rescue rate     : {c2['af2_rescue_rate']:.3f}")
+        print(f"  AF3 rescue rate     : {c2['af3_rescue_rate']:.3f}")
+        print(f"  Δ rescue AF3 − AF2  : {c2['delta_rescue_af3_minus_af2']:+.3f}")
+        if c2.get("af2_disordernet_delta_auc") is not None:
+            print(f"  DisorderNet Δ AUC   : AF2 {c2['af2_disordernet_delta_auc']:+.4f}  "
+                  f"AF3 {c2['af3_disordernet_delta_auc']:+.4f}")
+        verdict = "YES" if c2.get("disordernet_rescue_better_on_af3") else "NO"
+        print(f"  Rescue stronger on AF3? {verdict}")
+        ov = c2.get("overlap")
+        if ov:
+            print(f"  Overlap Δ rescue    : {ov['delta_rescue_af3_minus_af2']:+.3f}")
+
+    # 3. Fusion lift
+    c3 = summary.get("comparison_3_fusion_lift", {})
+    print(f"\n── 3. Fusion lift vs pLDDT baseline (AF3 vs AF2) ──")
+    if c3.get("insufficient_data"):
+        print("  Insufficient data (need GPU fold_results + both pLDDT sources).")
+    else:
+        a2, a3 = c3["af2"], c3["af3"]
+        print(f"  AF2-covered residues: {a2['n_residues']:,} ({a2['n_proteins']} proteins)")
+        print(f"    pLDDT baseline AUC  : {a2['plddt_baseline_auc']:.4f}")
+        print(f"    Fused AUC           : {a2['fused_auc']:.4f}")
+        print(f"    Δ fused − pLDDT     : {a2['delta_fused_vs_plddt']:+.4f}")
+        print(f"  AF3-covered residues: {a3['n_residues']:,} ({a3['n_proteins']} proteins)")
+        print(f"    pLDDT baseline AUC  : {a3['plddt_baseline_auc']:.4f}")
+        print(f"    Fused AUC           : {a3['fused_auc']:.4f}")
+        print(f"    Δ fused − pLDDT     : {a3['delta_fused_vs_plddt']:+.4f}")
+        print(f"  Δ lift (AF3 − AF2)    : {c3['delta_lift_af3_minus_af2']:+.4f}  "
+              f"({'fusion helps more on AF3' if c3['fusion_beats_plddt_more_on_af3'] else 'fusion helps more on AF2'})")
+
+    print(f"{'═' * 64}")
+
+
+def save_af2_af3_breakthrough_summary(
+    summary: dict,
+    path: str = "af2_af3_breakthrough_summary.json",
+) -> str:
+    with open(path, "w") as f:
+        json.dump(summary, f, indent=2)
+    return path

@@ -7,7 +7,9 @@ import pytest
 
 from colab.af_hallucination import (
     compute_hallucination_metrics,
+    compute_fusion_lift_vs_plddt,
     compute_plddt_baseline_auc,
+    run_af2_af3_breakthrough_summary,
     run_af2_af3_comparison_report,
     run_af_rescue_report,
     save_af_rescue_report,
@@ -102,3 +104,78 @@ class TestAf2Af3Comparison:
         assert not cmp["insufficient_data"]
         assert cmp["delta_hallucination_af3_minus_af2"] == pytest.approx(-0.05)
         assert cmp["delta_rescue_af3_minus_af2"] == pytest.approx(0.1)
+
+
+class TestBreakthroughSummary:
+    def test_fusion_lift(self, sample_disprot_entries):
+        cfg = TrainConfig(min_seq_len=20, min_disorder=3, min_order=3)
+        proteins, _ = process_disprot(sample_disprot_entries, cfg)
+        if len(proteins) < 2:
+            pytest.skip("Need proteins")
+
+        n_folds = min(2, len(proteins))
+        from sklearn.model_selection import GroupKFold
+        gkf = GroupKFold(n_splits=n_folds)
+        groups = np.arange(len(proteins))
+        fold_results = []
+        for _, val_idx in gkf.split(groups, groups=groups):
+            val_proteins = [proteins[i] for i in val_idx]
+            labels = np.concatenate([np.array(p["labels"], dtype=np.float32) for p in val_proteins])
+            probs = np.clip(labels * 0.2 + 0.75 * (1 - labels), 0, 1).astype(np.float32)
+            fold_results.append({"val_probs": probs, "val_labels": labels})
+
+        plddt = {}
+        for p in proteins:
+            plddt[p["id"]] = np.where(
+                np.array(p["labels"]) == 1, 30.0, 85.0,
+            ).astype(np.float32)
+
+        lift = compute_fusion_lift_vs_plddt(
+            proteins, fold_results, plddt, fusion_alpha=0.5, n_folds=n_folds,
+        )
+        assert not lift["insufficient_data"]
+        assert lift["delta_fused_vs_plddt"] is not None
+
+    def test_breakthrough_summary_structure(self, sample_disprot_entries):
+        cfg = TrainConfig(min_seq_len=20, min_disorder=3, min_order=3)
+        proteins, _ = process_disprot(sample_disprot_entries, cfg)
+        if len(proteins) < 2:
+            pytest.skip("Need proteins")
+
+        n_folds = min(2, len(proteins))
+        from sklearn.model_selection import GroupKFold
+        gkf = GroupKFold(n_splits=n_folds)
+        groups = np.arange(len(proteins))
+        fold_results = []
+        for _, val_idx in gkf.split(groups, groups=groups):
+            val_proteins = [proteins[i] for i in val_idx]
+            labels = np.concatenate([np.array(p["labels"], dtype=np.float32) for p in val_proteins])
+            probs = np.clip(labels * 0.2 + 0.75 * (1 - labels), 0, 1).astype(np.float32)
+            fold_results.append({"val_probs": probs, "val_labels": labels})
+
+        plddt = {}
+        for p in proteins:
+            plddt[p["id"]] = np.where(
+                np.array(p["labels"]) == 1, 35.0, 80.0,
+            ).astype(np.float32)
+
+        af2 = run_af_rescue_report(proteins, fold_results, plddt, n_folds=n_folds)
+        af3 = run_af_rescue_report(
+            proteins, fold_results, plddt, n_folds=n_folds, source="AF3",
+        )
+        cmp = run_af2_af3_comparison_report(af2, af3)
+        summary = run_af2_af3_breakthrough_summary(
+            proteins=proteins,
+            fold_results_gpu=fold_results,
+            af2_report=af2,
+            af3_report=af3,
+            af2_af3_comparison=cmp,
+            plddt_af2_by_protein=plddt,
+            plddt_af3_by_protein=plddt,
+            fusion_alpha=0.5,
+            n_folds=n_folds,
+        )
+        assert "comparison_1_hallucination" in summary
+        assert "comparison_2_rescue" in summary
+        assert "comparison_3_fusion_lift" in summary
+        assert not summary["comparison_1_hallucination"]["insufficient_data"]
