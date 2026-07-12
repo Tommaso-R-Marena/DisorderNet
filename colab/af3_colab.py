@@ -141,6 +141,28 @@ def clone_alphafold3_repo(
         return False, f"git clone failed: {exc}"
 
 
+def ensure_alphafold3_docker_image(image: str = DEFAULT_DOCKER_IMAGE) -> tuple[bool, str]:
+    """Pull or verify the AF3 Docker image exists locally."""
+    try:
+        inspect = subprocess.run(
+            ["docker", "image", "inspect", image],
+            capture_output=True, text=True, timeout=30,
+        )
+        if inspect.returncode == 0:
+            return True, f"Docker image {image} ready"
+        pull = subprocess.run(
+            ["docker", "pull", image], capture_output=True, text=True, timeout=1800,
+        )
+        if pull.returncode == 0:
+            return True, f"Pulled {image}"
+        return False, (
+            f"Docker image {image} not found. Build per "
+            "https://github.com/google-deepmind/alphafold3/blob/main/docs/installation.md"
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        return False, str(exc)
+
+
 def docker_available() -> bool:
     """Check if Docker CLI is usable (Colab Pro may have it)."""
     try:
