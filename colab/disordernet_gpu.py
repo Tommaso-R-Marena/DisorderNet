@@ -122,6 +122,61 @@ def _label_boundary_mask(labels: list[int], radius: int = 2) -> list[float]:
     return core.astype(np.float32).tolist()
 
 
+def _hallucination_weight_mask(
+    labels: list[int],
+    plddt: Optional[np.ndarray],
+    cfg: TrainConfig,
+) -> list[float]:
+    """Upweight disordered residues with high AF pLDDT (hallucinated order)."""
+    n = len(labels)
+    if not cfg.use_hallucination_weighting or plddt is None or len(plddt) != n:
+        return [1.0] * n
+
+    weights: list[float] = []
+    threshold = cfg.high_plddt_threshold
+    hall_w = cfg.hallucination_weight
+    for i, lab in enumerate(labels):
+        if lab == 1 and not np.isnan(plddt[i]) and plddt[i] >= threshold:
+            weights.append(hall_w)
+        else:
+            weights.append(1.0)
+    return weights
+
+
+def _load_plddt_for_protein(protein: dict, cache_dir: str) -> Optional[np.ndarray]:
+    """Load cached AF pLDDT for training sample weights (cache-only)."""
+    from colab.af_plddt import load_cached_plddt
+
+    acc = protein.get("uniprot_acc", "")
+    if not acc:
+        return None
+    return load_cached_plddt(acc, protein["sequence"], cache_dir=cache_dir)
+
+
+def build_plddt_cache_for_training(
+    proteins: list,
+    cache_dir: str = "af_plddt_cache",
+    sleep_s: float = 0.05,
+) -> dict[str, np.ndarray]:
+    """
+    Pre-fetch AF pLDDT before CV so hallucination weighting can use the cache.
+
+    Safe to call even if cache already populated; only fetches missing entries.
+    """
+    from colab.af_plddt import fetch_plddt_batch
+
+    existing = {
+        p["id"]: plddt
+        for p in proteins
+        if (plddt := _load_plddt_for_protein(p, cache_dir)) is not None
+    }
+    missing = [p for p in proteins if p["id"] not in existing and p.get("uniprot_acc")]
+    if missing:
+        fetched = fetch_plddt_batch(missing, cache_dir=cache_dir, sleep_s=sleep_s)
+        existing.update(fetched)
+    return existing
+
+
 @dataclass
 class TrainConfig:
     """Hyperparameters with Colab-friendly defaults."""
@@ -166,6 +221,21 @@ class TrainConfig:
     # Performance toggles
     use_gradient_checkpointing: bool = True
     deterministic: bool = False  # False → cudnn.benchmark + TF32 for speed
+
+    # Segment-aware early stopping & post-processing
+    use_segment_early_stop: bool = True
+    auc_score_weight: float = 0.5
+    ap_score_weight: float = 0.3
+    segment_score_weight: float = 0.2
+    segment_min_region_len: int = 5
+    segment_postprocess_min_len: int = 5
+    segment_postprocess_max_gap: int = 3
+
+    # AF hallucination hard-negative weighting (disordered + high pLDDT)
+    use_hallucination_weighting: bool = True
+    hallucination_weight: float = 3.0
+    high_plddt_threshold: float = 70.0
+    af_plddt_cache_dir: str = "af_plddt_cache"
 
     # Set automatically by setup_environment()
     device: torch.device = field(default_factory=lambda: torch.device("cpu"))
@@ -757,10 +827,14 @@ class DisProtDataset(Dataset):
         batch_converter,
         cache: Optional[dict] = None,
         boundary_radius: int = 2,
+        cfg: Optional[TrainConfig] = None,
+        plddt_by_id: Optional[dict[str, np.ndarray]] = None,
     ):
         self.proteins = proteins
         self._cache = cache if cache is not None else {}
         self.boundary_radius = boundary_radius
+        self.cfg = cfg
+        self.plddt_by_id = plddt_by_id or {}
 
         missing = [p for p in proteins if p["id"] not in self._cache]
         if missing:
@@ -772,12 +846,27 @@ class DisProtDataset(Dataset):
                 is_boundary = [
                     1.0 if (boundary[i] or trans[i]) else 0.0 for i in range(len(labels))
                 ]
+
+                plddt = self.plddt_by_id.get(p["id"])
+                if plddt is None and self.cfg is not None:
+                    plddt = _load_plddt_for_protein(p, self.cfg.af_plddt_cache_dir)
+
+                hall_weights = (
+                    _hallucination_weight_mask(labels, plddt, self.cfg)
+                    if self.cfg is not None else [1.0] * len(labels)
+                )
+                boundary_weight = self.cfg.boundary_weight if self.cfg is not None else 1.0
+                sample_weight = [
+                    (1.0 + (boundary_weight - 1.0) * is_boundary[i]) * hall_weights[i]
+                    for i in range(len(labels))
+                ]
+
                 aa_idx = [AA_TO_IDX.get(c, 0) for c in p["sequence"]]
                 self._cache[p["id"]] = {
                     "tokens": tokens.squeeze(0),
                     "labels": torch.tensor(labels, dtype=torch.float32),
                     "aa_idx": torch.tensor(aa_idx, dtype=torch.long),
-                    "sample_weight": torch.tensor(is_boundary, dtype=torch.float32),
+                    "sample_weight": torch.tensor(sample_weight, dtype=torch.float32),
                 }
 
     def __len__(self) -> int:
@@ -854,8 +943,7 @@ def _disorder_loss(
         )
 
     if sample_weight is not None:
-        bw = 1.0 + (cfg.boundary_weight - 1.0) * sample_weight
-        loss = loss * bw
+        loss = loss * sample_weight
 
     return loss.mean()
 
@@ -932,6 +1020,7 @@ def train_fold(
     batch_converter,
     token_cache: dict,
     cfg: TrainConfig,
+    plddt_by_id: Optional[dict[str, np.ndarray]] = None,
     on_epoch_end: Optional[Callable[[dict], None]] = None,
 ) -> dict:
     """Train one CV fold. Returns metrics dict including best checkpoint path."""
@@ -945,10 +1034,12 @@ def train_fold(
     fold_model = DisorderNetGPU(esm_backbone, cfg, verbose=True).to(device)
 
     train_ds = DisProtDataset(
-        proteins_train, batch_converter, token_cache, boundary_radius=cfg.boundary_radius,
+        proteins_train, batch_converter, token_cache,
+        boundary_radius=cfg.boundary_radius, cfg=cfg, plddt_by_id=plddt_by_id,
     )
     val_ds = DisProtDataset(
-        proteins_val, batch_converter, token_cache, boundary_radius=cfg.boundary_radius,
+        proteins_val, batch_converter, token_cache,
+        boundary_radius=cfg.boundary_radius, cfg=cfg, plddt_by_id=plddt_by_id,
     )
 
     loader_kw = dict(
@@ -1048,6 +1139,21 @@ def train_fold(
 
         avg_train_loss = train_loss / max(n_batches, 1)
         val_metrics = eval_epoch(fold_model, val_dl, device, amp_dtype, pos_weight, cfg)
+
+        from colab.segment_postprocess import composite_early_stop_score, pooled_segment_f1
+
+        seg_f1 = 0.0
+        if cfg.use_segment_early_stop:
+            seg_f1 = pooled_segment_f1(
+                proteins_val,
+                val_metrics["probs"],
+                val_metrics["labels"],
+                min_region_len=cfg.segment_min_region_len,
+                postprocess_min_len=cfg.segment_postprocess_min_len,
+                postprocess_max_gap=cfg.segment_postprocess_max_gap,
+            )
+        val_metrics["segment_f1"] = seg_f1
+
         epoch_time = time.time() - epoch_t0
         elapsed = time.time() - fold_t0
         eta_h = (elapsed / (epoch + 1)) * (cfg.num_epochs - epoch - 1) / 3600
@@ -1060,13 +1166,24 @@ def train_fold(
             "val_ap": val_metrics["ap"],
             "val_f1": val_metrics["f1"],
             "val_mcc": val_metrics["mcc"],
+            "val_segment_f1": seg_f1,
             "lr_lora": optimizer.param_groups[0]["lr"],
             "lr_head": optimizer.param_groups[1]["lr"],
         }
         history.append(row)
 
         marker = ""
-        composite = 0.7 * val_metrics["auc"] + 0.3 * val_metrics["ap"]
+        if cfg.use_segment_early_stop:
+            composite = composite_early_stop_score(
+                val_metrics["auc"],
+                val_metrics["ap"],
+                seg_f1,
+                auc_weight=cfg.auc_score_weight,
+                ap_weight=cfg.ap_score_weight,
+                segment_weight=cfg.segment_score_weight,
+            )
+        else:
+            composite = 0.7 * val_metrics["auc"] + 0.3 * val_metrics["ap"]
         if composite > best_score:
             best_score = composite
             best_auc = val_metrics["auc"]
@@ -1084,7 +1201,7 @@ def train_fold(
             f"  Ep {epoch + 1:2d}/{cfg.num_epochs}  "
             f"loss={avg_train_loss:.4f}  val_loss={val_metrics['loss']:.4f}  "
             f"AUC={val_metrics['auc']:.4f}  AP={val_metrics['ap']:.4f}  "
-            f"F1={val_metrics['f1']:.4f}  "
+            f"F1={val_metrics['f1']:.4f}  SegF1={seg_f1:.4f}  "
             f"[{epoch_time:.0f}s, ETA {eta_h:.1f}h]{marker}"
         )
         print(msg)
@@ -1126,6 +1243,8 @@ def run_cross_validation(
     batch_converter,
     cfg: TrainConfig,
     resume_from_fold: int = 0,
+    plddt_by_id: Optional[dict[str, np.ndarray]] = None,
+    prefetch_af_plddt: bool = False,
     on_fold_complete: Optional[Callable[[dict], None]] = None,
     on_epoch_end: Optional[Callable[[dict], None]] = None,
 ) -> tuple[list, dict]:
@@ -1133,7 +1252,14 @@ def run_cross_validation(
     Run N-fold GroupKFold CV. Returns (fold_results, summary_dict).
 
     resume_from_fold: skip folds < this index (0-based) for Colab reconnect.
+    prefetch_af_plddt: fetch AF pLDDT cache before training (hallucination weights).
     """
+    if plddt_by_id is None and cfg.use_hallucination_weighting and prefetch_af_plddt:
+        print("Pre-fetching AF pLDDT for hallucination hard-negative weighting...")
+        plddt_by_id = build_plddt_cache_for_training(proteins, cache_dir=cfg.af_plddt_cache_dir)
+        n_cached = len(plddt_by_id)
+        print(f"  pLDDT available for {n_cached}/{len(proteins)} proteins")
+
     token_cache: dict = {}
     gkf = GroupKFold(n_splits=cfg.n_folds)
     groups = np.arange(len(proteins))
@@ -1160,6 +1286,7 @@ def run_cross_validation(
             batch_converter=batch_converter,
             token_cache=token_cache,
             cfg=cfg,
+            plddt_by_id=plddt_by_id,
             on_epoch_end=on_epoch_end,
         )
         fold_results.append(result)
