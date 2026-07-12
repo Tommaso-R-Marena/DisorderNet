@@ -287,7 +287,9 @@ class TrainConfig:
         }
         if profile not in presets:
             raise ValueError(f"Unknown profile '{profile}'. Choose: {list(presets)}")
-        return cls(**{**presets[profile], **overrides})
+        obj = cls(**{**presets[profile], **overrides})
+        obj._profile_name = profile  # type: ignore[attr-defined]
+        return obj
 
 
 # ---------------------------------------------------------------------------
@@ -565,6 +567,30 @@ def print_dataset_summary(proteins: list, skipped: Counter) -> tuple[int, int, f
             f"min={np.min(fracs):.3f}  max={np.max(fracs):.3f}"
         )
     return total_res, total_dis, frac_dis
+
+
+def print_training_config_summary(cfg: TrainConfig, proteins: Optional[list] = None) -> None:
+    """Print active training features and hyperparameters for Colab progress logs."""
+    print(f"\n{'─' * 55}")
+    print("  Training configuration")
+    print(f"{'─' * 55}")
+    print(f"  Profile            : {getattr(cfg, '_profile_name', 'custom')}")
+    print(f"  LoRA rank / layers : {cfg.lora_rank} / {cfg.lora_layers}")
+    print(f"  Epochs / patience  : {cfg.num_epochs} / {cfg.patience}")
+    print(f"  Batch × accum      : {cfg.batch_size} × {cfg.accum_steps} "
+          f"(effective {cfg.effective_batch()})")
+    print(f"  Physico features   : {cfg.use_physico_features} (dim={cfg.physico_dim})")
+    print(f"  Focal loss         : {cfg.use_focal_loss} (γ={cfg.focal_gamma})")
+    print(f"  Segment early-stop : {cfg.use_segment_early_stop} "
+          f"({cfg.auc_score_weight}·AUC + {cfg.ap_score_weight}·AP + "
+          f"{cfg.segment_score_weight}·SegF1)")
+    print(f"  Hallucination wt   : {cfg.use_hallucination_weighting} "
+          f"(×{cfg.hallucination_weight} @ pLDDT≥{cfg.high_plddt_threshold})")
+    if proteins is not None:
+        print(f"  Proteins / residues: {len(proteins):,} / "
+              f"{sum(p['length'] for p in proteins):,}")
+        print(f"  CV folds           : {cfg.n_folds}")
+    print(f"{'─' * 55}")
 
 
 # ---------------------------------------------------------------------------
@@ -1285,6 +1311,11 @@ def run_cross_validation(
 
     print(f"\nStarting {cfg.n_folds}-fold cross-validation on {len(proteins)} proteins")
     print(f"  Effective batch size: {cfg.effective_batch()}")
+    print_training_config_summary(cfg, proteins)
+    if plddt_by_id:
+        print(f"  AF pLDDT cache     : {len(plddt_by_id)} proteins (hallucination weighting)")
+    elif cfg.use_hallucination_weighting:
+        print("  AF pLDDT cache     : none (hallucination weights = boundary only)")
 
     for fold_idx, (train_idx, val_idx) in enumerate(gkf.split(groups, groups=groups)):
         if fold_idx < resume_from_fold:
