@@ -113,6 +113,20 @@ OUR_DISPROT_CPU_V6 = {
     "results_file": "results_v6/metrics.json",
 }
 
+OUR_DISPROT_GPU_BASELINE = {
+    "method": "DisorderNet GPU (ESM-2 650M + LoRA)",
+    "auc": 0.817,
+    "ap": None,
+    "f1_max": None,
+    "mcc": None,
+    "source": "This repo (Colab A100)",
+    "protocol": "DisProt, 5-fold protein-grouped CV, ESM-2 650M + LoRA v2",
+    "comparable_to_ours": True,
+    "status": "verified_colab_run",
+    "results_file": "disordernet_gpu_results_*.json",
+    "notes": "Pooled OOF AUC; AF-fusion subset ~0.831 on AF-covered residues",
+}
+
 OUR_DISPROT_GPU_TEMPLATE = {
     "method": "DisorderNet GPU (ESM-2 650M + LoRA)",
     "auc": None,

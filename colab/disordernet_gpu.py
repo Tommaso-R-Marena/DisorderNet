@@ -153,6 +153,22 @@ def _load_plddt_for_protein(protein: dict, cache_dir: str) -> Optional[np.ndarra
     return load_cached_plddt(acc, protein["sequence"], cache_dir=cache_dir)
 
 
+def merge_plddt_for_training(
+    plddt_af2: Optional[dict[str, np.ndarray]] = None,
+    plddt_af3: Optional[dict[str, np.ndarray]] = None,
+    prefer_af3: bool = True,
+) -> dict[str, np.ndarray]:
+    """Merge AF2/AF3 pLDDT caches for hallucination weighting (AF3 preferred)."""
+    from colab.inference_fusion import build_combined_plddt_map
+
+    combined, _ = build_combined_plddt_map(
+        plddt_af2 or {},
+        plddt_af3,
+        prefer="af3" if prefer_af3 else "af2",
+    )
+    return combined
+
+
 def build_plddt_cache_for_training(
     proteins: list,
     cache_dir: str = "af_plddt_cache",

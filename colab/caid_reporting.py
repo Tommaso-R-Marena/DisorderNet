@@ -195,11 +195,11 @@ def run_per_fold_caid_report(
 ) -> dict:
     """Per-fold CAID metrics for stability reporting."""
     folds = []
-    for r in fold_results:
+    for i, r in enumerate(fold_results):
         labels = np.asarray(r["val_labels"], dtype=np.int8)
         probs = np.asarray(r["val_probs"], dtype=np.float32)
         m = compute_caid_metrics(labels, probs, threshold=threshold)
-        m["fold"] = r["fold"]
+        m["fold"] = r.get("fold", i + 1)
         folds.append(m)
 
     aucs = [f["auc"] for f in folds if f.get("auc") is not None]
@@ -223,12 +223,26 @@ def run_full_caid_report(
     fold_results: list,
     threshold: float = 0.5,
     n_folds: int = 5,
+    include_segment_f1: bool = True,
+    apply_postprocess: bool = True,
 ) -> dict:
-    """Complete CAID-style report: pooled + stratified + per-fold."""
-    return {
+    """Complete CAID-style report: pooled + stratified + per-fold + segment F1."""
+    report = {
         "stratified": run_stratified_caid_report(proteins, fold_results, threshold, n_folds),
         "per_fold": run_per_fold_caid_report(fold_results, threshold),
     }
+    if include_segment_f1:
+        from colab.segment_postprocess import pooled_segment_f1
+
+        all_probs = np.concatenate([r["val_probs"] for r in fold_results])
+        all_labels = np.concatenate([r["val_labels"] for r in fold_results])
+        seg_f1 = pooled_segment_f1(
+            proteins, all_probs, all_labels,
+            threshold=threshold,
+            apply_postprocess=apply_postprocess,
+        )
+        report["segment_f1_postprocessed"] = float(seg_f1)
+    return report
 
 
 def print_caid_report(report: dict) -> None:
@@ -248,6 +262,9 @@ def print_caid_report(report: dict) -> None:
     print(f"    AP      : {pooled['ap']:.4f}")
     print(f"    F1_max  : {pooled['f1_max']:.4f}  (t={pooled['threshold_at_f1_max']:.3f})")
     print(f"    MCC@F1* : {pooled['mcc_at_f1_max']:.4f}")
+    seg = report.get("segment_f1_postprocessed")
+    if seg is not None:
+        print(f"    Seg F1* : {seg:.4f}  (post-processed regions)")
 
     pf = report.get("per_fold", {}).get("summary", {})
     if pf.get("mean_auc") is not None:
