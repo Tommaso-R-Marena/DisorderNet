@@ -17,8 +17,6 @@ from sklearn.metrics import (
     matthews_corrcoef,
     roc_auc_score,
 )
-from sklearn.model_selection import GroupKFold
-
 from colab.biological_utility import align_fold_predictions
 
 # Stratification bins (CAID-style reporting)
@@ -218,6 +216,52 @@ def run_per_fold_caid_report(
     }
 
 
+def run_per_fold_threshold_report(
+    fold_results: list,
+    fixed_threshold: float = 0.5,
+) -> dict:
+    """
+    Per-fold threshold metrics: optimize threshold on each fold's val set only.
+
+    Pooled F1@0.5 is unbiased; mean per-fold F1@fold-opt summarizes fold-local
+  performance without pooling threshold optimization across OOF residues.
+    """
+    per_fold = []
+    for i, r in enumerate(fold_results):
+        labels = np.asarray(r["val_labels"], dtype=np.int8)
+        probs = np.asarray(r["val_probs"], dtype=np.float32)
+        f1m = compute_f1_max(labels, probs)
+        t_opt = f1m["threshold_at_f1_max"] if f1m["f1_max"] is not None else fixed_threshold
+        m_fixed = compute_caid_metrics(labels, probs, threshold=fixed_threshold)
+        m_opt = compute_caid_metrics(labels, probs, threshold=t_opt)
+        per_fold.append({
+            "fold": r.get("fold", i + 1),
+            "f1_at_fixed": m_fixed.get("f1_at_threshold"),
+            "mcc_at_fixed": m_fixed.get("mcc_at_threshold"),
+            "f1_at_fold_opt": m_opt.get("f1_at_threshold"),
+            "mcc_at_fold_opt": m_opt.get("mcc_at_threshold"),
+            "threshold_fold_opt": t_opt,
+            "auc": m_fixed.get("auc"),
+            "f1_max": f1m.get("f1_max"),
+        })
+
+    def _mean(key: str) -> Optional[float]:
+        vals = [f[key] for f in per_fold if f.get(key) is not None]
+        return float(np.mean(vals)) if vals else None
+
+    return {
+        "fixed_threshold": float(fixed_threshold),
+        "per_fold": per_fold,
+        "summary": {
+            "mean_f1_at_fixed": _mean("f1_at_fixed"),
+            "mean_mcc_at_fixed": _mean("mcc_at_fixed"),
+            "mean_f1_at_fold_opt": _mean("f1_at_fold_opt"),
+            "mean_mcc_at_fold_opt": _mean("mcc_at_fold_opt"),
+            "n_folds": len(per_fold),
+        },
+    }
+
+
 def run_full_caid_report(
     proteins: list,
     fold_results: list,
@@ -230,17 +274,23 @@ def run_full_caid_report(
     report = {
         "stratified": run_stratified_caid_report(proteins, fold_results, threshold, n_folds),
         "per_fold": run_per_fold_caid_report(fold_results, threshold),
+        "per_fold_threshold": run_per_fold_threshold_report(fold_results, fixed_threshold=threshold),
     }
     if include_segment_f1:
         from colab.segment_postprocess import pooled_segment_f1
 
-        all_probs = np.concatenate([r["val_probs"] for r in fold_results])
-        all_labels = np.concatenate([r["val_labels"] for r in fold_results])
-        seg_f1 = pooled_segment_f1(
-            proteins, all_probs, all_labels,
-            threshold=threshold,
-            apply_postprocess=apply_postprocess,
-        )
+        aligned = align_fold_predictions(proteins, fold_results, n_folds=n_folds)
+        if aligned:
+            proteins_ordered = [item["protein"] for item in aligned]
+            all_probs = np.concatenate([item["probs"] for item in aligned])
+            all_labels = np.concatenate([item["labels"] for item in aligned])
+            seg_f1 = pooled_segment_f1(
+                proteins_ordered, all_probs, all_labels,
+                threshold=threshold,
+                apply_postprocess=apply_postprocess,
+            )
+        else:
+            seg_f1 = 0.0
         report["segment_f1_postprocessed"] = float(seg_f1)
     return report
 
@@ -262,9 +312,18 @@ def print_caid_report(report: dict) -> None:
     print(f"    AP      : {pooled['ap']:.4f}")
     print(f"    F1_max  : {pooled['f1_max']:.4f}  (t={pooled['threshold_at_f1_max']:.3f})")
     print(f"    MCC@F1* : {pooled['mcc_at_f1_max']:.4f}")
+    print(f"    F1@0.5  : {pooled['f1_at_threshold']:.4f}  MCC@0.5={pooled['mcc_at_threshold']:.4f}")
     seg = report.get("segment_f1_postprocessed")
     if seg is not None:
         print(f"    Seg F1* : {seg:.4f}  (post-processed regions)")
+
+    pft = report.get("per_fold_threshold", {}).get("summary", {})
+    if pft.get("mean_f1_at_fixed") is not None:
+        print(
+            f"\n  Per-fold thresholds (unbiased): "
+            f"F1@0.5={pft['mean_f1_at_fixed']:.4f}  "
+            f"mean fold-opt F1={pft.get('mean_f1_at_fold_opt', 0):.4f}"
+        )
 
     pf = report.get("per_fold", {}).get("summary", {})
     if pf.get("mean_auc") is not None:

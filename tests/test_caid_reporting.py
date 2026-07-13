@@ -86,5 +86,35 @@ class TestStratifiedReport:
 
         full = run_full_caid_report(proteins, fold_results, n_folds=n_folds)
         assert "per_fold" in full
+        assert "per_fold_threshold" in full
         path = save_caid_report(full, str(tmp_path / "caid.json"))
         assert (tmp_path / "caid.json").exists()
+
+    def test_segment_f1_matches_aligned_oof_order(self, sample_disprot_entries):
+        """Segment F1 must aggregate aligned OOF predictions, not fold-concat order."""
+        from colab.biological_utility import align_fold_predictions
+        from colab.segment_postprocess import pooled_segment_f1
+
+        cfg = TrainConfig(min_seq_len=20, min_disorder=3, min_order=3)
+        proteins, _ = process_disprot(sample_disprot_entries, cfg)
+        if len(proteins) < 2:
+            pytest.skip("Need proteins")
+
+        from colab.cv_splits import get_cv_splits
+
+        n_folds = min(2, len(proteins))
+        splits = get_cv_splits(proteins, n_folds)
+        fold_results = []
+        for _, val_idx in splits:
+            val_proteins = [proteins[i] for i in val_idx]
+            labels = np.concatenate([np.array(p["labels"], dtype=np.float32) for p in val_proteins])
+            probs = np.clip(labels * 0.3 + 0.5, 0, 1).astype(np.float32)
+            fold_results.append({"fold": len(fold_results) + 1, "val_probs": probs, "val_labels": labels})
+
+        full = run_full_caid_report(proteins, fold_results, n_folds=n_folds)
+        aligned = align_fold_predictions(proteins, fold_results, n_folds=n_folds)
+        proteins_ordered = [item["protein"] for item in aligned]
+        all_probs = np.concatenate([item["probs"] for item in aligned])
+        all_labels = np.concatenate([item["labels"] for item in aligned])
+        expected = pooled_segment_f1(proteins_ordered, all_probs, all_labels)
+        assert full["segment_f1_postprocessed"] == pytest.approx(expected)

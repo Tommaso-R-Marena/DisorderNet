@@ -13,7 +13,7 @@ from typing import Optional
 
 import numpy as np
 from sklearn.metrics import roc_auc_score
-from sklearn.model_selection import GroupKFold
+from colab.cv_splits import get_cv_splits
 
 from colab.af_plddt import plddt_to_disorder_score
 
@@ -83,6 +83,36 @@ def sign_test_two_sided(n_positive: int, n_negative: int) -> dict:
     }
 
 
+def wilcoxon_signed_rank_test(deltas: list[float]) -> dict:
+    """
+    Wilcoxon signed-rank test on paired per-fold AUC deltas (DisorderNet − baseline).
+
+    More powerful than the sign test when fold deltas vary in magnitude.
+    """
+    deltas = [d for d in deltas if d != 0]
+    n = len(deltas)
+    if n < 2:
+        return {"p_value": None, "n_nonzero": n, "insufficient_data": True}
+    try:
+        from scipy.stats import wilcoxon
+
+        stat, p = wilcoxon(deltas, alternative="greater", zero_method="wilcox")
+        return {
+            "p_value": float(p),
+            "statistic": float(stat),
+            "n_nonzero": n,
+            "insufficient_data": False,
+            "favors": "disordernet" if sum(deltas) > 0 else "baseline",
+        }
+    except ImportError:
+        return {
+            "p_value": None,
+            "n_nonzero": n,
+            "insufficient_data": True,
+            "note": "scipy not available",
+        }
+
+
 def run_per_fold_paired_comparison(
     proteins: list,
     fold_results: list,
@@ -92,11 +122,10 @@ def run_per_fold_paired_comparison(
     """
     Per-fold AUC: DisorderNet vs inverse-pLDDT on AF-covered validation residues.
     """
-    gkf = GroupKFold(n_splits=n_folds)
-    groups = np.arange(len(proteins))
+    splits = get_cv_splits(proteins, n_folds)
     fold_rows = []
 
-    for fold_idx, (_, val_idx) in enumerate(gkf.split(groups, groups=groups)):
+    for fold_idx, (_, val_idx) in enumerate(splits):
         if fold_idx >= len(fold_results):
             break
 
@@ -163,7 +192,9 @@ def run_per_fold_paired_comparison(
     deltas = [r["delta_auc"] for r in valid_rows]
     n_pos = sum(1 for d in deltas if d > 0)
     n_neg = sum(1 for d in deltas if d < 0)
+    n_ties = sum(1 for d in deltas if d == 0)
     sign = sign_test_two_sided(n_pos, n_neg)
+    wilcoxon = wilcoxon_signed_rank_test(deltas)
 
     bootstrap_fold = None
     if len(deltas) >= 2:
@@ -177,8 +208,10 @@ def run_per_fold_paired_comparison(
             "std_delta_auc": float(np.std(deltas)) if deltas else None,
             "median_delta_auc": float(np.median(deltas)) if deltas else None,
             "all_folds_positive": n_pos == len(deltas) if deltas else False,
+            "n_ties": n_ties,
         },
         "sign_test_disordernet_vs_plddt": sign,
+        "wilcoxon_disordernet_vs_plddt": wilcoxon,
         "bootstrap_mean_delta_auc": bootstrap_fold,
         "comparison": "DisorderNet vs inverse-pLDDT (AF-covered val residues per fold)",
     }
@@ -251,7 +284,11 @@ def print_statistical_validation(report: dict) -> None:
         sign = paired.get("sign_test_disordernet_vs_plddt", {})
         if not sign.get("insufficient_data"):
             print(f"  Sign test : p={sign['p_value']:.4f}  "
-                  f"({sign['n_positive']} folds DN wins, {sign['n_negative']} baseline wins)")
+                  f"({sign['n_positive']} folds DN wins, {sign['n_negative']} baseline wins, "
+                  f"{s.get('n_ties', 0)} ties)")
+        wilcox = paired.get("wilcoxon_disordernet_vs_plddt", {})
+        if wilcox and not wilcox.get("insufficient_data") and wilcox.get("p_value") is not None:
+            print(f"  Wilcoxon  : p={wilcox['p_value']:.4f}  (n={wilcox['n_nonzero']} non-zero deltas)")
         boot = paired.get("bootstrap_mean_delta_auc", {})
         if boot and boot.get("ci_low") is not None:
             print(f"  Δ AUC 95% CI: [{boot['ci_low']:+.4f}, {boot['ci_high']:+.4f}]")

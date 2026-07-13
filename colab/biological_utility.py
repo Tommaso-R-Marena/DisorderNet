@@ -20,7 +20,7 @@ from sklearn.metrics import (
     matthews_corrcoef,
     roc_auc_score,
 )
-from sklearn.model_selection import GroupKFold
+from colab.cv_splits import get_cv_splits
 
 from colab.disordernet_gpu import FUNCTIONAL_TERM_GROUPS
 
@@ -277,11 +277,10 @@ def align_fold_predictions(
 
     Returns list of dicts with keys: id, labels, probs, preds, protein, fold.
     """
-    gkf = GroupKFold(n_splits=n_folds)
-    groups = np.arange(len(proteins))
+    splits = get_cv_splits(proteins, n_folds)
     aligned: list[dict] = []
 
-    for fold_idx, (_, val_idx) in enumerate(gkf.split(groups, groups=groups)):
+    for fold_idx, (_, val_idx) in enumerate(splits):
         if fold_idx >= len(fold_results):
             break
         val_proteins = [proteins[i] for i in val_idx]

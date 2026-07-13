@@ -10,6 +10,7 @@ from colab.statistical_validation import (
     run_full_statistical_validation,
     run_per_fold_paired_comparison,
     sign_test_two_sided,
+    wilcoxon_signed_rank_test,
 )
 
 
@@ -22,6 +23,18 @@ class TestSignTest:
         r = sign_test_two_sided(5, 0)
         assert r["p_value"] < 0.1
         assert r["favors"] == "a"
+
+
+class TestWilcoxon:
+    def test_positive_deltas(self):
+        r = wilcoxon_signed_rank_test([0.05, 0.03, 0.02, 0.04, 0.01])
+        if not r.get("insufficient_data"):
+            assert r["p_value"] is not None
+            assert r["p_value"] < 0.1
+
+    def test_insufficient_data(self):
+        r = wilcoxon_signed_rank_test([0.01])
+        assert r["insufficient_data"]
 
 
 class TestCvStability:
