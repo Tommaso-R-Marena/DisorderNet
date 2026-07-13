@@ -66,6 +66,7 @@ AlphaFold 3's diffusion architecture hallucinates structure in genuinely disorde
 | GPU (Colab) | 0.817 (0.831 AF-fusion subset) | 1280+phys | ESM-2 650M + LoRA + segment-aware ES + v6 ensemble |
 | GPU SOTA track (`sota` profile) | target ≥0.88–0.90 | — | Transformer head, Dice+EMA, 3-way stack, compact ckpt |
 | GPU ULTRA track (`ultra` profile) | target 0.88–0.92 | — | Rich features, FFN LoRA, v6-pro meta-stack, MC-dropout TTA |
+| GPU ULTRA 3B (`ultra3b` profile) | target 0.90–0.93 | — | ESM-2 3B backbone on A100 40GB+ |
 
 ### Performance ceiling (honest)
 
@@ -75,10 +76,25 @@ On **DisProt 5-fold CV** with ESM-2 650M, the realistic band is:
 |-------|-------------------|
 | Verified GPU baseline | 0.817 |
 | + ultra training + 7b–7d stack | 0.88–0.92 (target) |
+| + ESM-2 3B (`ultra3b`) + full stack | 0.90–0.93 (target) |
 | + multi-seed blend (2–3 seeds) | +0.005–0.015 |
 | ESMDisPred (CAID3, different protocol) | 0.895 reference |
 
-Breaking **0.90+ consistently** on DisProt likely needs **backbone upgrade** (ESM-2 3B / ESM-C) or **CAID3-homologous training** — not more post-hoc stacking alone. Use the [Quick Screen notebook](colab/DisorderNet_Colab_QuickScreen.ipynb) before a full ultra run.
+Breaking **0.90+ consistently** on DisProt likely needs **ESM-2 3B** (`ultra3b`) or **CAID3-homologous training** — not more post-hoc stacking on 650M alone. Use the [Quick Screen notebook](colab/DisorderNet_Colab_QuickScreen.ipynb) before a full ultra run.
+
+### Backbone upgrade — what to do
+
+| Step | Action | Notebook | Settings | ~Time (A100) |
+|------|--------|----------|----------|--------------|
+| 1 | Go/no-go | [Quick Screen](colab/DisorderNet_Colab_QuickScreen.ipynb) | `SCREEN_MODE="standard"`, `SCREEN_BACKBONE="650M"` | 2–3 h |
+| 2 | Full 650M ultra (if screen ≥ MODERATE) | [Colab Pro](colab/DisorderNet_Colab_Pro.ipynb) | `QUALITY_PROFILE="ultra"` | 18–24 h |
+| 3 | **3B paradigm test** | Quick Screen | `SCREEN_BACKBONE="3B"`, `SCREEN_MODE="paradigm"` | 8–12 h |
+| 4 | **Full 3B production** | Colab Pro | `QUALITY_PROFILE="ultra3b"`, `ESM_BACKBONE="3B"` | 30–40 h |
+| 5 | Multi-seed (optional) | Colab Pro Cell 7e | seeds 42 + 43 | 2× step 4 |
+
+**Colab for 3B:** Runtime → **A100 40GB** + **High RAM**. Run `!pip install -q lightgbm xgboost`. **Do not use T4** for 3B.
+
+**Decision rule:** If step 2 stacked AUC **< 0.87**, skip another 650M run and do step 3. If step 3 stacked AUC **≥ 0.86**, commit to step 4.
 
 ### SOTA track (`QUALITY_PROFILE = "sota"`)
 
@@ -223,7 +239,7 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/DisorderNet_Colab_QuickScreen.ipynb` | **Quick breakthrough screen** (~2–3h go/no-go before full CV) — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_QuickScreen.ipynb) |
 | `colab/DisorderNet_Colab_Pro.ipynb` | Full GPU notebook (ESM-2 650M + LoRA) — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb) |
 | `colab/quick_screen.py` | Quick screen logic (stratified subsample, verdict tiers) |
-| `colab/inference_tta.py` | MC-dropout test-time augmentation (ultra Cell 7d) |
+| `colab/esm_backbone.py` | ESM-2 backbone registry (650M → 3B) + VRAM batch presets |
 | `colab/multi_seed_blend.py` | Optional multi-seed OOF average (Cell 7e) |
 | `colab/disordernet_gpu.py` | Colab training module (data, model, CV loop) |
 | `colab/cv_splits.py` | Shared deterministic GroupKFold splits + fingerprints |

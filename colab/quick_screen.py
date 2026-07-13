@@ -43,7 +43,9 @@ SCREEN_MODES: dict[str, dict[str, Any]] = {
         "n_proteins": 350,
         "n_folds": 3,
         "train_profile": "screen_plus",
+        "train_profile_3b": "ultra3b",
         "description": "~4–6 h A100 — mini-ultra paradigm fidelity",
+        "description_3b": "~8–12 h A100 40GB — ESM-2 3B paradigm screen",
     },
 }
 
@@ -219,6 +221,7 @@ def run_paradigm_quick_screen(
     seed: int = 42,
     run_ensemble: bool = True,
     use_v6_pro: bool = True,
+    backbone: str = "650M",
     checkpoint_subdir: str = "quick_screen",
 ) -> dict:
     """
@@ -230,6 +233,13 @@ def run_paradigm_quick_screen(
         raise ValueError(f"Unknown screen mode '{mode}'. Choose: {list(SCREEN_MODES)}")
 
     spec = SCREEN_MODES[mode]
+    train_profile = spec["train_profile"]
+    if backbone.upper() in ("3B", "ESM2_3B") and "train_profile_3b" in spec:
+        train_profile = spec["train_profile_3b"]
+        print(f"  Backbone: ESM-2 3B (profile={train_profile})", flush=True)
+    else:
+        print(f"  Backbone: ESM-2 {backbone}", flush=True)
+
     screen_t0 = time.time()
 
     print(f"\n{'═' * 64}")
@@ -251,10 +261,11 @@ def run_paradigm_quick_screen(
     from colab.disordernet_gpu import TrainConfig, run_cross_validation
 
     screen_cfg = TrainConfig.from_profile(
-        spec["train_profile"],
+        train_profile,
         seed=seed,
         n_folds=spec["n_folds"],
-        checkpoint_dir=f"{cfg.checkpoint_dir}/{checkpoint_subdir}_{mode}",
+        esm_backbone=backbone,
+        checkpoint_dir=f"{cfg.checkpoint_dir}/{checkpoint_subdir}_{mode}_{backbone}",
     )
     screen_cfg.device = cfg.device
     screen_cfg.amp_dtype = cfg.amp_dtype
@@ -336,8 +347,9 @@ def run_paradigm_quick_screen(
         "mode": mode,
         "mode_spec": spec,
         "sample": sample_meta,
+        "backbone": backbone,
         "v6_pro_ensemble": use_v6_pro,
-        "screen_profile": spec["train_profile"],
+        "screen_profile": train_profile,
         "gpu": {
             "pooled_auc": float(gpu_auc),
             "pooled_ap": float(gpu_metrics["ap"]),

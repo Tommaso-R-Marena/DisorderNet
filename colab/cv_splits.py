@@ -64,6 +64,8 @@ _FINGERPRINT_KEYS = (
     "lora_on_ffn",
     "unfreeze_last_layers",
     "head_type",
+    "esm_backbone",
+    "esm_embed_dim",
 )
 
 
