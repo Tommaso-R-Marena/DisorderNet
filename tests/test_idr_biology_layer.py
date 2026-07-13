@@ -17,7 +17,7 @@ from colab.boltz_plddt import (  # noqa: E402
     load_boltz_structure_features,
     load_boltz_variance_for_protein,
 )
-from colab.function_predict import split_function_oof_by_lengths  # noqa: E402
+from colab.function_predict import split_function_oof_by_lengths, tune_function_threshold  # noqa: E402
 from colab.idr_biology_layer import (  # noqa: E402
     LAYER_VERSION,
     build_idr_layer_package,
@@ -28,6 +28,7 @@ from colab.idr_biology_layer import (  # noqa: E402
     evaluate_role_calls_against_annotations,
     export_idr_disorder_bedgraph,
     export_idr_layer_bed,
+    export_idr_layer_bundle,
     export_idr_layer_jsonl,
     export_idr_triage_tsv,
     score_protein_triage,
@@ -38,6 +39,11 @@ from colab.idr_layer_io import (  # noqa: E402
     load_ligand_map,
     load_partner_map,
     partner_binding_support,
+)
+from colab.idr_layer_ops import (  # noqa: E402
+    compare_idr_layer_jsonl,
+    proteome_landscape_summary,
+    write_idr_layer_markdown,
 )
 from rockfish.run_disordernet import build_parser  # noqa: E402
 
@@ -70,7 +76,7 @@ class TestIdrBiologyLayer:
             boltz_plddt_std=np.linspace(1, 20, 40).astype(np.float32),
         )
         assert rec["layer_version"] == LAYER_VERSION
-        assert LAYER_VERSION.startswith("1.3")
+        assert LAYER_VERSION.startswith("1.4")
         assert rec["n_idr_segments"] >= 1
         roles = {r["group"] for s in rec["idr_segments"] for r in s["predicted_roles"]}
         assert "protein binding" in roles
@@ -276,6 +282,56 @@ class TestIdrBiologyLayer:
         lig_path.write_text(json.dumps({"p1": ["nucleotide"]}))
         assert load_ligand_map(str(lig_path))["p1"][0]["type"] == "nucleic"
 
+    def test_v14_cache_tune_compare_markdown(self, tmp_path):
+        proteins = [{
+            "id": "p1",
+            "sequence": "A" * 20,
+            "length": 20,
+            "uniprot_acc": "U1",
+            "functional_regions": [
+                {"start": 1, "end": 10, "term_norm": "protein binding"},
+            ],
+        }]
+        preds = {"p1": np.array([0.9] * 12 + [0.1] * 8, dtype=np.float32)}
+        fn = np.zeros((20, 5), dtype=np.float32)
+        fn[:10, 0] = 0.9
+        cache = tmp_path / "cache"
+        pkg1 = build_idr_layer_package(
+            proteins, preds, function_probs_by_id={"p1": fn},
+            cache_dir=str(cache), max_workers=1,
+        )
+        assert pkg1["report"]["cache"]["hits"] == 0
+        assert pkg1["report"]["landscape"]["n_proteins"] == 1
+        pkg2 = build_idr_layer_package(
+            proteins, preds, function_probs_by_id={"p1": fn},
+            cache_dir=str(cache), max_workers=1,
+        )
+        assert pkg2["report"]["cache"]["hits"] == 1
+
+        yt = np.zeros((100, 5), dtype=np.float32)
+        yt[:30, 0] = 1
+        yp = yt.copy()
+        yp[:30, 0] = 0.75
+        yp[30:, 0] = 0.2
+        tune = tune_function_threshold(yt, yp)
+        assert tune["enabled"] is True
+
+        paths = export_idr_layer_bundle(
+            out_dir=str(tmp_path / "out"),
+            report=pkg1["report"],
+            records=pkg1["records"],
+            proteins=proteins,
+            disorder_probs_by_id=preds,
+        )
+        assert Path(paths["markdown"]).exists()
+        assert "DisorderNet" in Path(paths["markdown"]).read_text()
+        assert Path(paths["caid_dir"]).is_dir()
+        cmp = compare_idr_layer_jsonl(paths["jsonl"], paths["jsonl"])
+        assert cmp["n_shared"] == 1
+        assert abs(cmp["mean_abs_triage_delta"]) < 1e-9
+        land = proteome_landscape_summary(pkg1["records"])
+        assert land["n_proteins_with_roles"] >= 1
+
     def test_export_idr_layer_and_diffusion_samples(self):
         args = build_parser().parse_args([
             "predict", "--fasta", "q.fa",
@@ -286,11 +342,13 @@ class TestIdrBiologyLayer:
             "--idr-preds-dir", "preds",
             "--idr-workers", "8",
             "--idr-gzip",
+            "--idr-auto-threshold",
+            "--idr-cache",
+            "--idr-compare", "old.jsonl",
         ])
-        assert args.export_idr_layer is True
-        assert args.idr_ligands == "ligands.json"
-        assert args.idr_workers == 8
-        assert args.idr_gzip is True
+        assert args.idr_auto_threshold is True
+        assert args.idr_cache is True
+        assert args.idr_compare == "old.jsonl"
 
 
 class TestBoltzVariance:
@@ -380,6 +438,8 @@ class TestIdrLayerCLI:
             "--idr-workers", "8",
             "--idr-gzip",
             "--idr-disorder-threshold", "0.55",
+            "--idr-auto-threshold",
+            "--idr-cache",
         ])
         assert args.export_idr_layer is True
         assert args.boltz_diffusion_samples == 7
@@ -387,3 +447,5 @@ class TestIdrLayerCLI:
         assert args.idr_workers == 8
         assert args.idr_gzip is True
         assert abs(args.idr_disorder_threshold - 0.55) < 1e-9
+        assert args.idr_auto_threshold is True
+        assert args.idr_cache is True

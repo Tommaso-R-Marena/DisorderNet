@@ -441,13 +441,16 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
     # Function OOF shares the full-sequence pad-mask stream with disorder (same lengths).
     function_by_id: dict = {}
     function_oof_metrics = None
+    function_threshold = float(getattr(args, "idr_function_threshold", 0.5))
+    threshold_tuning = None
     try:
         from colab.function_predict import (
             align_function_oof,
             run_function_prediction_report,
             split_function_oof_by_lengths,
+            tune_function_threshold,
         )
-        _, y_prob, fn_protein_ids = align_function_oof(
+        y_true, y_prob, fn_protein_ids = align_function_oof(
             proteins, fold_results, n_folds=cfg.n_folds,
         )
         total_L = sum(len(item["probs"]) for item in aligned)
@@ -472,6 +475,14 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
             function_oof_metrics = run_function_prediction_report(
                 proteins, fold_results, n_folds=cfg.n_folds,
             )
+            if getattr(args, "idr_auto_threshold", False) and len(y_true) > 0:
+                threshold_tuning = tune_function_threshold(y_true, y_prob)
+                if threshold_tuning.get("enabled"):
+                    function_threshold = float(threshold_tuning["threshold"])
+                    print(
+                        f"  OOF-tuned function threshold → {function_threshold} "
+                        f"(score={threshold_tuning.get('best_score')})"
+                    )
     except Exception as exc:
         print(f"  Function OOF not attached to layer: {exc}")
 
@@ -513,6 +524,10 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
         except Exception as exc:
             print(f"  AF2 pLDDT fallback skipped: {exc}")
 
+    cache_dir = getattr(args, "idr_cache_dir", None)
+    if cache_dir is None and getattr(args, "idr_cache", False):
+        cache_dir = os.path.join(ckpt, "idr_layer_cache")
+
     package = build_idr_layer_package(
         proteins,
         disorder_by_id,
@@ -522,14 +537,18 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
         partners_by_id=partners_by_id,
         ligands_by_id=ligands_by_id,
         disorder_threshold=getattr(args, "idr_disorder_threshold", 0.5),
-        function_threshold=getattr(args, "idr_function_threshold", 0.5),
+        function_threshold=function_threshold,
         structure_source=structure_source,
         max_proteins_in_summary=getattr(args, "idr_layer_max_proteins", 100),
         max_workers=getattr(args, "idr_workers", 4),
+        cache_dir=cache_dir,
     )
     report, full_records = package["report"], package["records"]
     if function_oof_metrics is not None:
         report["function_oof_metrics"] = function_oof_metrics
+    if threshold_tuning is not None:
+        report["function_threshold_tuning"] = threshold_tuning
+        report["thresholds"]["function_threshold"] = function_threshold
     print_idr_layer_report(report)
     paths = export_idr_layer_bundle(
         out_dir=ckpt,
@@ -538,7 +557,20 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
         proteins=proteins,
         disorder_probs_by_id=disorder_by_id,
         gzip_jsonl=getattr(args, "idr_gzip", False),
+        export_caid=not getattr(args, "idr_no_caid", False),
     )
+    compare_path = getattr(args, "idr_compare", None)
+    if compare_path:
+        from colab.idr_layer_ops import compare_idr_layer_jsonl
+        cmp = compare_idr_layer_jsonl(compare_path, paths["jsonl"])
+        cmp_out = os.path.join(ckpt, "idr_biology_layer_compare.json")
+        with open(cmp_out, "w") as f:
+            json.dump(cmp, f, indent=2)
+        paths["compare"] = cmp_out
+        print(
+            f"  Compared vs {compare_path}: shared={cmp['n_shared']}  "
+            f"mean|Δtriage|={cmp['mean_abs_triage_delta']}"
+        )
     print(f"IDR layer exports: {len(full_records)} proteins → {paths}")
     return report
 
@@ -818,6 +850,9 @@ def stage_predict(args, cfg, model, converter) -> dict:
 
         partners_by_id = load_partner_map(getattr(args, "idr_partners", None))
         ligands_by_id = load_ligand_map(getattr(args, "idr_ligands", None))
+        cache_dir = getattr(args, "idr_cache_dir", None)
+        if cache_dir is None and getattr(args, "idr_cache", False):
+            cache_dir = os.path.join(out_dir, "idr_layer_cache")
         package = build_idr_layer_package(
             proteins, preds,
             plddt_by_id=plddt_by_id or {},
@@ -833,6 +868,7 @@ def stage_predict(args, cfg, model, converter) -> dict:
                 else "af2"
             ),
             max_workers=getattr(args, "idr_workers", 4),
+            cache_dir=cache_dir,
         )
         report, full = package["report"], package["records"]
         print_idr_layer_report(report)
@@ -843,6 +879,7 @@ def stage_predict(args, cfg, model, converter) -> dict:
             proteins=proteins,
             disorder_probs_by_id=preds,
             gzip_jsonl=getattr(args, "idr_gzip", False),
+            export_caid=not getattr(args, "idr_no_caid", False),
         )
         manifest["idr_layer_proteins"] = len(full)
         manifest["idr_layer_paths"] = paths
@@ -1143,6 +1180,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--idr-gzip", action="store_true",
         help="Write idr_biology_layer.jsonl.gz instead of plain JSONL",
+    )
+    p.add_argument(
+        "--idr-auto-threshold", action="store_true",
+        help="idr-layer: tune function role threshold from OOF micro-F1",
+    )
+    p.add_argument(
+        "--idr-cache", action="store_true",
+        help="Cache per-protein IDR layer records under checkpoint dir",
+    )
+    p.add_argument(
+        "--idr-cache-dir", default=None,
+        help="Explicit IDR layer record cache directory",
+    )
+    p.add_argument(
+        "--idr-compare", default=None,
+        help="Compare current JSONL export against a prior JSONL/.gz path",
+    )
+    p.add_argument(
+        "--idr-no-caid", action="store_true",
+        help="Skip CAID disorder export folder in the IDR layer bundle",
     )
     p.add_argument("--caid3-reference", default=None, help="Path to CAID3 reference FASTA")
 
