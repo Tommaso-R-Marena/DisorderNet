@@ -14,7 +14,7 @@ Stages:
   pipeline         — full → eval (complete Rockfish production run)
 
 Example (interactive debug on Rockfish):
-  python rockfish/run_disordernet.py cv --profile ultra --backbone 650M
+  python rockfish/run_disordernet.py cv --profile ultra --backbone 650M\n  python rockfish/run_disordernet.py boltz --boltz-mode auto   # Boltz-2 default
 
 Example (submit via Slurm):
   sbatch rockfish/slurm/train_ultra.sbatch
@@ -127,23 +127,37 @@ def stage_cv(args, cfg, proteins, model, converter, disprot_meta) -> tuple[list,
     from colab.disordernet_gpu import infer_resume_fold, run_cross_validation
     from colab.run_manifest import build_run_manifest, save_run_manifest
 
-    # Prefer AF3 pLDDT for train-time structure channel when available
+    # Structure pLDDT for train-time channel (Boltz default > AF3 > AF2)
     plddt_override = None
+    backend = getattr(args, "structure_backend", "boltz")
+    prefer = backend if backend in ("boltz", "af3", "af2") else "boltz"
+    plddt_boltz: dict = {}
+    plddt_af3: dict = {}
+    af2 = getattr(args, "_prefetched_plddt", None) or {}
+
+    if getattr(args, "boltz_mode", "off") != "off" and backend != "af2":
+        boltz_batch = stage_boltz(args, cfg, proteins)
+        plddt_boltz = boltz_batch.get("plddt_by_id") or {}
     if getattr(args, "af3_mode", "off") != "off":
         af3_batch = stage_af3(args, cfg, proteins)
         plddt_af3 = af3_batch.get("plddt_by_id") or {}
-        if plddt_af3:
-            from colab.disordernet_gpu import merge_plddt_for_training
-            af2 = getattr(args, "_prefetched_plddt", None) or {}
-            if not af2 and (args.prefetch_af_plddt or cfg.use_plddt_features or cfg.use_hallucination_weighting):
-                from colab.disordernet_gpu import build_plddt_cache_for_training
-                af2 = build_plddt_cache_for_training(
-                    proteins, cache_dir=os.path.join(cfg.checkpoint_dir, cfg.af_plddt_cache_dir),
-                )
-            plddt_override = merge_plddt_for_training(af2, plddt_af3, prefer_af3=True)
-            print(f"  Merged pLDDT for training: {len(plddt_override)} proteins (AF3 preferred)")
-    elif getattr(args, "_prefetched_plddt", None):
-        plddt_override = args._prefetched_plddt
+
+    if plddt_boltz or plddt_af3:
+        from colab.disordernet_gpu import merge_plddt_for_training, build_plddt_cache_for_training
+        if not af2 and (args.prefetch_af_plddt or cfg.use_plddt_features or cfg.use_hallucination_weighting):
+            af2 = build_plddt_cache_for_training(
+                proteins, cache_dir=os.path.join(cfg.checkpoint_dir, cfg.af_plddt_cache_dir),
+            )
+        plddt_override = merge_plddt_for_training(
+            af2, plddt_af3, prefer_af3=(prefer == "af3"),
+            plddt_boltz=plddt_boltz, prefer=prefer,
+        )
+        print(
+            f"  Merged pLDDT for training: {len(plddt_override)} proteins "
+            f"(prefer={prefer}, boltz={len(plddt_boltz)}, af3={len(plddt_af3)}, af2={len(af2)})"
+        )
+    elif af2:
+        plddt_override = af2
 
     progress_path = os.path.join(cfg.checkpoint_dir, "cv_progress.json")
     resume = args.resume_fold
@@ -287,6 +301,53 @@ def stage_postprocess(args, cfg, proteins, fold_results, model, converter) -> tu
     return report, fold_results
 
 
+
+def stage_boltz(args, cfg, proteins) -> dict:
+    """Ingest or run Boltz-2 (pinned); return paths + pLDDT dict."""
+    from rockfish.boltz_rockfish import run_boltz_on_rockfish, setup_boltz_for_rockfish
+
+    mode = getattr(args, "boltz_mode", "off")
+    if mode == "off":
+        print("Boltz disabled (boltz_mode=off)")
+        return {"skipped": True, "mode": "off"}
+
+    batch = run_boltz_on_rockfish(
+        proteins=proteins,
+        mode=mode,
+        boltz_root=getattr(args, "boltz_root", None),
+        max_proteins=getattr(args, "boltz_max_proteins", None),
+        msa_free=not getattr(args, "boltz_use_msa_server", False),
+        use_msa_server=getattr(args, "boltz_use_msa_server", False),
+        timeout_s=getattr(args, "boltz_timeout", 7200),
+        shard_index=getattr(args, "boltz_shard_index", None),
+        shard_count=getattr(args, "boltz_shard_count", None),
+        sampling_steps=getattr(args, "boltz_sampling_steps", 50),
+    )
+    if batch.get("skipped"):
+        return batch
+
+    paths = batch.get("paths") or setup_boltz_for_rockfish(
+        mode="ingest", boltz_root=args.boltz_root, ensure_install=False,
+    )["paths"]
+    out_root = paths["output_dir"]
+    cache = os.path.join(cfg.checkpoint_dir, "boltz_plddt_cache")
+    try:
+        from colab.boltz_plddt import load_boltz_plddt_batch
+        plddt = load_boltz_plddt_batch(
+            proteins, output_root=out_root, cache_dir=cache, verbose=True,
+        )
+        batch["n_plddt"] = len(plddt)
+        batch["plddt_by_id"] = plddt
+        batch["output_dir"] = out_root
+        batch["paths"] = paths
+        print(f"Boltz pLDDT available for {len(plddt)}/{len(proteins)} proteins")
+    except Exception as exc:
+        print(f"Boltz pLDDT load failed: {exc}")
+        batch["plddt_by_id"] = {}
+        batch["paths"] = paths
+    return batch
+
+
 def stage_af3(args, cfg, proteins) -> dict:
     """Ingest or run AF3 on Rockfish; return paths + optional pLDDT dict."""
     from rockfish.af3_rockfish import run_af3_on_rockfish, setup_af3_for_rockfish
@@ -376,6 +437,42 @@ def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
     print_af_rescue_report(af_report)
     save_af_rescue_report(af_report, os.path.join(ckpt, "af_rescue_report.json"))
 
+    # Boltz-2 rescue (default structure backend)
+    boltz_report = {"skipped": True}
+    plddt_boltz: dict = {}
+    if getattr(args, "boltz_mode", "off") != "off":
+        from colab.af_hallucination import run_af_rescue_report
+        from colab.boltz_plddt import load_boltz_plddt_batch
+        from rockfish.boltz_rockfish import setup_boltz_for_rockfish
+
+        if args.boltz_mode in ("run", "auto"):
+            stage_boltz(args, cfg, proteins)
+        boltz_cfg = setup_boltz_for_rockfish(
+            mode="ingest", boltz_root=args.boltz_root, ensure_install=False,
+        )
+        out_root = boltz_cfg["paths"]["output_dir"]
+        plddt_boltz = load_boltz_plddt_batch(
+            proteins, output_root=out_root,
+            cache_dir=os.path.join(ckpt, "boltz_plddt_cache"), verbose=True,
+        )
+        if plddt_boltz:
+            boltz_report = run_af_rescue_report(
+                proteins=proteins,
+                fold_results=fold_results,
+                plddt_by_protein=plddt_boltz,
+                n_folds=cfg.n_folds,
+                source="Boltz-2 (pinned auto-download)",
+            )
+            boltz_report["skipped"] = False
+            boltz_report["n_plddt_loaded"] = len(plddt_boltz)
+            print_af_rescue_report(boltz_report)
+            save_af_rescue_report(boltz_report, os.path.join(ckpt, "boltz_rescue_report.json"))
+            # Prefer Boltz over AF2 for downstream fusion when available
+            from colab.disordernet_gpu import merge_plddt_for_training
+            plddt_by_id = merge_plddt_for_training(
+                plddt_by_id, None, plddt_boltz=plddt_boltz, prefer="boltz",
+            )
+
     # Optional AF3 Phase 2b (ingest preferred on Rockfish)
     af3_report = {"skipped": True}
     plddt_af3: dict = {}
@@ -409,7 +506,14 @@ def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
             save_af2_af3_comparison(af3_comparison, os.path.join(ckpt, "af2_af3_comparison.json"))
             # Prefer AF3 pLDDT for fusion / training-adjacent analysis when available
             from colab.disordernet_gpu import merge_plddt_for_training
-            plddt_by_id = merge_plddt_for_training(plddt_by_id, plddt_af3, prefer_af3=True)
+            prefer = getattr(args, "structure_backend", "boltz")
+            if prefer not in ("boltz", "af3", "af2"):
+                prefer = "boltz"
+            plddt_by_id = merge_plddt_for_training(
+                plddt_by_id, plddt_af3,
+                plddt_boltz=plddt_boltz,
+                prefer=prefer,
+            )
 
     fusion_report, fold_results = apply_plddt_fusion_to_cv(
         proteins=proteins,
@@ -638,6 +742,9 @@ def run_pipeline(args) -> int:
     if args.stage == "screen":
         stage_screen(args, cfg, proteins, model, converter)
 
+    elif args.stage == "boltz":
+        stage_boltz(args, cfg, proteins)
+
     elif args.stage == "af3":
         stage_af3(args, cfg, proteins)
 
@@ -704,7 +811,7 @@ def build_parser() -> argparse.ArgumentParser:
         "stage",
         choices=[
             "screen", "cv", "stack", "postprocess", "full",
-            "eval", "predict", "multi-seed-blend", "pipeline", "af3",
+            "eval", "predict", "multi-seed-blend", "pipeline", "boltz", "af3",
         ],
         help="Pipeline stage to run",
     )
@@ -751,7 +858,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated checkpoint dirs for multi-seed-blend",
     )
 
-    # AF3 (Rockfish)
+    # Structure backend (Boltz-2 default — open weights, auto-download)
+    p.add_argument(
+        "--structure-backend",
+        default="boltz",
+        choices=["boltz", "af3", "af2", "off"],
+        help="Preferred structure pLDDT source for train/eval fusion",
+    )
+    p.add_argument(
+        "--boltz-mode", default="auto",
+        choices=["off", "ingest", "run", "auto"],
+        help="Boltz-2: auto installs pinned boltz and downloads weights on first run",
+    )
+    p.add_argument("--boltz-root", default=None, help="Boltz root (inputs/outputs/cache)")
+    p.add_argument("--boltz-max-proteins", type=int, default=None)
+    p.add_argument("--boltz-timeout", type=int, default=7200)
+    p.add_argument(
+        "--boltz-use-msa-server", action="store_true",
+        help="Use mmseqs MSA server (default: MSA-free single sequence)",
+    )
+    p.add_argument("--boltz-sampling-steps", type=int, default=50)
+    p.add_argument("--boltz-shard-index", type=int, default=None)
+    p.add_argument("--boltz-shard-count", type=int, default=None)
+
+    # AF3 (Rockfish) — optional licensed secondary backend
     p.add_argument(
         "--af3-mode", default="off",
         choices=["off", "ingest", "run", "auto"],

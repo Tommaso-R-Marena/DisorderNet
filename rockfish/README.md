@@ -93,12 +93,38 @@ sbatch --partition=ica100 --export=ALL,... rockfish/slurm/train_ultra3b.sbatch
 | `stack` | 7b–7c | GPU+v6 + meta ensemble |
 | `postprocess` | 7d | Fold soup + calibration |
 | `full` | all training | cv → stack → postprocess |
-| `eval` | 8–11 | CAID, AF rescue, structure calibration, Phase 3 |
+| `boltz` | structure | Boltz-2 pLDDT (pinned, auto-download) |
+| `af3` | structure | Optional AlphaFold 3 ingest/run |
+| `eval` | 8–11 | CAID, AF/Boltz rescue, structure calibration, Phase 3 |
 | `pipeline` | all + eval | full → eval [→ CAID3 with `RUN_CAID3=1`] |
 | `predict` | deploy | FASTA batch inference + `.caid` export |
 | `multi-seed-blend` | 7e | Average OOF from multiple seed dirs |
 
-## AlphaFold 3 on Rockfish
+## Boltz-2 structure backend (default)
+
+Boltz-2 is the **default** structure pLDDT source (`--structure-backend boltz`).
+Pinned package: `boltz[cuda]==2.2.1` — first run **auto-downloads** weights into `$BOLTZ_CACHE`.
+
+```bash
+export DISORDERNET_BOLTZ_ROOT=$HOME/boltz
+export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
+
+# Run / auto-download Boltz-2 for pending proteins
+sbatch --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_BOLTZ_ROOT,BOLTZ_MODE=auto \
+  rockfish/slurm/boltz_batch.sbatch
+
+# Or Slurm array:
+export BOLTZ_SHARD_COUNT=8
+sbatch --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_BOLTZ_ROOT,BOLTZ_MODE=run,BOLTZ_SHARD_COUNT=8 \
+  rockfish/slurm/boltz_array.sbatch
+
+# CV prefers Boltz pLDDT when available (training jobs default BOLTZ_MODE=ingest)
+python rockfish/run_disordernet.py cv --profile ultra --boltz-mode ingest
+```
+
+AF3 remains available as a secondary licensed backend (`--af3-mode ingest|run`, `--structure-backend af3`).
+
+## AlphaFold 3 (optional licensed)
 
 AF3 **code** is open (Apache 2.0); **weights** (`af3.bin`) require a DeepMind license and must **never** go on GitHub.
 
@@ -158,7 +184,7 @@ sbatch --account=$DISORDERNET_ACCOUNT --array=0-7 \
 | Sequence-only disorder | ✓ | ✓ (ESM-2 650M–3B + LoRA) |
 | Homology-safe CV | CAID protocol | ✓ `split_method=homology` in ultra |
 | CAID3 benchmark eval | 0.895 ref | ✓ `caid3_eval_report.json` |
-| AF hallucination rescue | ✗ | ✓ unique differentiator |
+| AF / Boltz hallucination rescue | ✗ | ✓ Boltz-2 default (+ optional AF3) |
 | Train-time pLDDT channel | ✗ | ✓ `use_plddt_features` in ultra |
 | Proteome FASTA deploy | limited | ✓ `predict` stage |
 
@@ -199,6 +225,10 @@ sbatch --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR rockfish/slurm/train
 | `BACKBONE` | `650M` / `3B` | ESM-2 size |
 | `STAGE` | `full` | Pipeline stage |
 | `SEED` | `42` | Random seed |
+| `STRUCTURE_BACKEND` | `boltz` | Prefer boltz / af3 / af2 pLDDT |
+| `BOLTZ_MODE` | `ingest` (train) / `auto` (boltz jobs) | Boltz-2 ingest/run/auto |
+| `DISORDERNET_BOLTZ_ROOT` | `~/boltz` | Boltz inputs/outputs/cache root |
+| `BOLTZ_CACHE` | `$DISORDERNET_BOLTZ_ROOT/cache` | Auto-downloaded Boltz weights |
 
 ## Copy DisProt cache from Colab (optional)
 

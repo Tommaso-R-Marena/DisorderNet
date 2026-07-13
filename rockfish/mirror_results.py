@@ -26,6 +26,7 @@ DEFAULT_GLOBS = [
     "checkpoints/phase3_integrated_report.json",
     "checkpoints/statistical_validation_report.json",
     "checkpoints/af_rescue_report.json",
+    "checkpoints/boltz_rescue_report.json",
     "checkpoints/af3_rescue_report.json",
     "checkpoints/af2_af3_comparison.json",
     "checkpoints/inference_fusion_report.json",
