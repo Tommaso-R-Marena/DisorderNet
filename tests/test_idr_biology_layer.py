@@ -33,7 +33,9 @@ from colab.idr_biology_layer import (  # noqa: E402
     score_protein_triage,
 )
 from colab.idr_layer_io import (  # noqa: E402
+    ligand_binding_support,
     load_disorder_preds_from_dir,
+    load_ligand_map,
     load_partner_map,
     partner_binding_support,
 )
@@ -68,7 +70,7 @@ class TestIdrBiologyLayer:
             boltz_plddt_std=np.linspace(1, 20, 40).astype(np.float32),
         )
         assert rec["layer_version"] == LAYER_VERSION
-        assert LAYER_VERSION.startswith("1.2")
+        assert LAYER_VERSION.startswith("1.3")
         assert rec["n_idr_segments"] >= 1
         roles = {r["group"] for s in rec["idr_segments"] for r in s["predicted_roles"]}
         assert "protein binding" in roles
@@ -235,6 +237,61 @@ class TestIdrBiologyLayer:
         assert load_partner_map(str(partner_json))["DP1"] == ["KKKKEEEE"]
         assert partner_binding_support("DDDDAAAA", ["KKKKIIII"])["support"] > 0
 
+    def test_ligand_context_and_bundle(self, tmp_path):
+        from colab.idr_biology_layer import export_idr_layer_bundle
+
+        proteins = [{
+            "id": "p1",
+            "sequence": ("AILMFV" * 3) + ("G" * 12),
+            "length": 30,
+            "uniprot_acc": "U1",
+        }]
+        preds = {"p1": np.array([0.95] * 18 + [0.1] * 12, dtype=np.float32)}
+        fn = np.zeros((30, 5), dtype=np.float32)
+        fn[:18, 4] = 0.85  # lipid / small molecule
+        package = build_idr_layer_package(
+            proteins, preds,
+            function_probs_by_id={"p1": fn},
+            ligands_by_id={"p1": ["lipid", {"type": "metal", "name": "Zn"}]},
+            max_workers=2,
+        )
+        rec = package["records"][0]
+        assert any(s.get("ligand_context") for s in rec["idr_segments"])
+        assert package["report"]["structure_distrust"] is not None
+        assert package["report"]["n_segments_with_ligand_context"] >= 1
+        lb = ligand_binding_support("AILMFVWAA", [{"type": "lipid"}])
+        assert lb["support"] > 0 and "lipid / small molecule binding" in lb["target_roles"]
+
+        paths = export_idr_layer_bundle(
+            out_dir=str(tmp_path / "out"),
+            report=package["report"],
+            records=package["records"],
+            proteins=proteins,
+            disorder_probs_by_id=preds,
+            gzip_jsonl=True,
+        )
+        assert Path(paths["jsonl"]).exists() and paths["jsonl"].endswith(".gz")
+        assert Path(paths["roles"]).exists()
+        lig_path = tmp_path / "ligands.json"
+        lig_path.write_text(json.dumps({"p1": ["nucleotide"]}))
+        assert load_ligand_map(str(lig_path))["p1"][0]["type"] == "nucleic"
+
+    def test_export_idr_layer_and_diffusion_samples(self):
+        args = build_parser().parse_args([
+            "predict", "--fasta", "q.fa",
+            "--export-idr-layer",
+            "--boltz-diffusion-samples", "7",
+            "--idr-partners", "partners.json",
+            "--idr-ligands", "ligands.json",
+            "--idr-preds-dir", "preds",
+            "--idr-workers", "8",
+            "--idr-gzip",
+        ])
+        assert args.export_idr_layer is True
+        assert args.idr_ligands == "ligands.json"
+        assert args.idr_workers == 8
+        assert args.idr_gzip is True
+
 
 class TestBoltzVariance:
     def test_sample_stack_and_std(self, tmp_path):
@@ -318,9 +375,15 @@ class TestIdrLayerCLI:
             "--export-idr-layer",
             "--boltz-diffusion-samples", "7",
             "--idr-partners", "partners.json",
+            "--idr-ligands", "ligands.json",
             "--idr-preds-dir", "preds",
+            "--idr-workers", "8",
+            "--idr-gzip",
+            "--idr-disorder-threshold", "0.55",
         ])
         assert args.export_idr_layer is True
         assert args.boltz_diffusion_samples == 7
-        assert args.idr_partners == "partners.json"
-        assert args.idr_preds_dir == "preds"
+        assert args.idr_ligands == "ligands.json"
+        assert args.idr_workers == 8
+        assert args.idr_gzip is True
+        assert abs(args.idr_disorder_threshold - 0.55) < 1e-9

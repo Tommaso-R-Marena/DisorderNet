@@ -197,3 +197,163 @@ def partner_binding_support(
         "tags": tags,
         "n_partners": len(partner_sequences),
     }
+
+
+_LIGAND_TYPE_ALIASES: dict[str, str] = {
+    "lipid": "lipid",
+    "fatty": "lipid",
+    "membrane": "lipid",
+    "phospholipid": "lipid",
+    "nucleotide": "nucleic",
+    "nucleic": "nucleic",
+    "atp": "nucleic",
+    "gtp": "nucleic",
+    "dna": "nucleic",
+    "rna": "nucleic",
+    "metal": "metal",
+    "ion": "metal",
+    "zn": "metal",
+    "zinc": "metal",
+    "ca": "metal",
+    "calcium": "metal",
+    "mg": "metal",
+    "small_molecule": "small",
+    "small": "small",
+    "drug": "small",
+    "ligand": "small",
+    "metabolite": "small",
+}
+
+_LIGAND_TO_ROLE: dict[str, str] = {
+    "lipid": "lipid / small molecule binding",
+    "small": "lipid / small molecule binding",
+    "metal": "lipid / small molecule binding",
+    "nucleic": "nucleic acid binding",
+}
+
+
+def normalize_ligand_entry(entry) -> dict:
+    """Normalize a ligand JSON/TSV entry to ``{type, name, smiles?}``."""
+    if isinstance(entry, str):
+        key = entry.strip().lower()
+        return {"type": _LIGAND_TYPE_ALIASES.get(key, "small"), "name": entry.strip()}
+    if not isinstance(entry, dict):
+        return {"type": "small", "name": str(entry)}
+    raw_type = (
+        entry.get("type") or entry.get("class") or entry.get("category") or "small"
+    )
+    key = str(raw_type).strip().lower()
+    return {
+        "type": _LIGAND_TYPE_ALIASES.get(key, "small"),
+        "name": entry.get("name") or entry.get("id") or str(raw_type),
+        "smiles": entry.get("smiles"),
+    }
+
+
+def load_ligand_map(path: Optional[str]) -> dict[str, list[dict]]:
+    """
+    Load optional ligand context map for conditioned lipid/NA/metal cues.
+
+    Formats:
+      - JSON ``{protein_id: [\"lipid\", {\"type\": \"nucleotide\"}, ...]}``
+      - TSV ``protein_id\\ttype[\\tname]``
+    """
+    if not path or not os.path.isfile(path):
+        return {}
+    if path.lower().endswith(".json"):
+        with open(path) as f:
+            raw = json.load(f)
+        out: dict[str, list[dict]] = {}
+        for k, v in raw.items():
+            if isinstance(v, list):
+                out[k] = [normalize_ligand_entry(x) for x in v]
+            else:
+                out[k] = [normalize_ligand_entry(v)]
+        return out
+
+    out = {}
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            entry = {"type": parts[1]}
+            if len(parts) >= 3:
+                entry["name"] = parts[2]
+            out.setdefault(parts[0], []).append(normalize_ligand_entry(entry))
+    return out
+
+
+def ligand_binding_support(
+    idr_sequence: str,
+    ligands: list,
+) -> dict:
+    """
+    Cheap ligand-conditioned cue for lipid / NA / metal-ish IDR chemistry.
+
+    Does not change model logits — returns support ∈ [0,1], target roles, tags.
+    """
+    if not ligands or not idr_sequence:
+        return {"support": 0.0, "tags": [], "target_roles": [], "n_ligands": 0}
+
+    idr = idr_sequence.upper()
+    L = max(len(idr), 1)
+    frac_hydro = sum(1 for a in idr if a in "AILMFVW") / L
+    frac_arom = sum(1 for a in idr if a in "FWY") / L
+    frac_basic = sum(1 for a in idr if a in "KRH") / L
+    frac_polar = sum(1 for a in idr if a in "STNQ") / L
+    has_cys = "C" in idr
+
+    best = 0.0
+    tags: list[str] = []
+    targets: list[str] = []
+    for raw in ligands:
+        lig = normalize_ligand_entry(raw)
+        lt = lig["type"]
+        score = 0.0
+        local: list[str] = []
+        role = _LIGAND_TO_ROLE.get(lt)
+        if lt == "lipid":
+            if frac_hydro >= 0.3:
+                score += 0.5
+                local.append("hydrophobic_lipid_compatible")
+            if frac_arom >= 0.05:
+                score += 0.15
+                local.append("aromatic_membrane_cue")
+        elif lt == "nucleic":
+            if frac_basic >= 0.2:
+                score += 0.55
+                local.append("basic_na_compatible")
+            if frac_polar >= 0.2:
+                score += 0.15
+                local.append("polar_na_cue")
+        elif lt == "metal":
+            if has_cys or frac_basic >= 0.15:
+                score += 0.5
+                local.append("metal_chelating_residues")
+        else:  # small
+            if frac_hydro >= 0.25 or frac_arom >= 0.08:
+                score += 0.4
+                local.append("small_molecule_pocket_like")
+            if frac_polar >= 0.25:
+                score += 0.15
+                local.append("polar_ligand_cue")
+
+        best = max(best, min(1.0, score))
+        for t in local:
+            if t not in tags:
+                tags.append(t)
+        if role and role not in targets and score >= 0.3:
+            targets.append(role)
+
+    return {
+        "support": round(float(best), 4),
+        "tags": tags,
+        "target_roles": targets,
+        "n_ligands": len(ligands),
+        "ligands": [normalize_ligand_entry(x) for x in ligands][:8],
+    }
+

@@ -410,14 +410,14 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
     from colab.biological_utility import align_fold_predictions
     from colab.idr_biology_layer import (
         build_idr_layer_package,
-        export_idr_disorder_bedgraph,
-        export_idr_layer_bed,
-        export_idr_layer_jsonl,
-        export_idr_triage_tsv,
+        export_idr_layer_bundle,
         print_idr_layer_report,
-        save_idr_layer_report,
     )
-    from colab.idr_layer_io import load_disorder_preds_from_dir, load_partner_map
+    from colab.idr_layer_io import (
+        load_disorder_preds_from_dir,
+        load_ligand_map,
+        load_partner_map,
+    )
 
     ckpt = cfg.checkpoint_dir
     aligned = align_fold_predictions(proteins, fold_results, n_folds=cfg.n_folds)
@@ -434,11 +434,19 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
     partners_by_id = load_partner_map(getattr(args, "idr_partners", None))
     if partners_by_id:
         print(f"  Partner-context map: {len(partners_by_id)} proteins")
+    ligands_by_id = load_ligand_map(getattr(args, "idr_ligands", None))
+    if ligands_by_id:
+        print(f"  Ligand-context map: {len(ligands_by_id)} proteins")
 
     # Function OOF shares the full-sequence pad-mask stream with disorder (same lengths).
     function_by_id: dict = {}
+    function_oof_metrics = None
     try:
-        from colab.function_predict import align_function_oof, split_function_oof_by_lengths
+        from colab.function_predict import (
+            align_function_oof,
+            run_function_prediction_report,
+            split_function_oof_by_lengths,
+        )
         _, y_prob, fn_protein_ids = align_function_oof(
             proteins, fold_results, n_folds=cfg.n_folds,
         )
@@ -460,6 +468,10 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
                     "  Function OOF length ≠ disorder / protein stream; "
                     "role calls skipped (retrain with function head)."
                 )
+        if function_by_id:
+            function_oof_metrics = run_function_prediction_report(
+                proteins, fold_results, n_folds=cfg.n_folds,
+            )
     except Exception as exc:
         print(f"  Function OOF not attached to layer: {exc}")
 
@@ -508,22 +520,26 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
         function_probs_by_id=function_by_id,
         boltz_std_by_id=boltz_std,
         partners_by_id=partners_by_id,
+        ligands_by_id=ligands_by_id,
+        disorder_threshold=getattr(args, "idr_disorder_threshold", 0.5),
+        function_threshold=getattr(args, "idr_function_threshold", 0.5),
         structure_source=structure_source,
         max_proteins_in_summary=getattr(args, "idr_layer_max_proteins", 100),
+        max_workers=getattr(args, "idr_workers", 4),
     )
     report, full_records = package["report"], package["records"]
+    if function_oof_metrics is not None:
+        report["function_oof_metrics"] = function_oof_metrics
     print_idr_layer_report(report)
-    save_idr_layer_report(report, os.path.join(ckpt, "idr_biology_layer_report.json"))
-    export_idr_layer_jsonl(full_records, os.path.join(ckpt, "idr_biology_layer.jsonl"))
-    export_idr_triage_tsv(full_records, os.path.join(ckpt, "idr_biology_layer_triage.tsv"))
-    export_idr_layer_bed(full_records, os.path.join(ckpt, "idr_biology_layer.bed"))
-    export_idr_disorder_bedgraph(
-        proteins, disorder_by_id, os.path.join(ckpt, "idr_biology_layer_disorder.bedgraph"),
+    paths = export_idr_layer_bundle(
+        out_dir=ckpt,
+        report=report,
+        records=full_records,
+        proteins=proteins,
+        disorder_probs_by_id=disorder_by_id,
+        gzip_jsonl=getattr(args, "idr_gzip", False),
     )
-    print(
-        f"IDR layer exports: {len(full_records)} proteins → "
-        f"{ckpt}/idr_biology_layer.{{jsonl,triage.tsv,bed,disorder.bedgraph}}"
-    )
+    print(f"IDR layer exports: {len(full_records)} proteins → {paths}")
     return report
 
 
@@ -795,38 +811,41 @@ def stage_predict(args, cfg, model, converter) -> dict:
     if getattr(args, "export_idr_layer", False):
         from colab.idr_biology_layer import (
             build_idr_layer_package,
-            export_idr_disorder_bedgraph,
-            export_idr_layer_bed,
-            export_idr_layer_jsonl,
-            export_idr_triage_tsv,
+            export_idr_layer_bundle,
             print_idr_layer_report,
-            save_idr_layer_report,
         )
-        from colab.idr_layer_io import load_partner_map
+        from colab.idr_layer_io import load_ligand_map, load_partner_map
 
         partners_by_id = load_partner_map(getattr(args, "idr_partners", None))
+        ligands_by_id = load_ligand_map(getattr(args, "idr_ligands", None))
         package = build_idr_layer_package(
             proteins, preds,
             plddt_by_id=plddt_by_id or {},
             function_probs_by_id=function_by_id,
             boltz_std_by_id=boltz_std,
             partners_by_id=partners_by_id,
+            ligands_by_id=ligands_by_id,
+            disorder_threshold=getattr(args, "idr_disorder_threshold", 0.5),
+            function_threshold=getattr(args, "idr_function_threshold", 0.5),
             structure_source=(
                 "boltz2"
                 if boltz_std or (plddt_by_id and getattr(args, "boltz_mode", "off") != "off")
                 else "af2"
             ),
+            max_workers=getattr(args, "idr_workers", 4),
         )
         report, full = package["report"], package["records"]
         print_idr_layer_report(report)
-        save_idr_layer_report(report, os.path.join(out_dir, "idr_biology_layer_report.json"))
-        export_idr_layer_jsonl(full, os.path.join(out_dir, "idr_biology_layer.jsonl"))
-        export_idr_triage_tsv(full, os.path.join(out_dir, "idr_biology_layer_triage.tsv"))
-        export_idr_layer_bed(full, os.path.join(out_dir, "idr_biology_layer.bed"))
-        export_idr_disorder_bedgraph(
-            proteins, preds, os.path.join(out_dir, "idr_biology_layer_disorder.bedgraph"),
+        paths = export_idr_layer_bundle(
+            out_dir=out_dir,
+            report=report,
+            records=full,
+            proteins=proteins,
+            disorder_probs_by_id=preds,
+            gzip_jsonl=getattr(args, "idr_gzip", False),
         )
         manifest["idr_layer_proteins"] = len(full)
+        manifest["idr_layer_paths"] = paths
     return manifest
 
 
@@ -1104,6 +1123,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--idr-partners", default=None,
         help="Optional partner map JSON/TSV for conditioned binding cues",
+    )
+    p.add_argument(
+        "--idr-ligands", default=None,
+        help="Optional ligand map JSON/TSV for lipid/NA/metal conditioned cues",
+    )
+    p.add_argument(
+        "--idr-disorder-threshold", type=float, default=0.5,
+        help="Disorder probability threshold for IDR segments",
+    )
+    p.add_argument(
+        "--idr-function-threshold", type=float, default=0.5,
+        help="Function probability threshold for role calls",
+    )
+    p.add_argument(
+        "--idr-workers", type=int, default=4,
+        help="Thread workers for IDR layer proteome build",
+    )
+    p.add_argument(
+        "--idr-gzip", action="store_true",
+        help="Write idr_biology_layer.jsonl.gz instead of plain JSONL",
     )
     p.add_argument("--caid3-reference", default=None, help="Path to CAID3 reference FASTA")
 

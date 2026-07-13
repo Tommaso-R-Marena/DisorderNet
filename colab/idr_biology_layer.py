@@ -34,7 +34,7 @@ IDR_ROLE_GROUPS: tuple[str, ...] = (
     "lipid / small molecule binding",
 )
 
-LAYER_VERSION = "1.2.0"
+LAYER_VERSION = "1.3.0"
 
 # Cheap sequence cues that often co-occur with IDR biology (AF-blind)
 _MOTIF_PATTERNS: tuple[tuple[str, str], ...] = (
@@ -268,9 +268,10 @@ def build_idr_segment_records(
     role_names: tuple[str, ...] = IDR_ROLE_GROUPS,
     include_sequence_cues: bool = True,
     partner_sequences: Optional[list[str]] = None,
+    ligands: Optional[list] = None,
 ) -> list[dict]:
-    """IDR segments with optional multi-label role calls + sequence/partner cues."""
-    from colab.idr_layer_io import partner_binding_support
+    """IDR segments with optional multi-label role calls + sequence/partner/ligand cues."""
+    from colab.idr_layer_io import ligand_binding_support, partner_binding_support
 
     dis = np.asarray(disorder_probs, dtype=np.float32).ravel()
     mask = dis >= disorder_threshold
@@ -336,9 +337,32 @@ def build_idr_segment_records(
                         ev = list(role.get("evidence") or [])
                         if pb["support"] >= 0.4:
                             ev.append("partner_context_supports_binding")
-                        # Conditioned score: raw + support bump, capped (transparent)
                         role["conditioned_prob"] = round(
-                            min(1.0, float(role["mean_prob"]) + 0.15 * float(pb["support"])),
+                            min(1.0, float(role.get("conditioned_prob", role["mean_prob"]))
+                                + 0.15 * float(pb["support"])),
+                            4,
+                        )
+                        role["evidence"] = ev
+
+        if ligands and sequence:
+            lb = ligand_binding_support(sequence[start:end], ligands)
+            if lb["support"] > 0:
+                rec["ligand_context"] = lb
+                target_set = set(lb.get("target_roles") or [])
+                for role in roles:
+                    if role["group"] in target_set or (
+                        role["group"] == "lipid / small molecule binding"
+                        and lb["support"] >= 0.3
+                    ) or (
+                        role["group"] == "nucleic acid binding"
+                        and "nucleic acid binding" in target_set
+                    ):
+                        ev = list(role.get("evidence") or [])
+                        if lb["support"] >= 0.4:
+                            ev.append("ligand_context_supports_role")
+                        role["conditioned_prob"] = round(
+                            min(1.0, float(role.get("conditioned_prob", role["mean_prob"]))
+                                + 0.15 * float(lb["support"])),
                             4,
                         )
                         role["evidence"] = ev
@@ -356,6 +380,7 @@ def build_protein_idr_layer(
     boltz_plddt_std: Optional[np.ndarray] = None,
     transition_mask: Optional[np.ndarray] = None,
     partner_sequences: Optional[list[str]] = None,
+    ligands: Optional[list] = None,
     uniprot_acc: str = "",
     disorder_threshold: float = 0.5,
     function_threshold: float = 0.5,
@@ -392,6 +417,7 @@ def build_protein_idr_layer(
         function_threshold=function_threshold,
         include_sequence_cues=include_sequence_cues,
         partner_sequences=partner_sequences,
+        ligands=ligands,
     )
 
     halluc = None
@@ -499,6 +525,11 @@ def _recommended_actions(
         for s in segments for r in s.get("predicted_roles", [])
     ):
         actions.append("partner_context_supports_binding_roles")
+    if any(
+        "ligand_context_supports_role" in (r.get("evidence") or [])
+        for s in segments for r in s.get("predicted_roles", [])
+    ):
+        actions.append("ligand_context_supports_role_calls")
     return actions
 
 
@@ -606,6 +637,33 @@ def evaluate_role_calls_against_annotations(
     }
 
 
+def summarize_structure_distrust(records: list[dict]) -> dict:
+    """Aggregate hallucination / structure-distrust stats across the proteome."""
+    n_halluc = 0
+    n_rescued = 0
+    n_proteins_flagged = 0
+    n_intersections = 0
+    for r in records:
+        h = r.get("hallucination") or {}
+        nh = int(h.get("n_hallucinated", 0) or 0)
+        nr = int(h.get("n_rescued", 0) or 0)
+        n_halluc += nh
+        n_rescued += nr
+        if nh > 0:
+            n_proteins_flagged += 1
+        n_intersections += len(r.get("role_hallucination_intersections") or [])
+    return {
+        "n_proteins_with_hallucination": n_proteins_flagged,
+        "total_hallucinated_residues": n_halluc,
+        "total_rescued_residues": n_rescued,
+        "overall_rescue_rate": (
+            round(float(n_rescued / n_halluc), 4) if n_halluc else 0.0
+        ),
+        "n_role_hallucination_intersections": n_intersections,
+        "note": "Prefer DisorderNet over structure confidence in flagged regions",
+    }
+
+
 def build_idr_layer_package(
     proteins: list[dict],
     disorder_probs_by_id: dict[str, np.ndarray],
@@ -614,6 +672,7 @@ def build_idr_layer_package(
     function_probs_by_id: Optional[dict[str, np.ndarray]] = None,
     boltz_std_by_id: Optional[dict[str, np.ndarray]] = None,
     partners_by_id: Optional[dict[str, list[str]]] = None,
+    ligands_by_id: Optional[dict[str, list]] = None,
     disorder_threshold: float = 0.5,
     function_threshold: float = 0.5,
     high_plddt_threshold: float = 70.0,
@@ -621,24 +680,27 @@ def build_idr_layer_package(
     max_proteins_in_summary: int = 100,
     include_sequence_cues: bool = True,
     validate_roles: bool = True,
+    max_workers: int = 1,
 ) -> dict:
     """
     Single-pass package: full records + summary report + triage ranking.
 
-    Avoids building each protein twice (summary + JSONL).
+    ``max_workers>1`` threads protein builds (I/O-light; accuracy-identical).
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     plddt_by_id = plddt_by_id or {}
     function_probs_by_id = function_probs_by_id or {}
     boltz_std_by_id = boltz_std_by_id or {}
     partners_by_id = partners_by_id or {}
+    ligands_by_id = ligands_by_id or {}
 
-    records: list[dict] = []
-    for p in proteins:
+    work = [p for p in proteins if p["id"] in disorder_probs_by_id]
+
+    def _one(p: dict) -> dict:
         pid = p["id"]
-        if pid not in disorder_probs_by_id:
-            continue
         tmask = p.get("transition_mask")
-        records.append(build_protein_idr_layer(
+        return build_protein_idr_layer(
             protein_id=pid,
             sequence=p["sequence"],
             disorder_probs=disorder_probs_by_id[pid],
@@ -649,13 +711,30 @@ def build_idr_layer_package(
             partner_sequences=partners_by_id.get(pid) or partners_by_id.get(
                 p.get("uniprot_acc") or "",
             ),
+            ligands=ligands_by_id.get(pid) or ligands_by_id.get(
+                p.get("uniprot_acc") or "",
+            ),
             uniprot_acc=p.get("uniprot_acc", ""),
             disorder_threshold=disorder_threshold,
             function_threshold=function_threshold,
             high_plddt_threshold=high_plddt_threshold,
             structure_source=structure_source,
             include_sequence_cues=include_sequence_cues,
-        ))
+        )
+
+    records: list[dict] = []
+    workers = max(1, min(int(max_workers), len(work) or 1))
+    if workers == 1:
+        records = [_one(p) for p in work]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {ex.submit(_one, p): p["id"] for p in work}
+            by_id = {}
+            for fut in as_completed(futs):
+                rec = fut.result()
+                by_id[rec["protein_id"]] = rec
+            # Stable triage-ready list in input order first, then sort
+            records = [by_id[p["id"]] for p in work if p["id"] in by_id]
 
     records.sort(key=lambda r: -float((r.get("triage") or {}).get("score", 0.0)))
 
@@ -679,18 +758,24 @@ def build_idr_layer_package(
         for s in r["idr_segments"]
         if s.get("partner_context")
     )
+    n_ligand = sum(
+        1 for r in records
+        for s in r["idr_segments"]
+        if s.get("ligand_context")
+    )
 
     role_validation = (
         evaluate_role_calls_against_annotations(records, proteins)
         if validate_roles else {"enabled": False}
     )
+    structure_distrust = summarize_structure_distrust(records)
 
     report = {
         "layer_version": LAYER_VERSION,
         "thesis": (
             "Post-structure IDR biology layer: disorder map + functional roles + "
-            "sequence/partner cues + structure-hallucination flags + conditional-disorder "
-            "boundary cues (+ optional Boltz variance proxy)."
+            "sequence/partner/ligand cues + structure-hallucination flags + "
+            "conditional-disorder boundary cues (+ optional Boltz variance proxy)."
         ),
         "non_goals": [
             "full_md_conformational_ensembles",
@@ -703,10 +788,17 @@ def build_idr_layer_package(
         "n_role_hallucination_intersections": n_intersections,
         "n_roles_with_sequence_cue_support": n_cue_agree,
         "n_segments_with_partner_context": n_partner,
+        "n_segments_with_ligand_context": n_ligand,
         "mean_disorder_fraction": (
             float(np.mean([r["disorder_fraction"] for r in records])) if records else 0.0
         ),
         "role_validation": role_validation,
+        "structure_distrust": structure_distrust,
+        "thresholds": {
+            "disorder_threshold": disorder_threshold,
+            "function_threshold": function_threshold,
+            "high_plddt_threshold": high_plddt_threshold,
+        },
         "top_priority_proteins": [
             {
                 "protein_id": r["protein_id"],
@@ -735,12 +827,14 @@ def build_proteome_idr_layer(
     function_probs_by_id: Optional[dict[str, np.ndarray]] = None,
     boltz_std_by_id: Optional[dict[str, np.ndarray]] = None,
     partners_by_id: Optional[dict[str, list[str]]] = None,
+    ligands_by_id: Optional[dict[str, list]] = None,
     disorder_threshold: float = 0.5,
     function_threshold: float = 0.5,
     high_plddt_threshold: float = 70.0,
     structure_source: str = "boltz2",
     max_proteins_in_summary: int = 100,
     include_sequence_cues: bool = True,
+    max_workers: int = 1,
 ) -> dict:
     """Proteome-scale IDR biology layer + summary stats (builds records once)."""
     package = build_idr_layer_package(
@@ -750,22 +844,64 @@ def build_proteome_idr_layer(
         function_probs_by_id=function_probs_by_id,
         boltz_std_by_id=boltz_std_by_id,
         partners_by_id=partners_by_id,
+        ligands_by_id=ligands_by_id,
         disorder_threshold=disorder_threshold,
         function_threshold=function_threshold,
         high_plddt_threshold=high_plddt_threshold,
         structure_source=structure_source,
         max_proteins_in_summary=max_proteins_in_summary,
         include_sequence_cues=include_sequence_cues,
+        max_workers=max_workers,
     )
     return package["report"]
 
 
-def export_idr_layer_jsonl(records: list[dict], path: str) -> str:
+def export_idr_layer_jsonl(records: list[dict], path: str, *, gzip: bool = False) -> str:
     """Write one protein layer record per line (proteome-scale)."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    if gzip and not path.endswith(".gz"):
+        path = path + ".gz"
+    if gzip or path.endswith(".gz"):
+        import gzip as _gzip
+        with _gzip.open(path, "wt", encoding="utf-8") as f:
+            for rec in records:
+                f.write(json.dumps(rec) + "\n")
+    else:
+        with open(path, "w") as f:
+            for rec in records:
+                f.write(json.dumps(rec) + "\n")
+    return path
+
+
+def export_idr_role_tracks_tsv(records: list[dict], path: str) -> str:
+    """
+    Compact residue-level top-role track for IDR segments.
+
+    Columns: protein_id, uniprot_acc, start, end, top_role, mean_prob, conditioned_prob
+    """
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as f:
+        f.write(
+            "protein_id\tuniprot_acc\tstart\tend\ttop_role\t"
+            "mean_prob\tconditioned_prob\tevidence\n"
+        )
         for rec in records:
-            f.write(json.dumps(rec) + "\n")
+            acc = rec.get("uniprot_acc") or ""
+            for seg in rec.get("idr_segments", []):
+                roles = seg.get("predicted_roles") or []
+                if not roles:
+                    f.write(
+                        f"{rec['protein_id']}\t{acc}\t{seg['start']}\t{seg['end']}\t"
+                        f"\t\t\t\n"
+                    )
+                    continue
+                top = roles[0]
+                ev = ";".join(top.get("evidence") or [])
+                f.write(
+                    f"{rec['protein_id']}\t{acc}\t{seg['start']}\t{seg['end']}\t"
+                    f"{top['group']}\t{top['mean_prob']:.4f}\t"
+                    f"{top.get('conditioned_prob', '')}\t{ev}\n"
+                )
     return path
 
 
@@ -863,6 +999,41 @@ def save_idr_layer_report(report: dict, path: str) -> str:
     return path
 
 
+def export_idr_layer_bundle(
+    *,
+    out_dir: str,
+    report: dict,
+    records: list[dict],
+    proteins: list[dict],
+    disorder_probs_by_id: dict[str, np.ndarray],
+    gzip_jsonl: bool = False,
+) -> dict[str, str]:
+    """Write the standard IDR layer artifact set; returns path map."""
+    os.makedirs(out_dir, exist_ok=True)
+    paths = {
+        "report": save_idr_layer_report(
+            report, os.path.join(out_dir, "idr_biology_layer_report.json"),
+        ),
+        "jsonl": export_idr_layer_jsonl(
+            records, os.path.join(out_dir, "idr_biology_layer.jsonl"), gzip=gzip_jsonl,
+        ),
+        "triage": export_idr_triage_tsv(
+            records, os.path.join(out_dir, "idr_biology_layer_triage.tsv"),
+        ),
+        "bed": export_idr_layer_bed(
+            records, os.path.join(out_dir, "idr_biology_layer.bed"),
+        ),
+        "bedgraph": export_idr_disorder_bedgraph(
+            proteins, disorder_probs_by_id,
+            os.path.join(out_dir, "idr_biology_layer_disorder.bedgraph"),
+        ),
+        "roles": export_idr_role_tracks_tsv(
+            records, os.path.join(out_dir, "idr_biology_layer_roles.tsv"),
+        ),
+    }
+    return paths
+
+
 def print_idr_layer_report(report: dict) -> None:
     print(f"\n{'═' * 60}")
     print(" IDR Biology Layer (post-structure default)")
@@ -875,6 +1046,13 @@ def print_idr_layer_report(report: dict) -> None:
     print(f"  role∩hallucination={report.get('n_role_hallucination_intersections', 0)}")
     print(f"  roles with sequence-cue support={report.get('n_roles_with_sequence_cue_support', 0)}")
     print(f"  partner-context segments={report.get('n_segments_with_partner_context', 0)}")
+    print(f"  ligand-context segments={report.get('n_segments_with_ligand_context', 0)}")
+    sd = report.get("structure_distrust") or {}
+    if sd:
+        print(
+            f"  structure distrust: halluc_prot={sd.get('n_proteins_with_hallucination', 0)}  "
+            f"rescue_rate={sd.get('overall_rescue_rate', 0)}"
+        )
     rv = report.get("role_validation") or {}
     if rv.get("enabled"):
         micro = rv.get("micro") or {}
