@@ -65,6 +65,20 @@ AlphaFold 3's diffusion architecture hallucinates structure in genuinely disorde
 | v6 | 0.831 | 406 | + PCA-48, ESM variance/context features |
 | GPU (Colab) | 0.817 (0.831 AF-fusion subset) | 1280+phys | ESM-2 650M + LoRA + segment-aware ES + v6 ensemble |
 | GPU SOTA track (`sota` profile) | target ≥0.88–0.90 | — | Transformer head, Dice+EMA, 3-way stack, compact ckpt |
+| GPU ULTRA track (`ultra` profile) | target 0.88–0.92 | — | Rich features, FFN LoRA, v6-pro meta-stack, MC-dropout TTA |
+
+### Performance ceiling (honest)
+
+On **DisProt 5-fold CV** with ESM-2 650M, the realistic band is:
+
+| Stage | Typical pooled AUC |
+|-------|-------------------|
+| Verified GPU baseline | 0.817 |
+| + ultra training + 7b–7d stack | 0.88–0.92 (target) |
+| + multi-seed blend (2–3 seeds) | +0.005–0.015 |
+| ESMDisPred (CAID3, different protocol) | 0.895 reference |
+
+Breaking **0.90+ consistently** on DisProt likely needs **backbone upgrade** (ESM-2 3B / ESM-C) or **CAID3-homologous training** — not more post-hoc stacking alone. Use the [Quick Screen notebook](colab/DisorderNet_Colab_QuickScreen.ipynb) before a full ultra run.
 
 ### SOTA track (`QUALITY_PROFILE = "sota"`)
 
@@ -209,6 +223,8 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/DisorderNet_Colab_QuickScreen.ipynb` | **Quick breakthrough screen** (~2–3h go/no-go before full CV) — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_QuickScreen.ipynb) |
 | `colab/DisorderNet_Colab_Pro.ipynb` | Full GPU notebook (ESM-2 650M + LoRA) — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb) |
 | `colab/quick_screen.py` | Quick screen logic (stratified subsample, verdict tiers) |
+| `colab/inference_tta.py` | MC-dropout test-time augmentation (ultra Cell 7d) |
+| `colab/multi_seed_blend.py` | Optional multi-seed OOF average (Cell 7e) |
 | `colab/disordernet_gpu.py` | Colab training module (data, model, CV loop) |
 | `colab/cv_splits.py` | Shared deterministic GroupKFold splits + fingerprints |
 | `colab/sota_heads.py` | SOTA CNN+Transformer prediction head |

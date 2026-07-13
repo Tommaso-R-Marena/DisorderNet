@@ -30,7 +30,6 @@ from colab.inference_fusion import compute_pooled_metrics, write_fused_probs_to_
 from colab.biological_utility import align_fold_predictions
 
 
-@torch.inference_mode()
 def _predict_proteins(
     model: DisorderNetGPU,
     proteins: list,
@@ -38,6 +37,8 @@ def _predict_proteins(
     token_cache: dict,
     cfg: TrainConfig,
     plddt_by_id: Optional[dict] = None,
+    use_tta: bool = False,
+    tta_passes: int = 1,
 ) -> dict[str, np.ndarray]:
     """Run inference; return protein_id -> per-residue probabilities."""
     if not proteins:
@@ -53,6 +54,19 @@ def _predict_proteins(
     device = cfg.device
     amp_dtype = cfg.amp_dtype
     out: dict[str, np.ndarray] = {}
+    use_mc = use_tta and tta_passes > 1
+
+    def _one_batch(tokens, aa_idx, mask, rich_t):
+        aa = aa_idx if model.use_physico else None
+        if use_mc:
+            from colab.inference_tta import mc_dropout_predict_probs
+            return mc_dropout_predict_probs(
+                model, tokens, aa, mask, rich_t, tta_passes, _forward_logits,
+            )
+        with torch.inference_mode():
+            return torch.sigmoid(
+                _forward_logits(model, tokens, aa, mask, rich_feats=rich_t),
+            ).float()
 
     for tokens, labels, mask, aa_idx, _, rich_feats, ids in dl:
         tokens = tokens.to(device, non_blocking=True)
@@ -62,11 +76,7 @@ def _predict_proteins(
         with torch.amp.autocast(
             device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda",
         ):
-            logits = _forward_logits(
-                model, tokens, aa_idx if model.use_physico else None, mask,
-                rich_feats=rich_t,
-            )
-        probs = torch.sigmoid(logits).float().cpu().numpy()
+            probs = _one_batch(tokens, aa_idx, mask, rich_t).cpu().numpy()
         mask_np = mask.cpu().numpy()
         for i, pid in enumerate(ids):
             m = mask_np[i]
@@ -124,6 +134,11 @@ def run_fold_model_soup(
     token_cache: dict = {}
     models_loaded = 0
 
+    use_tta = getattr(cfg, "use_mc_dropout_tta", False)
+    tta_passes = int(getattr(cfg, "mc_dropout_tta_passes", 6))
+    if use_tta:
+        print(f"  MC-dropout TTA: {tta_passes} passes per batch", flush=True)
+
     for model_idx in range(n_folds):
         ckpt_path = os.path.join(ckpt_dir, f"fold{model_idx + 1}_best.pt")
         if not os.path.isfile(ckpt_path):
@@ -138,6 +153,7 @@ def run_fold_model_soup(
             val_proteins = [proteins[i] for i in val_idx]
             preds = _predict_proteins(
                 fold_model, val_proteins, batch_converter, token_cache, cfg, plddt_by_id,
+                use_tta=use_tta, tta_passes=tta_passes,
             )
             for pid, pr in preds.items():
                 prob_sum[pid] += pr
@@ -147,6 +163,7 @@ def run_fold_model_soup(
                 val_proteins = [proteins[i] for i in val_idx]
                 preds = _predict_proteins(
                     fold_model, val_proteins, batch_converter, token_cache, cfg, plddt_by_id,
+                    use_tta=use_tta, tta_passes=tta_passes,
                 )
                 for pid, pr in preds.items():
                     prob_sum[pid] += pr
@@ -196,6 +213,8 @@ def run_fold_model_soup(
         "delta_auc_pooled": after["auc"] - before["auc"],
         "delta_ap_pooled": after["ap"] - before["ap"],
         "method": "fold_checkpoint_ensemble",
+        "mc_dropout_tta": use_tta,
+        "mc_dropout_tta_passes": tta_passes if use_tta else 0,
     }
     return report, fold_results_soup
 

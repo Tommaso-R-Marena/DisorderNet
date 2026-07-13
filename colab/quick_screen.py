@@ -218,6 +218,7 @@ def run_paradigm_quick_screen(
     mode: str = "standard",
     seed: int = 42,
     run_ensemble: bool = True,
+    use_v6_pro: bool = True,
     checkpoint_subdir: str = "quick_screen",
 ) -> dict:
     """
@@ -286,13 +287,20 @@ def run_paradigm_quick_screen(
     v6_auc: Optional[float] = None
 
     if run_ensemble:
-        print("\n  Running v6-lite ensemble on screen subset…", flush=True)
+        print("\n  Running v6 ensemble on screen subset…", flush=True)
         v6_cache = f"{screen_cfg.checkpoint_dir}/v6_screen_cache.json"
-        oof_probs, oof_labels, _ = run_v6_lite_oof(
-            subset, n_folds=screen_cfg.n_folds, seed=seed, verbose=True,
-        )
-        v6_auc = float(roc_auc_score(oof_labels, oof_probs))
         from colab.ensemble_v6 import aligned_probs_from_oof, save_v6_probs_cache
+        if use_v6_pro:
+            from colab.v6_pro_ensemble import run_v6_pro_oof
+            print("  Using v6-pro (LGB+XGB) for screen ensemble…", flush=True)
+            oof_probs, oof_labels, _ = run_v6_pro_oof(
+                subset, n_folds=screen_cfg.n_folds, seed=seed, verbose=True,
+            )
+        else:
+            oof_probs, oof_labels, _ = run_v6_lite_oof(
+                subset, n_folds=screen_cfg.n_folds, seed=seed, verbose=True,
+            )
+        v6_auc = float(roc_auc_score(oof_labels, oof_probs))
         v6_by_id = aligned_probs_from_oof(subset, oof_probs)
         save_v6_probs_cache(v6_by_id, v6_cache)
 
@@ -304,6 +312,7 @@ def run_paradigm_quick_screen(
             v6_cache_path=v6_cache,
             run_v6_if_missing=False,
             seed=seed,
+            use_v6_pro=False,
         )
 
         stacked_metrics = compute_pooled_metrics(fold_results)
@@ -327,6 +336,7 @@ def run_paradigm_quick_screen(
         "mode": mode,
         "mode_spec": spec,
         "sample": sample_meta,
+        "v6_pro_ensemble": use_v6_pro,
         "screen_profile": spec["train_profile"],
         "gpu": {
             "pooled_auc": float(gpu_auc),
