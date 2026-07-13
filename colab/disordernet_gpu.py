@@ -295,6 +295,10 @@ class TrainConfig:
     unfreeze_last_layers: int = 0  # fine-tune tail LayerNorm + FFN
     lr_esm_tail: float = 1e-5
 
+    # Inference-time boosts
+    use_mc_dropout_tta: bool = False
+    mc_dropout_tta_passes: int = 6
+
     # AF hallucination hard-negative weighting (disordered + high pLDDT)
     use_hallucination_weighting: bool = True
     hallucination_weight: float = 3.0
@@ -405,6 +409,8 @@ class TrainConfig:
                 "lora_on_out_proj": True,
                 "lora_on_ffn": True,
                 "unfreeze_last_layers": 2,
+                "use_mc_dropout_tta": True,
+                "mc_dropout_tta_passes": 6,
             },
             "screen": {
                 "lora_rank": 32,

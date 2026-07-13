@@ -134,6 +134,24 @@ def calibrate_fold_results(
         iso_report["method"] = "isotonic"
         return updated, iso_report
 
+    if method == "temperature_then_isotonic":
+        temp_updated, temp_report = calibrate_fold_results(fold_results, method="temperature")
+        if temp_report.get("insufficient_data"):
+            return fold_results, temp_report
+        iso_updated, iso_report = calibrate_fold_results(temp_updated, method="isotonic")
+        if iso_report.get("insufficient_data"):
+            return temp_updated, {**temp_report, "method": "temperature_then_isotonic", "isotonic_skipped": True}
+        combined = {
+            "method": "temperature_then_isotonic",
+            "temperature": temp_report.get("temperature"),
+            "temperature_auc_after": temp_report.get("auc_after"),
+            "isotonic_auc_before": iso_report.get("auc_before"),
+            "isotonic_auc_after": iso_report.get("auc_after"),
+            "auc_before": temp_report.get("auc_before"),
+            "auc_after": iso_report.get("auc_after"),
+        }
+        return iso_updated, combined
+
     return fold_results, {"method": "none", "skipped": True}
 
 
