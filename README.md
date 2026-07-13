@@ -1,7 +1,8 @@
 # DisorderNet: Beating AlphaFold 3 at Intrinsic Disorder Prediction
 
 [![Tests](https://github.com/Tommaso-R-Marena/DisorderNet/actions/workflows/test.yml/badge.svg)](https://github.com/Tommaso-R-Marena/DisorderNet/actions/workflows/test.yml)
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb)
+[![Open In Colab — Full GPU CV](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb)
+[![Open In Colab — Quick Screen](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_QuickScreen.ipynb)
 
 ## Overview
 
@@ -130,9 +131,21 @@ Designed to close the gap to ESMDisPred (0.895 CAID3 reference):
 
 ## Quick Start
 
-### Option 1: Google Colab (Recommended for max performance)
+### Option 1a: Quick paradigm screen (~2–3 hours, recommended first)
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb)
+[![Open Quick Screen in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_QuickScreen.ipynb)
+
+Run this **before** the full 18–24h CV to get a breakthrough go/no-go verdict on the current paradigm (ESM-2 650M + LoRA + v6 ensemble).
+
+1. Open [`colab/DisorderNet_Colab_QuickScreen.ipynb`](colab/DisorderNet_Colab_QuickScreen.ipynb) in Colab (badge above)
+2. Select **Runtime → Change runtime type → GPU (A100 or L4) + High RAM**
+3. Set `SCREEN_MODE = "standard"` (or `"flash"` for ~1h, `"paradigm"` for mini-ultra)
+4. Run all cells — outputs `quick_screen_report.json` with tier **HIGH / MODERATE / LOW / STOP**
+5. Proceed to the full notebook only if the verdict recommends full ultra CV
+
+### Option 1b: Full GPU cross-validation (Google Colab)
+
+[![Open Full GPU CV in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb)
 
 1. Click the badge above
 2. Select **Runtime → Change runtime type → GPU (A100 or L4) + High RAM**
@@ -193,7 +206,9 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 
 | File | Description |
 |------|-------------|
-| `colab/DisorderNet_Colab_Pro.ipynb` | Full GPU notebook (ESM-2 650M + LoRA) |
+| `colab/DisorderNet_Colab_QuickScreen.ipynb` | **Quick breakthrough screen** (~2–3h go/no-go before full CV) — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_QuickScreen.ipynb) |
+| `colab/DisorderNet_Colab_Pro.ipynb` | Full GPU notebook (ESM-2 650M + LoRA) — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb) |
+| `colab/quick_screen.py` | Quick screen logic (stratified subsample, verdict tiers) |
 | `colab/disordernet_gpu.py` | Colab training module (data, model, CV loop) |
 | `colab/cv_splits.py` | Shared deterministic GroupKFold splits + fingerprints |
 | `colab/sota_heads.py` | SOTA CNN+Transformer prediction head |
