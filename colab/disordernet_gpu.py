@@ -640,8 +640,12 @@ def setup_environment(cfg: TrainConfig) -> TrainConfig:
 # ---------------------------------------------------------------------------
 # Data
 # ---------------------------------------------------------------------------
-def fetch_disprot(cache_path: str = "disprot_raw.json") -> list:
+def fetch_disprot(cache_path: str = "disprot_raw.json", concurrent: bool = True) -> list:
     """Fetch DisProt via REST API with local JSON cache (versioned metadata wrapper)."""
+    if concurrent and not os.path.exists(cache_path):
+        from colab.async_io import fetch_disprot_concurrent
+        return fetch_disprot_concurrent(cache_path=cache_path)
+
     if os.path.exists(cache_path):
         print(f"Loading cached DisProt from '{cache_path}'...")
         with open(cache_path) as f:
@@ -705,6 +709,7 @@ def fetch_disprot(cache_path: str = "disprot_raw.json") -> list:
         "content_sha256": hashlib.sha256(
             json.dumps(all_entries, sort_keys=True).encode()
         ).hexdigest(),
+        "fetch_mode": "sequential",
     }
     with open(cache_path, "w") as f:
         json.dump({"meta": meta, "data": all_entries}, f)

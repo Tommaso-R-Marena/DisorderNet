@@ -132,9 +132,23 @@ Stages: `af3` · eval with `--af3-mode ingest|run` · CV uses AF3 pLDDT for stru
 | TORCH_HOME on scratch | Faster ESM weight load from local SSD |
 | Grad-checkpoint off at infer | ~10–30% faster fold soup / FASTA predict |
 | Parallel AF2 pLDDT fetch | Faster structure prefetch |
+| **Concurrent DisProt download** | Parallel REST pages at cold start |
+| **ESM ‖ AF2 pLDDT overlap** | Prefetch structure while loading ESM |
+| **AF3 Slurm array** | Parallel MSA-free AF3 across GPUs |
+| **Parallel result mirror** | Threaded copy of reports to `$DISORDERNET_RESULTS` |
 | AF3 MSA-free mode | Hours→minutes per protein without 630 GB DBs |
 
 These do **not** change CV folds, losses, or logit values used for AUC.
+
+### AF3 parallel array
+
+```bash
+export DISORDERNET_AF3_ROOT=$HOME/af3
+export AF3_SHARD_COUNT=8
+sbatch --account=$DISORDERNET_ACCOUNT --array=0-7 \
+  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_AF3_ROOT,AF3_MODE=run,AF3_SHARD_COUNT=8 \
+  rockfish/slurm/af3_array.sbatch
+```
 
 ## vs ESMDisPred / sequence-only SOTA
 

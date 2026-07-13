@@ -7,6 +7,7 @@ Weights stay off GitHub — place licensed af3.bin under $DISORDERNET_AF3_ROOT.
 
 from __future__ import annotations
 
+import json
 import os
 import textwrap
 from typing import Optional
@@ -115,6 +116,46 @@ def print_af3_rockfish_instructions(paths: Optional[dict] = None) -> None:
     """))
 
 
+def write_af3_pending_list(
+    proteins: list,
+    output_dir: str,
+    list_path: str,
+) -> list[dict]:
+    """Write JSONL of proteins still missing AF3 outputs (for Slurm arrays)."""
+    from colab.af3_colab import select_proteins_for_af3
+
+    _, pending = select_proteins_for_af3(proteins, output_dir)
+    os.makedirs(os.path.dirname(list_path) or ".", exist_ok=True)
+    with open(list_path, "w") as f:
+        for p in pending:
+            f.write(json.dumps({
+                "id": p["id"],
+                "uniprot_acc": p.get("uniprot_acc", ""),
+                "sequence": p["sequence"],
+                "length": p.get("length", len(p["sequence"])),
+            }) + "\n")
+    print(f"AF3 pending list: {len(pending)} proteins → {list_path}")
+    return pending
+
+
+def load_af3_pending_shard(
+    list_path: str,
+    shard_index: int,
+    shard_count: int,
+) -> list[dict]:
+    """Load one shard of the pending JSONL for a Slurm array task."""
+    proteins: list[dict] = []
+    with open(list_path) as f:
+        for i, line in enumerate(f):
+            line = line.strip()
+            if not line:
+                continue
+            if i % shard_count != shard_index:
+                continue
+            proteins.append(json.loads(line))
+    return proteins
+
+
 def run_af3_on_rockfish(
     proteins: list,
     mode: str = "ingest",
@@ -123,11 +164,14 @@ def run_af3_on_rockfish(
     msa_free: bool = True,
     timeout_s: int = 7200,
     prefer_docker: bool = False,
+    shard_index: Optional[int] = None,
+    shard_count: Optional[int] = None,
 ) -> dict:
     """
     Ingest existing AF3 outputs or run missing proteins on the GPU node.
 
     prefer_docker=False on Rockfish (singularity/native more common).
+    Optional shard_index/shard_count for Slurm array parallelism.
     """
     cfg = setup_af3_for_rockfish(mode=mode, af3_root=af3_root)
     print_af3_rockfish_instructions(cfg["paths"])
@@ -151,15 +195,31 @@ def run_af3_on_rockfish(
             "paths": cfg["paths"],
         }
 
-    # run / auto
+    # run / auto — optional array sharding
+    run_proteins = proteins
+    if shard_index is not None and shard_count is not None and shard_count > 1:
+        _, pending = select_proteins_for_af3(proteins, cfg["paths"]["output_dir"])
+        run_proteins = [
+            p for i, p in enumerate(pending) if i % shard_count == shard_index
+        ]
+        print(
+            f"AF3 array shard {shard_index}/{shard_count}: "
+            f"{len(run_proteins)}/{len(pending)} pending proteins",
+            flush=True,
+        )
+        if max_proteins is not None:
+            run_proteins = run_proteins[:max_proteins]
+    elif max_proteins is not None:
+        run_proteins = proteins  # run_af3_batch applies max internally
+
     if not cfg.get("weights_ok"):
         return {"success": False, "error": cfg.get("weights_message"), "mode": mode}
 
     batch = run_af3_batch(
-        proteins=proteins,
+        proteins=run_proteins if (shard_index is not None) else proteins,
         paths=cfg["paths"],
         alphafold3_repo=cfg.get("alphafold3_repo") or default_af3_repo(),
-        max_proteins=max_proteins,
+        max_proteins=None if shard_index is not None else max_proteins,
         timeout_s=timeout_s,
         msa_free=msa_free,
         prefer_docker=prefer_docker,
@@ -167,4 +227,6 @@ def run_af3_on_rockfish(
     )
     batch["mode"] = mode
     batch["paths"] = cfg["paths"]
+    batch["shard_index"] = shard_index
+    batch["shard_count"] = shard_count
     return batch
