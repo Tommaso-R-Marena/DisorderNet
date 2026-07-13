@@ -54,6 +54,18 @@ _FINGERPRINT_KEYS = (
     "dice_loss_weight",
     "use_ema",
     "compact_checkpoints",
+    "use_rdrop",
+    "use_tversky_loss",
+    "use_swa",
+    "use_v6_distill",
+    "use_rich_features",
+    "fusion_type",
+    "lora_on_out_proj",
+    "lora_on_ffn",
+    "unfreeze_last_layers",
+    "head_type",
+    "esm_backbone",
+    "esm_embed_dim",
 )
 
 
