@@ -14,7 +14,7 @@ from typing import Optional
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import average_precision_score, roc_auc_score
-from sklearn.model_selection import GroupKFold
+from colab.cv_splits import get_cv_splits
 
 from colab.biological_utility import align_fold_predictions
 from colab.inference_fusion import compute_pooled_metrics, write_fused_probs_to_fold_results
@@ -81,13 +81,12 @@ def run_v6_lite_oof(
 
     Returns (oof_probs, oof_labels, per_fold_metadata).
     """
-    gkf = GroupKFold(n_splits=n_folds)
-    groups = np.arange(len(proteins))
+    splits = get_cv_splits(proteins, n_folds)
     oof_probs_by_id: dict[str, np.ndarray] = {}
     oof_labels_by_id: dict[str, np.ndarray] = {}
     fold_meta: list[dict] = []
 
-    for fold_idx, (train_idx, val_idx) in enumerate(gkf.split(groups, groups=groups)):
+    for fold_idx, (train_idx, val_idx) in enumerate(splits):
         train_proteins = [proteins[i] for i in train_idx]
         val_proteins = [proteins[i] for i in val_idx]
 

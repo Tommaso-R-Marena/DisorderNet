@@ -13,7 +13,7 @@ from typing import Optional
 
 import numpy as np
 from sklearn.metrics import average_precision_score, roc_auc_score
-from sklearn.model_selection import GroupKFold
+from colab.cv_splits import get_cv_splits
 
 from colab.biological_utility import align_fold_predictions
 from colab.phase3_synthesis import find_optimal_fusion_alpha, fuse_disorder_score
@@ -142,10 +142,9 @@ def write_fused_probs_to_fold_results(
     by_id = {item["id"]: item["probs"] for item in aligned}
     updated = []
 
-    gkf = GroupKFold(n_splits=n_folds)
-    groups = np.arange(len(proteins))
+    splits = get_cv_splits(proteins, n_folds)
 
-    for fold_idx, (_, val_idx) in enumerate(gkf.split(groups, groups=groups)):
+    for fold_idx, (_, val_idx) in enumerate(splits):
         if fold_idx >= len(fold_results):
             break
         fold_copy = dict(fold_results[fold_idx])

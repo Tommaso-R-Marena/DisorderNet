@@ -12,6 +12,7 @@ Designed for Google Colab Pro (A100 / L4 / T4 / V100) with:
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import math
 import os
@@ -32,7 +33,13 @@ from sklearn.metrics import (
     matthews_corrcoef,
     roc_auc_score,
 )
-from sklearn.model_selection import GroupKFold
+from colab.cv_splits import (
+    config_fingerprint,
+    get_cv_splits,
+    get_fold_val_protein_ids,
+    proteins_fingerprint,
+    sort_proteins_deterministic,
+)
 from torch.amp import GradScaler, autocast
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
@@ -255,6 +262,9 @@ class TrainConfig:
     segment_postprocess_min_len: int = 5
     segment_postprocess_max_gap: int = 3
 
+    # Checkpoint selection: "composite" (AUC+AP+SegF1) or "auc" (AUC-only, rigor-first)
+    early_stop_mode: str = "composite"
+
     # AF hallucination hard-negative weighting (disordered + high pLDDT)
     use_hallucination_weighting: bool = True
     hallucination_weight: float = 3.0
@@ -399,11 +409,19 @@ def setup_environment(cfg: TrainConfig) -> TrainConfig:
 # Data
 # ---------------------------------------------------------------------------
 def fetch_disprot(cache_path: str = "disprot_raw.json") -> list:
-    """Fetch DisProt via REST API with local JSON cache."""
+    """Fetch DisProt via REST API with local JSON cache (versioned metadata wrapper)."""
     if os.path.exists(cache_path):
         print(f"Loading cached DisProt from '{cache_path}'...")
         with open(cache_path) as f:
-            return json.load(f)
+            payload = json.load(f)
+        if isinstance(payload, dict) and "data" in payload:
+            meta = payload.get("meta", {})
+            n = meta.get("n_entries", len(payload["data"]))
+            fetched = meta.get("fetched_at", "unknown date")
+            sha = meta.get("content_sha256", "")[:12]
+            print(f"  Cache meta: {n} entries  fetched={fetched}  sha={sha}")
+            return payload["data"]
+        return payload
 
     base_url = "https://disprot.org/api/search"
     params = {
@@ -448,9 +466,32 @@ def fetch_disprot(cache_path: str = "disprot_raw.json") -> list:
     elapsed = time.time() - t0
     print(f"Downloaded {len(all_entries)} entries in {elapsed:.0f}s")
 
+    meta = {
+        "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "n_entries": len(all_entries),
+        "api_release": params["release"],
+        "content_sha256": hashlib.sha256(
+            json.dumps(all_entries, sort_keys=True).encode()
+        ).hexdigest(),
+    }
     with open(cache_path, "w") as f:
-        json.dump(all_entries, f)
+        json.dump({"meta": meta, "data": all_entries}, f)
+    print(f"  Saved DisProt cache (sha256={meta['content_sha256'][:12]}...)")
     return all_entries
+
+
+def get_disprot_cache_meta(cache_path: str = "disprot_raw.json") -> Optional[dict]:
+    """Return DisProt cache metadata if present (legacy flat caches return None)."""
+    if not os.path.isfile(cache_path):
+        return None
+    try:
+        with open(cache_path) as f:
+            payload = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    if isinstance(payload, dict) and "meta" in payload:
+        return dict(payload["meta"])
+    return None
 
 
 def _normalize_term(term_name: Optional[str]) -> str:
@@ -552,6 +593,7 @@ def process_disprot(
             "n_functional_regions": len(functional_regions),
         })
 
+    proteins = sort_proteins_deterministic(proteins)
     return proteins, skipped
 
 
@@ -595,6 +637,7 @@ def print_training_config_summary(cfg: TrainConfig, proteins: Optional[list] = N
     print(f"  Segment early-stop : {cfg.use_segment_early_stop} "
           f"({cfg.auc_score_weight}·AUC + {cfg.ap_score_weight}·AP + "
           f"{cfg.segment_score_weight}·SegF1)")
+    print(f"  Early-stop mode    : {cfg.early_stop_mode}")
     print(f"  Hallucination wt   : {cfg.use_hallucination_weighting} "
           f"(×{cfg.hallucination_weight} @ pLDDT≥{cfg.high_plddt_threshold})")
     if proteins is not None:
@@ -1102,7 +1145,11 @@ def train_fold(
         pin_memory=cfg.pin_memory,
         persistent_workers=cfg.num_workers > 0,
     )
-    train_dl = DataLoader(train_ds, shuffle=True, drop_last=False, **loader_kw)
+    train_gen = torch.Generator()
+    train_gen.manual_seed(cfg.seed + fold_idx * 1000)
+    train_dl = DataLoader(
+        train_ds, shuffle=True, drop_last=False, generator=train_gen, **loader_kw,
+    )
     val_dl = DataLoader(val_ds, shuffle=False, **loader_kw)
 
     lora_params = list(fold_model.get_lora_params())
@@ -1129,6 +1176,7 @@ def train_fold(
     best_ap = 0.0
     best_state: Optional[dict] = None
     best_probs = best_labels = None
+    best_epoch = 0
     ckpt_path = os.path.join(cfg.checkpoint_dir, f"fold{fold_idx + 1}_best.pt")
     patience_counter = 0
     history: list = []
@@ -1226,7 +1274,9 @@ def train_fold(
         history.append(row)
 
         marker = ""
-        if cfg.use_segment_early_stop:
+        if cfg.early_stop_mode == "auc":
+            composite = val_metrics["auc"]
+        elif cfg.use_segment_early_stop:
             composite = composite_early_stop_score(
                 val_metrics["auc"],
                 val_metrics["ap"],
@@ -1241,6 +1291,7 @@ def train_fold(
             best_score = composite
             best_auc = val_metrics["auc"]
             best_ap = val_metrics["ap"]
+            best_epoch = epoch + 1
             best_state = copy.deepcopy(fold_model.state_dict())
             best_probs = val_metrics["probs"]
             best_labels = val_metrics["labels"]
@@ -1282,6 +1333,8 @@ def train_fold(
         "fold": fold_idx + 1,
         "best_auc": best_auc,
         "best_ap": best_ap,
+        "best_epoch": best_epoch,
+        "early_stop_mode": cfg.early_stop_mode,
         "history": history,
         "val_probs": best_probs,
         "val_labels": best_labels,
@@ -1314,15 +1367,21 @@ def save_cv_progress(
     path: str,
     fold_results: list,
     cfg: TrainConfig,
-    n_proteins: int,
+    proteins: list,
+    disprot_meta: Optional[dict] = None,
 ) -> None:
     """Persist completed folds so Colab can resume after disconnect."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     payload = {
-        "version": 1,
-        "n_proteins": n_proteins,
+        "version": 2,
+        "n_proteins": len(proteins),
+        "protein_ids": [p["id"] for p in proteins],
+        "proteins_fingerprint": proteins_fingerprint(proteins),
+        "fold_val_ids": get_fold_val_protein_ids(proteins, cfg.n_folds),
+        "config_fingerprint": config_fingerprint(cfg),
         "n_folds": cfg.n_folds,
         "seed": cfg.seed,
+        "disprot_meta": disprot_meta,
         "fold_results": [_serialize_fold_result(r) for r in fold_results],
     }
     with open(path, "w") as f:
@@ -1332,7 +1391,8 @@ def save_cv_progress(
 def load_cv_progress(
     path: str,
     cfg: TrainConfig,
-    n_proteins: int,
+    proteins: list,
+    disprot_meta: Optional[dict] = None,
 ) -> list:
     """Load completed folds if progress file matches current run."""
     if not os.path.isfile(path):
@@ -1342,10 +1402,26 @@ def load_cv_progress(
             payload = json.load(f)
     except (json.JSONDecodeError, OSError):
         return []
-    if payload.get("version") != 1:
-        return []
-    if (
-        payload.get("n_proteins") != n_proteins
+
+    version = payload.get("version", 1)
+    if version >= 2:
+        if payload.get("protein_ids") != [p["id"] for p in proteins]:
+            print("  ⚠ cv_progress.json protein ID list mismatch — ignoring saved folds")
+            return []
+        if payload.get("proteins_fingerprint") != proteins_fingerprint(proteins):
+            print("  ⚠ cv_progress.json protein fingerprint mismatch — ignoring saved folds")
+            return []
+        if payload.get("config_fingerprint") != config_fingerprint(cfg):
+            print("  ⚠ cv_progress.json config fingerprint mismatch — ignoring saved folds")
+            return []
+        saved_meta = payload.get("disprot_meta")
+        if disprot_meta and saved_meta and saved_meta.get("content_sha256") != disprot_meta.get(
+            "content_sha256"
+        ):
+            print("  ⚠ cv_progress.json DisProt snapshot mismatch — ignoring saved folds")
+            return []
+    elif (
+        payload.get("n_proteins") != len(proteins)
         or payload.get("n_folds") != cfg.n_folds
         or payload.get("seed") != cfg.seed
     ):
@@ -1353,7 +1429,22 @@ def load_cv_progress(
             "  ⚠ cv_progress.json mismatch (proteins/folds/seed changed) — ignoring saved folds"
         )
         return []
+
+    if payload.get("n_folds") != cfg.n_folds or payload.get("seed") != cfg.seed:
+        print("  ⚠ cv_progress.json folds/seed mismatch — ignoring saved folds")
+        return []
+
     return [_deserialize_fold_result(r) for r in payload.get("fold_results", [])]
+
+
+def infer_resume_fold(
+    path: str,
+    cfg: TrainConfig,
+    proteins: list,
+    disprot_meta: Optional[dict] = None,
+) -> int:
+    """Return next fold index (0-based) from saved CV progress."""
+    return len(load_cv_progress(path, cfg, proteins, disprot_meta))
 
 
 def run_cross_validation(
@@ -1381,13 +1472,13 @@ def run_cross_validation(
         print(f"  pLDDT available for {n_cached}/{len(proteins)} proteins")
 
     token_cache: dict = {}
-    gkf = GroupKFold(n_splits=cfg.n_folds)
-    groups = np.arange(len(proteins))
+    splits = get_cv_splits(proteins, cfg.n_folds)
 
     progress_path = os.path.join(cfg.checkpoint_dir, "cv_progress.json")
+    disprot_meta = get_disprot_cache_meta(cfg.data_cache)
     fold_results: list = []
     if resume_from_fold > 0:
-        loaded = load_cv_progress(progress_path, cfg, len(proteins))
+        loaded = load_cv_progress(progress_path, cfg, proteins, disprot_meta)
         if len(loaded) >= resume_from_fold:
             fold_results = loaded[:resume_from_fold]
             print(
@@ -1417,7 +1508,7 @@ def run_cross_validation(
     elif cfg.use_hallucination_weighting:
         print("  AF pLDDT cache     : none (hallucination weights = boundary only)")
 
-    for fold_idx, (train_idx, val_idx) in enumerate(gkf.split(groups, groups=groups)):
+    for fold_idx, (train_idx, val_idx) in enumerate(splits):
         if fold_idx < resume_from_fold:
             print(f"  Skipping fold {fold_idx + 1} (resume_from_fold={resume_from_fold})")
             continue
@@ -1437,7 +1528,7 @@ def run_cross_validation(
             on_epoch_end=on_epoch_end,
         )
         fold_results.append(result)
-        save_cv_progress(progress_path, fold_results, cfg, len(proteins))
+        save_cv_progress(progress_path, fold_results, cfg, proteins, disprot_meta)
 
         if on_fold_complete:
             on_fold_complete(result)
@@ -1470,6 +1561,9 @@ def run_cross_validation(
             k: (str(v) if isinstance(v, (torch.device, torch.dtype)) else v)
             for k, v in asdict(cfg).items()
         },
+        "proteins_fingerprint": proteins_fingerprint(proteins),
+        "config_fingerprint": config_fingerprint(cfg),
+        "disprot_meta": disprot_meta,
     }
 
     _print_cv_summary(fold_results, summary)

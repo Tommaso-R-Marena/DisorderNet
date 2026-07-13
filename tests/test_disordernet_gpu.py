@@ -270,7 +270,8 @@ class TestCvProgress:
     def test_roundtrip_save_load(self, tmp_path):
         from colab.disordernet_gpu import load_cv_progress, save_cv_progress
 
-        cfg = TrainConfig(seed=7, n_folds=5)
+        cfg = TrainConfig(seed=7, n_folds=2)
+        proteins = [{"id": f"P{i}", "length": 10} for i in range(6)]
         fold_results = [
             {
                 "fold": 1,
@@ -284,8 +285,8 @@ class TestCvProgress:
             }
         ]
         path = str(tmp_path / "cv_progress.json")
-        save_cv_progress(path, fold_results, cfg, n_proteins=600)
-        loaded = load_cv_progress(path, cfg, n_proteins=600)
+        save_cv_progress(path, fold_results, cfg, proteins)
+        loaded = load_cv_progress(path, cfg, proteins)
         assert len(loaded) == 1
         assert loaded[0]["best_auc"] == 0.81
         np.testing.assert_allclose(loaded[0]["val_probs"], [0.1, 0.9])
@@ -294,8 +295,35 @@ class TestCvProgress:
     def test_mismatch_returns_empty(self, tmp_path):
         from colab.disordernet_gpu import load_cv_progress, save_cv_progress
 
-        cfg = TrainConfig(seed=7, n_folds=5)
+        cfg = TrainConfig(seed=7, n_folds=2)
+        proteins = [{"id": f"P{i}", "length": 10} for i in range(4)]
         path = str(tmp_path / "cv_progress.json")
-        save_cv_progress(path, [], cfg, n_proteins=600)
-        assert load_cv_progress(path, TrainConfig(seed=99), 600) == []
-        assert load_cv_progress(path, cfg, n_proteins=500) == []
+        save_cv_progress(path, [], cfg, proteins)
+        assert load_cv_progress(path, TrainConfig(seed=99), proteins) == []
+        assert load_cv_progress(path, cfg, [{"id": "P99", "length": 10}]) == []
+
+    def test_config_fingerprint_mismatch(self, tmp_path):
+        from colab.disordernet_gpu import load_cv_progress, save_cv_progress
+
+        proteins = [{"id": "P1", "length": 10}]
+        cfg_a = TrainConfig(seed=7, n_folds=2, lora_rank=16)
+        cfg_b = TrainConfig(seed=7, n_folds=2, lora_rank=32)
+        proteins = [{"id": f"P{i}", "length": 10} for i in range(6)]
+        path = str(tmp_path / "cv_progress.json")
+        save_cv_progress(path, [], cfg_a, proteins)
+        assert load_cv_progress(path, cfg_b, proteins) == []
+
+    def test_infer_resume_fold(self, tmp_path):
+        from colab.disordernet_gpu import infer_resume_fold, save_cv_progress
+
+        cfg = TrainConfig(seed=7, n_folds=2)
+        proteins = [{"id": "P1", "length": 10}, {"id": "P2", "length": 20},
+                    {"id": "P3", "length": 15}, {"id": "P4", "length": 12}]
+        path = str(tmp_path / "cv_progress.json")
+        save_cv_progress(
+            path,
+            [{"fold": 1, "best_auc": 0.8, "best_ap": 0.4, "val_probs": [0.5], "val_labels": [0]}],
+            cfg,
+            proteins,
+        )
+        assert infer_resume_fold(path, cfg, proteins) == 1
