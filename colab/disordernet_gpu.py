@@ -244,6 +244,10 @@ class TrainConfig:
     physico_dim: int = 32
     esm_fusion_layers: int = 4
 
+    # ESM-2 backbone (8M | 35M | 150M | 650M | 3B)
+    esm_backbone: str = "650M"
+    esm_embed_dim: int = 1280
+
     n_folds: int = 5
     num_workers: int = 2
     checkpoint_dir: str = "checkpoints"
@@ -324,6 +328,7 @@ class TrainConfig:
         max      — higher capacity (rank 32, 25 epochs, larger physico stream)
         sota     — SOTA push: rank 64, Transformer head, Dice+EMA, compact ckpt
         ultra    — maximum push: rich features, attn fusion, FFN LoRA, v6-pro stack
+        ultra3b  — ultra on ESM-2 3B (A100 40GB+); primary backbone upgrade
         screen   — fast paradigm check (~2h): 8 epochs, CNN head, 10 LoRA layers
         screen_plus — paradigm fidelity (~4h): mini-ultra on subset
         """
@@ -412,6 +417,49 @@ class TrainConfig:
                 "use_mc_dropout_tta": True,
                 "mc_dropout_tta_passes": 6,
             },
+            "ultra3b": {
+                "esm_backbone": "3B",
+                "esm_embed_dim": 2560,
+                "lora_rank": 64,
+                "lora_alpha": 128,
+                "lora_layers": 14,
+                "num_epochs": 28,
+                "patience": 10,
+                "lr_lora": 2e-5,
+                "lr_head": 1.2e-4,
+                "lr_esm_tail": 5e-6,
+                "boundary_weight": 4.0,
+                "physico_dim": 96,
+                "focal_gamma": 3.0,
+                "esm_fusion_layers": 10,
+                "head_type": "sota",
+                "use_dice_loss": True,
+                "dice_loss_weight": 0.35,
+                "label_smoothing": 0.03,
+                "use_ema": True,
+                "ema_decay": 0.9995,
+                "compact_checkpoints": True,
+                "auc_score_weight": 0.40,
+                "ap_score_weight": 0.15,
+                "segment_score_weight": 0.45,
+                "hallucination_weight": 4.0,
+                "use_rdrop": True,
+                "rdrop_weight": 0.5,
+                "use_tversky_loss": True,
+                "tversky_weight": 0.15,
+                "use_swa": True,
+                "swa_start_frac": 0.65,
+                "use_v6_distill": True,
+                "v6_distill_weight": 0.15,
+                "use_rich_features": True,
+                "fusion_type": "attention",
+                "lora_on_out_proj": True,
+                "lora_on_ffn": True,
+                "unfreeze_last_layers": 2,
+                "use_mc_dropout_tta": True,
+                "mc_dropout_tta_passes": 4,
+                "max_seq_len": 1022,
+            },
             "screen": {
                 "lora_rank": 32,
                 "lora_alpha": 64,
@@ -462,6 +510,13 @@ class TrainConfig:
             )
         obj = cls(**{**presets[profile], **overrides})
         obj._profile_name = profile  # type: ignore[attr-defined]
+        if obj.esm_backbone != "650M" or profile in ("ultra3b",):
+            try:
+                from colab.esm_backbone import get_backbone_spec
+                spec = get_backbone_spec(obj.esm_backbone)
+                obj.esm_embed_dim = spec.embed_dim
+            except Exception:
+                pass
         return obj
 
 
@@ -528,8 +583,11 @@ def setup_environment(cfg: TrainConfig) -> TrainConfig:
     major, _ = torch.cuda.get_device_capability(0)
     cfg.amp_dtype = torch.bfloat16 if major >= 8 else torch.float16
 
-    bs, accum = _auto_batch_size(cfg.vram_gb)
     if cfg.batch_size == 4 and cfg.accum_steps == 4:
+        from colab.esm_backbone import auto_batch_for_backbone
+        bs, accum = auto_batch_for_backbone(
+            cfg.vram_gb, getattr(cfg, "esm_backbone", "650M"),
+        )
         cfg.batch_size = bs
         cfg.accum_steps = accum
 
@@ -556,6 +614,9 @@ def setup_environment(cfg: TrainConfig) -> TrainConfig:
     if _in_colab() and cfg.num_workers != 0:
         cfg.num_workers = 0
         print("  DataLoader workers: 0 (Colab-safe; avoids multiprocessing hangs)")
+    if getattr(cfg, "esm_backbone", "650M") == "3B":
+        from colab.esm_backbone import print_backbone_playbook
+        print_backbone_playbook(cfg.vram_gb)
     print(f"{'=' * 55}")
     return cfg
 
@@ -783,6 +844,8 @@ def print_training_config_summary(cfg: TrainConfig, proteins: Optional[list] = N
     print("  Training configuration")
     print(f"{'─' * 55}")
     print(f"  Profile            : {getattr(cfg, '_profile_name', 'custom')}")
+    print(f"  ESM backbone       : {getattr(cfg, 'esm_backbone', '650M')} "
+          f"(dim={getattr(cfg, 'esm_embed_dim', 1280)})")
     print(f"  LoRA rank / layers : {cfg.lora_rank} / {cfg.lora_layers}")
     print(f"  Epochs / patience  : {cfg.num_epochs} / {cfg.patience}")
     print(f"  Batch × accum      : {cfg.batch_size} × {cfg.accum_steps} "
@@ -1050,10 +1113,11 @@ class DisorderNetGPU(nn.Module):
 
         fusion_n = min(cfg.esm_fusion_layers, n_layers)
         self._fusion_layer_ids = list(range(n_layers - fusion_n, n_layers))
+        esm_dim = getattr(cfg, "esm_embed_dim", 1280)
         if cfg.fusion_type == "attention":
-            self.layer_fusion = ESMAttentionFusion(fusion_n, dim=1280)
+            self.layer_fusion = ESMAttentionFusion(fusion_n, dim=esm_dim)
         else:
-            self.layer_fusion = ESMLayerFusion(fusion_n, dim=1280)
+            self.layer_fusion = ESMLayerFusion(fusion_n, dim=esm_dim)
 
         self.use_rich = cfg.use_rich_features
         self.use_physico = cfg.use_physico_features and not self.use_rich
@@ -1069,7 +1133,7 @@ class DisorderNetGPU(nn.Module):
             self.physico = PhysicoFeatureEncoder(cfg.physico_dim)
             extra_dim = cfg.physico_dim
 
-        head_in = 1280 + extra_dim
+        head_in = esm_dim + extra_dim
 
         self.head_type = cfg.head_type
         if cfg.head_type == "sota":
@@ -1154,19 +1218,18 @@ class DisorderNetGPU(nn.Module):
         return self.head(embeddings)
 
 
-def load_esm_model(device: torch.device):
-    """Load ESM-2 650M and batch converter."""
-    import esm
+def load_esm_model(
+    device: torch.device,
+    backbone: str = "650M",
+    use_gradient_checkpointing: bool = True,
+):
+    """Load ESM-2 backbone via fair-esm. backbone: 8M | 35M | 150M | 650M | 3B."""
+    from colab.esm_backbone import load_esm_backbone
 
-    print("Loading ESM-2 650M...")
-    t0 = time.time()
-    model, alphabet = esm.pretrained.esm2_t33_650M_UR50D()
-    model = model.to(device)
-    model.eval()
-    converter = alphabet.get_batch_converter()
-    elapsed = time.time() - t0
-    params_m = sum(p.numel() for p in model.parameters()) / 1e6
-    print(f"  Loaded in {elapsed:.1f}s  |  {params_m:.0f}M parameters")
+    model, alphabet, converter, spec = load_esm_backbone(
+        device, backbone=backbone,
+        use_gradient_checkpointing=use_gradient_checkpointing,
+    )
     return model, alphabet, converter
 
 
