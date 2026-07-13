@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Optional
 
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import average_precision_score, roc_auc_score
+from tqdm.auto import tqdm
+
 from colab.cv_splits import get_cv_splits
 
 from colab.biological_utility import align_fold_predictions
@@ -26,13 +29,21 @@ def build_v6_features(sequence: str) -> np.ndarray:
     return compute_features_fast(sequence).astype(np.float32)
 
 
-def _stack_protein_features(proteins: list) -> tuple[np.ndarray, np.ndarray, list[int]]:
+def _stack_protein_features(
+    proteins: list,
+    verbose: bool = False,
+    desc: str = "features",
+) -> tuple[np.ndarray, np.ndarray, list[int]]:
     """Return (X, y, protein_lengths) for all proteins."""
     chunks_x: list[np.ndarray] = []
     chunks_y: list[np.ndarray] = []
     lengths: list[int] = []
 
-    for p in proteins:
+    iterator = proteins
+    if verbose and len(proteins) > 3:
+        iterator = tqdm(proteins, desc=f"  {desc}", leave=False)
+
+    for p in iterator:
         feats = build_v6_features(p["sequence"])
         labels = np.asarray(p["labels"], dtype=np.float32)
         length = min(len(labels), feats.shape[0])
@@ -75,6 +86,7 @@ def run_v6_lite_oof(
     proteins: list,
     n_folds: int = 5,
     seed: int = 42,
+    verbose: bool = True,
 ) -> tuple[np.ndarray, np.ndarray, list[dict]]:
     """
     Run lightweight v6-style OOF predictions aligned with GPU CV folds.
@@ -85,15 +97,53 @@ def run_v6_lite_oof(
     oof_probs_by_id: dict[str, np.ndarray] = {}
     oof_labels_by_id: dict[str, np.ndarray] = {}
     fold_meta: list[dict] = []
+    n_res = sum(p["length"] for p in proteins)
 
+    if verbose:
+        print(
+            f"\n{'─' * 60}\n"
+            f" v6-lite OOF  │  {len(proteins)} proteins  │  {n_res:,} residues  │  "
+            f"{n_folds} folds\n"
+            f"{'─' * 60}",
+            flush=True,
+        )
+
+    cv_t0 = time.time()
     for fold_idx, (train_idx, val_idx) in enumerate(splits):
+        fold_t0 = time.time()
         train_proteins = [proteins[i] for i in train_idx]
         val_proteins = [proteins[i] for i in val_idx]
 
-        X_train, y_train, _ = _stack_protein_features(train_proteins)
-        X_val, y_val, val_lengths = _stack_protein_features(val_proteins)
+        if verbose:
+            print(
+                f"\n  Fold {fold_idx + 1}/{n_folds}  "
+                f"(train={len(train_proteins)}, val={len(val_proteins)})",
+                flush=True,
+            )
 
+        if verbose:
+            print("    → stacking train features…", flush=True)
+        X_train, y_train, _ = _stack_protein_features(
+            train_proteins, verbose=verbose, desc="train features",
+        )
+        if verbose:
+            print(
+                f"    → stacking val features ({len(val_proteins)} proteins)…",
+                flush=True,
+            )
+        X_val, y_val, val_lengths = _stack_protein_features(
+            val_proteins, verbose=verbose, desc="val features",
+        )
+
+        if verbose:
+            print(
+                f"    → training HGB ({X_train.shape[0]:,} train residues)…",
+                flush=True,
+            )
         model = _train_v6_lite_fold(X_train, y_train, seed=seed + fold_idx)
+
+        if verbose:
+            print(f"    → predicting val ({X_val.shape[0]:,} residues)…", flush=True)
         val_probs = model.predict_proba(X_val)[:, 1].astype(np.float32)
 
         val_offset = 0
@@ -103,16 +153,40 @@ def run_v6_lite_oof(
             oof_labels_by_id[p["id"]] = y_val[val_offset:val_offset + length].copy()
             val_offset += length
 
+        val_auc = (
+            float(roc_auc_score(y_val, val_probs))
+            if len(np.unique(y_val)) > 1 else None
+        )
         fold_meta.append({
             "fold": fold_idx + 1,
             "n_train": len(train_proteins),
             "n_val": len(val_proteins),
-            "val_auc": float(roc_auc_score(y_val, val_probs)) if len(np.unique(y_val)) > 1 else None,
+            "val_auc": val_auc,
             "val_lengths": val_lengths,
         })
 
+        if verbose:
+            auc_s = f"{val_auc:.4f}" if val_auc is not None else "n/a"
+            elapsed = time.time() - fold_t0
+            total = time.time() - cv_t0
+            eta = (total / (fold_idx + 1)) * (n_folds - fold_idx - 1)
+            print(
+                f"    ✓ fold {fold_idx + 1} done  val_AUC={auc_s}  "
+                f"[{elapsed:.0f}s fold, {total / 60:.1f}m elapsed, ~{eta / 60:.1f}m left]",
+                flush=True,
+            )
+
     oof_probs = np.concatenate([oof_probs_by_id[p["id"]] for p in proteins])
     oof_labels = np.concatenate([oof_labels_by_id[p["id"]] for p in proteins])
+
+    if verbose:
+        pooled_auc = float(roc_auc_score(oof_labels, oof_probs))
+        print(
+            f"\n  v6-lite OOF complete  pooled_AUC={pooled_auc:.4f}  "
+            f"total={(time.time() - cv_t0) / 60:.1f} min\n",
+            flush=True,
+        )
+
     return oof_probs, oof_labels, fold_meta
 
 
@@ -233,6 +307,7 @@ def apply_gpu_v6_ensemble(
 
     Returns (report, updated_fold_results, v6_probs_by_id).
     """
+    print("\nGPU + v6 ensemble starting…", flush=True)
     before = compute_pooled_metrics(fold_results)
     aligned = align_fold_predictions(proteins, fold_results, n_folds=n_folds)
 
@@ -241,16 +316,34 @@ def apply_gpu_v6_ensemble(
 
     v6_meta: dict = {"source": "cache" if v6_probs_by_id else "lite_cv"}
 
-    if v6_probs_by_id is None and run_v6_if_missing:
+    if v6_probs_by_id is not None:
+        print(
+            f"  v6 cache hit: {v6_cache_path} ({len(v6_probs_by_id)} proteins) — skipping OOF",
+            flush=True,
+        )
+    elif run_v6_if_missing:
         if use_v6_pro:
             from colab.v6_pro_ensemble import get_v6_pro_oof_probs
             pro_cache = v6_cache_path.replace(".json", "_pro.json")
+            print(
+                f"  v6 cache miss — running v6-pro OOF (first time: often 20–60 min)…\n"
+                f"  cache will be saved to {pro_cache}",
+                flush=True,
+            )
             v6_probs_by_id = get_v6_pro_oof_probs(
                 proteins, n_folds=n_folds, seed=seed, cache_path=pro_cache,
+                verbose=True,
             )
             v6_meta.update({"source": "v6_pro", "cache": pro_cache})
         else:
-            oof_probs, oof_labels, fold_meta = run_v6_lite_oof(proteins, n_folds=n_folds, seed=seed)
+            print(
+                f"  v6 cache miss — running v6-lite OOF (first time: often 15–45 min)…\n"
+                f"  cache will be saved to {v6_cache_path}",
+                flush=True,
+            )
+            oof_probs, oof_labels, fold_meta = run_v6_lite_oof(
+                proteins, n_folds=n_folds, seed=seed, verbose=True,
+            )
             v6_probs_by_id = aligned_probs_from_oof(proteins, oof_probs)
             save_v6_probs_cache(v6_probs_by_id, v6_cache_path)
             v6_meta.update({
@@ -258,6 +351,7 @@ def apply_gpu_v6_ensemble(
                 "lite_cv_auc": float(roc_auc_score(oof_labels, oof_probs)),
                 "fold_meta": fold_meta,
             })
+            print(f"  saved v6 cache → {v6_cache_path}", flush=True)
     elif v6_probs_by_id is None:
         raise ValueError("v6 probabilities unavailable and run_v6_if_missing=False")
 
@@ -284,9 +378,11 @@ def apply_gpu_v6_ensemble(
         labels_all = before["all_labels"]
 
     if weight is None:
+        print("  Tuning GPU/v6 blend weight on OOF residues…", flush=True)
         search = find_optimal_blend_weight(labels_all, gpu_all, v6_all)
         weight = search["best_weight"]
         weight_search = search
+        print(f"  Best v6 blend weight: {weight:.2f}", flush=True)
     else:
         weight_search = {"best_weight": float(weight), "provided": True}
 
