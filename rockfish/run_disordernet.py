@@ -827,12 +827,75 @@ def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
 
     from colab.biological_utility import align_fold_predictions
 
-    preds_by_id = {
-        item["id"]: item["probs"]
-        for item in align_fold_predictions(proteins, fold_results, n_folds=cfg.n_folds)
-    }
-    manifest = build_af_rescue_manifest(proteins, preds_by_id, plddt_by_id)
+    aligned = align_fold_predictions(proteins, fold_results, n_folds=cfg.n_folds)
+    preds_by_id = {item["id"]: item["probs"] for item in aligned}
+    labels_by_id = {item["id"]: item["labels"] for item in aligned}
+
+    manifest = build_af_rescue_manifest(
+        proteins, preds_by_id, plddt_by_id, labels_by_id=labels_by_id,
+    )
     save_novel_use_case_report(manifest, os.path.join(ckpt, "af_rescue_manifest.json"))
+
+    # Paper pillar 1: labeled distrust benchmark + proteome atlas
+    bench = None
+    if not getattr(args, "no_structure_distrust_atlas", False):
+        import numpy as np
+
+        from colab.hallucination_benchmark import (
+            print_distrust_benchmark,
+            run_labeled_distrust_benchmark,
+            save_distrust_benchmark,
+        )
+        from colab.structure_distrust_atlas import (
+            build_structure_distrust_atlas,
+            estimate_downstream_mask_utility,
+            export_structure_distrust_atlas_bundle,
+            print_distrust_atlas,
+        )
+
+        structure_source = "boltz2" if plddt_boltz else ("af3" if plddt_af3 else "af2")
+        bench = run_labeled_distrust_benchmark(
+            proteins, fold_results, plddt_by_id,
+            n_folds=cfg.n_folds,
+            structure_source=structure_source,
+        )
+        # Attach computational downstream utility on pooled labeled residues
+        try:
+            ys, ps, plds = [], [], []
+            for item in aligned:
+                pid = item["id"]
+                if pid not in plddt_by_id:
+                    continue
+                L = len(item["probs"])
+                pld = np.asarray(plddt_by_id[pid], dtype=np.float32).ravel()
+                if len(pld) < L:
+                    continue
+                ys.append(np.asarray(item["labels"], dtype=np.int8).ravel()[:L])
+                ps.append(np.asarray(item["probs"], dtype=np.float32).ravel()[:L])
+                plds.append(pld[:L])
+            if ys:
+                util = estimate_downstream_mask_utility(
+                    np.concatenate(ys), np.concatenate(ps), np.concatenate(plds),
+                )
+                bench["downstream_mask_utility"] = util
+        except Exception as exc:
+            bench["downstream_mask_utility"] = {"enabled": False, "error": str(exc)}
+
+        print_distrust_benchmark(bench)
+        save_distrust_benchmark(
+            bench, os.path.join(ckpt, "structure_distrust_benchmark.json"),
+        )
+
+        atlas = build_structure_distrust_atlas(
+            proteins, preds_by_id, plddt_by_id,
+            labels_by_id=labels_by_id,
+            structure_source=structure_source,
+        )
+        if bench.get("downstream_mask_utility"):
+            atlas["downstream_mask_utility"] = bench["downstream_mask_utility"]
+        print_distrust_atlas(atlas)
+        atlas_paths = export_structure_distrust_atlas_bundle(atlas, ckpt)
+        print(f"Structure distrust atlas → {atlas_paths}")
 
     eval_summary = {
         "pooled_auc": cv_pooled["auc"],
@@ -844,6 +907,10 @@ def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
             func_report.get("metrics", {}) or {}
         ).get("macro_auc"),
         "function_enabled": bool(func_report.get("enabled")),
+        "structure_distrust_rescue_rate": (
+            (bench.get("labeled_rescue_report") or {}).get("pooled", {}).get("rescue_rate")
+            if bench is not None else None
+        ),
     }
     with open(os.path.join(ckpt, "eval_summary.json"), "w") as f:
         json.dump(eval_summary, f, indent=2)
@@ -1220,6 +1287,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--no-idr-layer", action="store_true",
         help="pipeline: skip IDR biology layer export",
+    )
+    p.add_argument(
+        "--no-structure-distrust-atlas", action="store_true",
+        help="eval: skip labeled distrust benchmark + proteome atlas export",
     )
     p.add_argument(
         "--idr-layer-max-proteins", type=int, default=100,

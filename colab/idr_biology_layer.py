@@ -605,9 +605,11 @@ def build_protein_idr_layer(
         "idr_segments": segments,
         "n_role_assignments": n_role_calls,
         "hallucination": {
+            "definition": (halluc or {}).get("definition", "proxy_distrust"),
             "n_hallucinated": (halluc or {}).get("metrics", {}).get("n_hallucinated", 0),
-            "n_rescued": (halluc or {}).get("metrics", {}).get("n_rescued", 0),
-            "rescue_rate": (halluc or {}).get("metrics", {}).get("rescue_rate", 0.0),
+            "n_rescued": (halluc or {}).get("metrics", {}).get("n_rescued"),
+            "rescue_rate": (halluc or {}).get("metrics", {}).get("rescue_rate"),
+            "rescue_rate_valid": (halluc or {}).get("metrics", {}).get("rescue_rate_valid", False),
             "regions": halluc_regions,
             "recommendation": (halluc or {}).get("recommendation"),
         } if halluc else None,
@@ -788,29 +790,53 @@ def evaluate_role_calls_against_annotations(
 
 
 def summarize_structure_distrust(records: list[dict]) -> dict:
-    """Aggregate hallucination / structure-distrust stats across the proteome."""
+    """
+    Aggregate structure-distrust stats across the proteome.
+
+    Distinguishes proxy distrust flags (default deployment) from labeled rescue
+    when protein records carry ``hallucination.definition == labeled_independent``.
+    """
     n_halluc = 0
     n_rescued = 0
     n_proteins_flagged = 0
     n_intersections = 0
+    n_labeled = 0
+    any_proxy = False
     for r in records:
         h = r.get("hallucination") or {}
         nh = int(h.get("n_hallucinated", 0) or 0)
-        nr = int(h.get("n_rescued", 0) or 0)
+        nr = h.get("n_rescued")
+        definition = h.get("definition") or "proxy_distrust"
+        if definition == "labeled_independent":
+            n_labeled += 1
+            if nr is not None:
+                n_rescued += int(nr or 0)
+        else:
+            any_proxy = True
         n_halluc += nh
-        n_rescued += nr
         if nh > 0:
             n_proteins_flagged += 1
         n_intersections += len(r.get("role_hallucination_intersections") or [])
+    rescue_valid = n_labeled > 0 and not any_proxy
     return {
         "n_proteins_with_hallucination": n_proteins_flagged,
         "total_hallucinated_residues": n_halluc,
-        "total_rescued_residues": n_rescued,
+        "total_rescued_residues": n_rescued if rescue_valid else None,
         "overall_rescue_rate": (
-            round(float(n_rescued / n_halluc), 4) if n_halluc else 0.0
+            round(float(n_rescued / n_halluc), 4)
+            if rescue_valid and n_halluc
+            else None
+        ),
+        "rescue_rate_valid": rescue_valid,
+        "definition": (
+            "labeled_independent" if rescue_valid
+            else ("mixed" if n_labeled else "proxy_distrust")
         ),
         "n_role_hallucination_intersections": n_intersections,
-        "note": "Prefer DisorderNet over structure confidence in flagged regions",
+        "note": (
+            "Prefer DisorderNet over structure confidence in flagged regions. "
+            "Rescue rates only valid under labeled_independent protocol."
+        ),
     }
 
 
@@ -1422,7 +1448,8 @@ def print_idr_layer_report(report: dict) -> None:
     if sd:
         print(
             f"  structure distrust: halluc_prot={sd.get('n_proteins_with_hallucination', 0)}  "
-            f"rescue_rate={sd.get('overall_rescue_rate', 0)}"
+            f"definition={sd.get('definition')}  "
+            f"rescue_rate={sd.get('overall_rescue_rate')}"
         )
     qual = report.get("quality") or {}
     if qual:
