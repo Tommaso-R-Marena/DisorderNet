@@ -59,6 +59,15 @@ fi
 if [[ -n "${FASTA_PATH:-}" ]]; then
   EXTRA_ARGS+=(--fasta "$FASTA_PATH")
 fi
+if [[ "${AF3_MODE:-off}" != "off" ]]; then
+  EXTRA_ARGS+=(--af3-mode "$AF3_MODE")
+fi
+if [[ -n "${DISORDERNET_AF3_ROOT:-}" ]]; then
+  EXTRA_ARGS+=(--af3-root "$DISORDERNET_AF3_ROOT")
+fi
+if [[ -n "${AF3_MAX_PROTEINS:-}" ]]; then
+  EXTRA_ARGS+=(--af3-max-proteins "$AF3_MAX_PROTEINS")
+fi
 
 CHECKPOINT_ARG=(--checkpoint-dir "${CHECKPOINT_SUBDIR:-checkpoints}")
 

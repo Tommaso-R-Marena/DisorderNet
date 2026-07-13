@@ -98,7 +98,46 @@ sbatch --partition=ica100 --export=ALL,... rockfish/slurm/train_ultra3b.sbatch
 | `predict` | deploy | FASTA batch inference + `.caid` export |
 | `multi-seed-blend` | 7e | Average OOF from multiple seed dirs |
 
+## AlphaFold 3 on Rockfish
+
+AF3 **code** is open (Apache 2.0); **weights** (`af3.bin`) require a DeepMind license and must **never** go on GitHub.
+
+```bash
+export DISORDERNET_AF3_ROOT=$HOME/af3
+mkdir -p $DISORDERNET_AF3_ROOT/{outputs,inputs}
+# Place licensed af3.bin → $DISORDERNET_AF3_ROOT/af3.bin
+git clone --depth 1 https://github.com/google-deepmind/alphafold3.git ~/software/alphafold3
+export DISORDERNET_AF3_REPO=$HOME/software/alphafold3
+
+# Run missing proteins (MSA-free by default — no 630 GB DBs)
+sbatch --account=$DISORDERNET_ACCOUNT \
+  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_AF3_ROOT,AF3_MODE=run \
+  rockfish/slurm/af3_batch.sbatch
+
+# Then train/eval with AF3 preferred over AF2:
+sbatch --account=$DISORDERNET_ACCOUNT \
+  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_AF3_ROOT,AF3_MODE=ingest,RUN_CAID3=1 \
+  rockfish/slurm/pipeline_ultra.sbatch
+```
+
+Stages: `af3` · eval with `--af3-mode ingest|run` · CV uses AF3 pLDDT for structure channel when available.
+
+## Efficiency (zero accuracy loss)
+
+| Optimization | Effect |
+|--------------|--------|
+| Disk token cache | Skip re-tokenization across resumes / multi-seed |
+| `persistent_workers` + prefetch | Faster epochs on multi-core nodes |
+| TF32 / high matmul precision | Faster Ampere GPUs (bf16 path unchanged) |
+| TORCH_HOME on scratch | Faster ESM weight load from local SSD |
+| Grad-checkpoint off at infer | ~10–30% faster fold soup / FASTA predict |
+| Parallel AF2 pLDDT fetch | Faster structure prefetch |
+| AF3 MSA-free mode | Hours→minutes per protein without 630 GB DBs |
+
+These do **not** change CV folds, losses, or logit values used for AUC.
+
 ## vs ESMDisPred / sequence-only SOTA
+
 
 | Capability | ESMDisPred | DisorderNet (Rockfish) |
 |------------|------------|------------------------|

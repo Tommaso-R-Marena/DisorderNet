@@ -127,6 +127,22 @@ def stage_cv(args, cfg, proteins, model, converter, disprot_meta) -> tuple[list,
     from colab.disordernet_gpu import infer_resume_fold, run_cross_validation
     from colab.run_manifest import build_run_manifest, save_run_manifest
 
+    # Prefer AF3 pLDDT for train-time structure channel when available
+    plddt_override = None
+    if getattr(args, "af3_mode", "off") != "off":
+        af3_batch = stage_af3(args, cfg, proteins)
+        plddt_af3 = af3_batch.get("plddt_by_id") or {}
+        if plddt_af3:
+            from colab.disordernet_gpu import merge_plddt_for_training
+            af2 = {}
+            if args.prefetch_af_plddt or cfg.use_plddt_features or cfg.use_hallucination_weighting:
+                from colab.disordernet_gpu import build_plddt_cache_for_training
+                af2 = build_plddt_cache_for_training(
+                    proteins, cache_dir=os.path.join(cfg.checkpoint_dir, cfg.af_plddt_cache_dir),
+                )
+            plddt_override = merge_plddt_for_training(af2, plddt_af3, prefer_af3=True)
+            print(f"  Merged pLDDT for training: {len(plddt_override)} proteins (AF3 preferred)")
+
     progress_path = os.path.join(cfg.checkpoint_dir, "cv_progress.json")
     resume = args.resume_fold
     if resume < 0:
@@ -138,7 +154,8 @@ def stage_cv(args, cfg, proteins, model, converter, disprot_meta) -> tuple[list,
         batch_converter=converter,
         cfg=cfg,
         resume_from_fold=resume,
-        prefetch_af_plddt=args.prefetch_af_plddt,
+        plddt_by_id=plddt_override,
+        prefetch_af_plddt=args.prefetch_af_plddt and plddt_override is None,
     )
 
     cv_path = os.path.join(cfg.checkpoint_dir, "cv_summary.json")
@@ -268,6 +285,49 @@ def stage_postprocess(args, cfg, proteins, fold_results, model, converter) -> tu
     return report, fold_results
 
 
+def stage_af3(args, cfg, proteins) -> dict:
+    """Ingest or run AF3 on Rockfish; return paths + optional pLDDT dict."""
+    from rockfish.af3_rockfish import run_af3_on_rockfish, setup_af3_for_rockfish
+
+    mode = args.af3_mode
+    if mode == "off":
+        print("AF3 disabled (af3_mode=off)")
+        return {"skipped": True, "mode": "off"}
+
+    batch = run_af3_on_rockfish(
+        proteins=proteins,
+        mode=mode,
+        af3_root=args.af3_root,
+        max_proteins=args.af3_max_proteins,
+        msa_free=not args.af3_use_msa,
+        timeout_s=args.af3_timeout,
+        prefer_docker=args.af3_docker,
+    )
+    if batch.get("skipped"):
+        return batch
+    if not batch.get("success") and not batch.get("n_done") and mode == "ingest":
+        # ingest: success may be True with n_done; tolerate partial
+        if not batch.get("paths"):
+            print(f"AF3 stage warning: {batch.get('error', batch)}")
+            return batch
+
+    paths = batch.get("paths") or setup_af3_for_rockfish(mode="ingest", af3_root=args.af3_root)["paths"]
+    out_root = paths["output_dir"]
+    cache = os.path.join(cfg.checkpoint_dir, "af3_plddt_cache")
+    try:
+        from colab.af3_plddt import load_af3_plddt_batch
+        plddt = load_af3_plddt_batch(proteins, output_root=out_root, cache_dir=cache, verbose=True)
+        batch["n_plddt"] = len(plddt)
+        batch["plddt_by_id"] = plddt
+        batch["output_dir"] = out_root
+        batch["paths"] = paths
+        print(f"AF3 pLDDT available for {len(plddt)}/{len(proteins)} proteins")
+    except Exception as exc:
+        print(f"AF3 pLDDT load failed: {exc}")
+        batch["plddt_by_id"] = {}
+        batch["paths"] = paths
+    return batch
+
 def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
     """Cells 8–11: CAID, biological utility, AF rescue, structure calibration, Phase 3."""
     import json
@@ -312,6 +372,41 @@ def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
     print_af_rescue_report(af_report)
     save_af_rescue_report(af_report, os.path.join(ckpt, "af_rescue_report.json"))
 
+    # Optional AF3 Phase 2b (ingest preferred on Rockfish)
+    af3_report = {"skipped": True}
+    plddt_af3: dict = {}
+    af3_comparison: dict = {"insufficient_data": True}
+    if getattr(args, "af3_mode", "off") != "off":
+        from colab.af_hallucination import (
+            fetch_and_run_af3_rescue_report,
+            print_af2_af3_comparison,
+            run_af2_af3_comparison_report,
+            save_af2_af3_comparison,
+        )
+        from rockfish.af3_rockfish import setup_af3_for_rockfish
+
+        af3_cfg = setup_af3_for_rockfish(mode=args.af3_mode, af3_root=args.af3_root)
+        if args.af3_mode in ("run", "auto"):
+            stage_af3(args, cfg, proteins)
+            af3_cfg = setup_af3_for_rockfish(mode="ingest", af3_root=args.af3_root)
+        if af3_cfg.get("outputs_ok"):
+            af3_report, plddt_af3 = fetch_and_run_af3_rescue_report(
+                proteins=proteins,
+                fold_results=fold_results,
+                af3_output_root=af3_cfg["paths"]["output_dir"],
+                n_folds=cfg.n_folds,
+                cache_dir=os.path.join(ckpt, "af3_plddt_cache"),
+            )
+            af3_report["skipped"] = False
+            print_af_rescue_report(af3_report)
+            save_af_rescue_report(af3_report, os.path.join(ckpt, "af3_rescue_report.json"))
+            af3_comparison = run_af2_af3_comparison_report(af_report, af3_report)
+            print_af2_af3_comparison(af3_comparison)
+            save_af2_af3_comparison(af3_comparison, os.path.join(ckpt, "af2_af3_comparison.json"))
+            # Prefer AF3 pLDDT for fusion / training-adjacent analysis when available
+            from colab.disordernet_gpu import merge_plddt_for_training
+            plddt_by_id = merge_plddt_for_training(plddt_by_id, plddt_af3, prefer_af3=True)
+
     fusion_report, fold_results = apply_plddt_fusion_to_cv(
         proteins=proteins,
         fold_results=fold_results,
@@ -350,6 +445,8 @@ def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
         bio_report=downstream["bio_report"],
         af_report=af_report,
         calibration_report=calibration_report,
+        af3_report=af3_report if not af3_report.get("skipped") else None,
+        af2_af3_comparison=af3_comparison if not af3_comparison.get("insufficient_data") else None,
         caid_report=downstream["caid_report"],
         statistical_validation=stats_report,
     )
@@ -494,12 +591,19 @@ def run_pipeline(args) -> int:
     if needs_esm:
         model, _, converter, spec = _load_esm(cfg)
         print(f"ESM backbone: {spec.key}  dim={spec.embed_dim}")
+        from colab.hpc_efficiency import disable_gradient_checkpointing_for_inference
+        if args.stage in ("predict", "postprocess"):
+            if disable_gradient_checkpointing_for_inference(model):
+                print("  Inference: gradient checkpointing OFF (same logits, faster)")
 
     fold_results: list = []
     cv_summary: dict = {}
 
     if args.stage == "screen":
         stage_screen(args, cfg, proteins, model, converter)
+
+    elif args.stage == "af3":
+        stage_af3(args, cfg, proteins)
 
     elif args.stage == "cv":
         fold_results, cv_summary = stage_cv(
@@ -564,7 +668,7 @@ def build_parser() -> argparse.ArgumentParser:
         "stage",
         choices=[
             "screen", "cv", "stack", "postprocess", "full",
-            "eval", "predict", "multi-seed-blend", "pipeline",
+            "eval", "predict", "multi-seed-blend", "pipeline", "af3",
         ],
         help="Pipeline stage to run",
     )
@@ -610,6 +714,18 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Comma-separated checkpoint dirs for multi-seed-blend",
     )
+
+    # AF3 (Rockfish)
+    p.add_argument(
+        "--af3-mode", default="off",
+        choices=["off", "ingest", "run", "auto"],
+        help="AF3 integration: ingest outputs, run missing, or off",
+    )
+    p.add_argument("--af3-root", default=None, help="AF3 root with af3.bin + outputs/")
+    p.add_argument("--af3-max-proteins", type=int, default=None)
+    p.add_argument("--af3-timeout", type=int, default=7200)
+    p.add_argument("--af3-use-msa", action="store_true", help="Require public_databases MSA (slow)")
+    p.add_argument("--af3-docker", action="store_true", help="Prefer Docker over native AF3")
     return p
 
 

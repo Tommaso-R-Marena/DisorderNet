@@ -254,6 +254,7 @@ class TrainConfig:
     num_workers: int = 2
     checkpoint_dir: str = "checkpoints"
     data_cache: str = "disprot_raw.json"
+    token_disk_cache_dir: str = "token_cache"  # HPC: persist tokenization across jobs
 
     # Performance toggles
     use_gradient_checkpointing: bool = True
@@ -612,8 +613,13 @@ def setup_environment(cfg: TrainConfig) -> TrainConfig:
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
+    # Accuracy-preserving HPC speedups (no change to bf16 training path)
+    if not _in_colab():
+        from colab.hpc_efficiency import apply_hpc_runtime_settings
+        apply_hpc_runtime_settings(verbose=True)
+
     print(f"\n{'=' * 55}")
-    print(f"  Environment : {'Google Colab' if _in_colab() else 'local'}")
+    print(f"  Environment : {'Google Colab' if _in_colab() else 'local/HPC'}")
     print(f"  GPU         : {cfg.gpu_name}")
     print(f"  VRAM        : {cfg.vram_gb:.1f} GB")
     print(f"  CUDA        : {torch.version.cuda}")
@@ -1279,10 +1285,16 @@ class DisProtDataset(Dataset):
         self.cfg = cfg
         self.plddt_by_id = plddt_by_id or {}
 
-        missing = [p for p in proteins if p["id"] not in self._cache]
+        missing = [p for p in proteins if p["id"] not in self._cache or "labels" not in self._cache.get(p["id"], {})]
         if missing:
             for p in tqdm(missing, desc="Tokenizing", leave=False):
-                _, _, tokens = batch_converter([(p["id"], p["sequence"])])
+                cached = self._cache.get(p["id"], {})
+                if "tokens" in cached:
+                    tokens = cached["tokens"]
+                    if tokens.dim() == 1:
+                        tokens = tokens.unsqueeze(0)
+                else:
+                    _, _, tokens = batch_converter([(p["id"], p["sequence"])])
                 labels = p["labels"]
                 boundary = _label_boundary_mask(labels, radius=self.boundary_radius)
                 trans = p.get("transition_mask") or [0] * len(labels)
@@ -1304,11 +1316,16 @@ class DisProtDataset(Dataset):
                     for i in range(len(labels))
                 ]
 
-                aa_idx = [AA_TO_IDX.get(c, 0) for c in p["sequence"]]
+                if "aa_idx" in cached:
+                    aa_tensor = cached["aa_idx"]
+                else:
+                    aa_idx = [AA_TO_IDX.get(c, 0) for c in p["sequence"]]
+                    aa_tensor = torch.tensor(aa_idx, dtype=torch.long)
+
                 entry = {
                     "tokens": tokens.squeeze(0),
                     "labels": torch.tensor(labels, dtype=torch.float32),
-                    "aa_idx": torch.tensor(aa_idx, dtype=torch.long),
+                    "aa_idx": aa_tensor,
                     "sample_weight": torch.tensor(sample_weight, dtype=torch.float32),
                 }
                 if self.cfg is not None and self.cfg.use_rich_features:
@@ -1320,6 +1337,14 @@ class DisProtDataset(Dataset):
                     from colab.structure_encoder import build_plddt_feature_tensor
                     entry["plddt_feats"] = build_plddt_feature_tensor(plddt, len(labels))
                 self._cache[p["id"]] = entry
+                disk_dir = getattr(self.cfg, "token_disk_cache_dir", "") if self.cfg else ""
+                if disk_dir and not _in_colab():
+                    from colab.hpc_efficiency import save_disk_token_cache
+                    save_disk_token_cache(
+                        p["id"], p["sequence"],
+                        {"tokens": entry["tokens"], "aa_idx": entry["aa_idx"]},
+                        disk_dir,
+                    )
 
     def __len__(self) -> int:
         return len(self.proteins)
@@ -1591,6 +1616,8 @@ def train_fold(
         pin_memory=cfg.pin_memory,
         persistent_workers=cfg.num_workers > 0,
     )
+    if cfg.num_workers > 0:
+        loader_kw["prefetch_factor"] = 2
     train_gen = torch.Generator()
     train_gen.manual_seed(cfg.seed + fold_idx * 1000)
     train_dl = DataLoader(
@@ -2016,6 +2043,13 @@ def run_cross_validation(
         print(f"  pLDDT available for {n_cached}/{len(proteins)} proteins")
 
     token_cache: dict = {}
+    disk_dir = getattr(cfg, "token_disk_cache_dir", "")
+    if disk_dir and not _in_colab():
+        from colab.hpc_efficiency import warm_token_disk_cache
+        cache_path = disk_dir if os.path.isabs(disk_dir) else os.path.join(cfg.checkpoint_dir, disk_dir)
+        token_cache = warm_token_disk_cache(proteins, batch_converter, cache_path, token_cache)
+        cfg.token_disk_cache_dir = cache_path
+
     splits = get_cv_splits(
         proteins, cfg.n_folds,
         split_method=getattr(cfg, "split_method", "protein"),
