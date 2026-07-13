@@ -121,6 +121,7 @@ def run_boltz_on_rockfish(
     shard_index: Optional[int] = None,
     shard_count: Optional[int] = None,
     sampling_steps: int = 50,
+    diffusion_samples: int = 5,
 ) -> dict:
     """
     Ingest existing Boltz outputs or run missing proteins (weights auto-download).
@@ -130,6 +131,9 @@ def run_boltz_on_rockfish(
       ingest  — load existing outputs only
       run     — install pinned boltz + predict pending
       auto    — ingest then run pending
+
+    ``diffusion_samples>=2`` enables the multi-sample pLDDT variance proxy used
+    by the IDR biology layer (does not change mean-confidence model_0 path).
     """
     cfg = setup_boltz_for_rockfish(mode=mode, boltz_root=boltz_root)
     print_boltz_setup_instructions(cfg["paths"])
@@ -150,6 +154,7 @@ def run_boltz_on_rockfish(
             "n_pending": len(pending),
             "paths": paths,
             "pinned_version": PINNED_BOLTZ_VERSION,
+            "diffusion_samples": diffusion_samples,
         }
 
     # run / auto
@@ -183,6 +188,7 @@ def run_boltz_on_rockfish(
         pin_version=PINNED_BOLTZ_VERSION,
         ensure_install=True,
         sampling_steps=sampling_steps,
+        diffusion_samples=diffusion_samples,
         verbose=True,
     )
     batch["mode"] = mode

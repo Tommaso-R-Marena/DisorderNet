@@ -330,6 +330,7 @@ def stage_boltz(args, cfg, proteins) -> dict:
         shard_index=getattr(args, "boltz_shard_index", None),
         shard_count=getattr(args, "boltz_shard_count", None),
         sampling_steps=getattr(args, "boltz_sampling_steps", 50),
+        diffusion_samples=getattr(args, "boltz_diffusion_samples", 5),
     )
     if batch.get("skipped"):
         return batch
@@ -419,24 +420,32 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
     aligned = align_fold_predictions(proteins, fold_results, n_folds=cfg.n_folds)
     disorder_by_id = {item["id"]: item["probs"] for item in aligned}
 
-    # Optional function OOF — only when flat length matches full val residue count
+    # Function OOF shares the full-sequence pad-mask stream with disorder (same lengths).
     function_by_id: dict = {}
     try:
-        from colab.function_predict import align_function_oof
-        _, y_prob, _ = align_function_oof(proteins, fold_results, n_folds=cfg.n_folds)
+        from colab.function_predict import align_function_oof, split_function_oof_by_lengths
+        _, y_prob, fn_protein_ids = align_function_oof(
+            proteins, fold_results, n_folds=cfg.n_folds,
+        )
         total_L = sum(len(item["probs"]) for item in aligned)
         if len(y_prob) == total_L and total_L > 0:
+            # Prefer align order (matches disorder OOF concatenation).
             offset = 0
             for item in aligned:
                 L = len(item["probs"])
                 function_by_id[item["id"]] = y_prob[offset:offset + L]
                 offset += L
             print(f"  Attached function OOF to {len(function_by_id)} proteins")
-        elif len(y_prob) > 0:
-            print(
-                "  Function OOF present but supervised-mask length ≠ full sequences; "
-                "role calls skipped (use ultra_fun inference for full maps)."
-            )
+        elif len(y_prob) > 0 and fn_protein_ids:
+            lengths = {p["id"]: int(p.get("length") or len(p["sequence"])) for p in proteins}
+            try:
+                function_by_id = split_function_oof_by_lengths(y_prob, fn_protein_ids, lengths)
+                print(f"  Attached function OOF via protein lengths ({len(function_by_id)})")
+            except ValueError:
+                print(
+                    "  Function OOF length ≠ disorder / protein stream; "
+                    "role calls skipped (retrain with function head)."
+                )
     except Exception as exc:
         print(f"  Function OOF not attached to layer: {exc}")
 
@@ -444,7 +453,7 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
     boltz_std: dict = {}
     structure_source = "none"
     if getattr(args, "boltz_mode", "off") != "off":
-        from colab.boltz_plddt import load_boltz_plddt_batch, load_boltz_variance_batch
+        from colab.boltz_plddt import load_boltz_structure_features
         from rockfish.boltz_rockfish import setup_boltz_for_rockfish
 
         if args.boltz_mode in ("run", "auto"):
@@ -453,10 +462,14 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
             mode="ingest", boltz_root=args.boltz_root, ensure_install=False,
         )
         out_root = bcfg["paths"]["output_dir"]
-        plddt_by_id = load_boltz_plddt_batch(
-            proteins, out_root, cache_dir=os.path.join(ckpt, "boltz_plddt_cache"),
+        plddt_by_id, boltz_std = load_boltz_structure_features(
+            proteins,
+            out_root,
+            plddt_cache_dir=os.path.join(ckpt, "boltz_plddt_cache"),
+            variance_cache_dir=os.path.join(ckpt, "boltz_variance_cache"),
+            max_samples=getattr(args, "boltz_diffusion_samples", 5),
+            verbose=True,
         )
-        boltz_std = load_boltz_variance_batch(proteins, out_root, verbose=True)
         structure_source = "boltz2"
 
     if not plddt_by_id:
@@ -722,14 +735,34 @@ def stage_predict(args, cfg, model, converter) -> dict:
         raise ValueError("--fasta required for predict stage")
 
     plddt_by_id = None
-    if args.prefetch_af_plddt:
+    boltz_std: dict = {}
+    if getattr(args, "boltz_mode", "off") != "off":
+        from colab.boltz_plddt import load_boltz_structure_features
+        from rockfish.boltz_rockfish import setup_boltz_for_rockfish
+        proteins_pre = parse_fasta(args.fasta)
+        if args.boltz_mode in ("run", "auto"):
+            stage_boltz(args, cfg, proteins_pre)
+        bcfg = setup_boltz_for_rockfish(
+            mode="ingest", boltz_root=args.boltz_root, ensure_install=False,
+        )
+        out_root = bcfg["paths"]["output_dir"]
+        plddt_by_id, boltz_std = load_boltz_structure_features(
+            proteins_pre,
+            out_root,
+            plddt_cache_dir=os.path.join(cfg.checkpoint_dir, "boltz_plddt_cache"),
+            variance_cache_dir=os.path.join(cfg.checkpoint_dir, "boltz_variance_cache"),
+            max_samples=getattr(args, "boltz_diffusion_samples", 5),
+            verbose=True,
+        )
+    elif args.prefetch_af_plddt:
         from colab.disordernet_gpu import build_plddt_cache_for_training
-        proteins = parse_fasta(args.fasta)
+        proteins_pre = parse_fasta(args.fasta)
         plddt_by_id = build_plddt_cache_for_training(
-            proteins, cache_dir=os.path.join(cfg.checkpoint_dir, cfg.af_plddt_cache_dir),
+            proteins_pre, cache_dir=os.path.join(cfg.checkpoint_dir, cfg.af_plddt_cache_dir),
         )
 
-    preds = predict_fasta_batch(
+    want_fn = bool(getattr(cfg, "use_function_head", False)) or getattr(args, "export_idr_layer", False)
+    result = predict_fasta_batch(
         fasta_path=args.fasta,
         esm_backbone=model,
         batch_converter=converter,
@@ -739,11 +772,49 @@ def stage_predict(args, cfg, model, converter) -> dict:
         use_tta=not args.skip_tta,
         tta_passes=cfg.mc_dropout_tta_passes,
         n_folds=cfg.n_folds,
+        return_function=want_fn,
     )
+    if isinstance(result, tuple):
+        preds, function_by_id = result
+    else:
+        preds, function_by_id = result, {}
+
     proteins = parse_fasta(args.fasta)
     out_dir = args.predict_out or os.path.join(cfg.checkpoint_dir, "predictions")
     manifest = export_predictions(proteins, preds, out_dir, formats=("caid", "tsv"))
     print(f"Predictions written to {out_dir} ({manifest['n_scored']} proteins)")
+
+    if getattr(args, "export_idr_layer", False):
+        from colab.idr_biology_layer import (
+            build_proteome_idr_layer,
+            export_idr_layer_jsonl,
+            build_protein_idr_layer,
+            print_idr_layer_report,
+            save_idr_layer_report,
+        )
+        report = build_proteome_idr_layer(
+            proteins, preds,
+            plddt_by_id=plddt_by_id or {},
+            function_probs_by_id=function_by_id,
+            boltz_std_by_id=boltz_std,
+            structure_source="boltz2" if boltz_std or (plddt_by_id and getattr(args, "boltz_mode", "off") != "off") else "af2",
+        )
+        print_idr_layer_report(report)
+        save_idr_layer_report(report, os.path.join(out_dir, "idr_biology_layer_report.json"))
+        full = [
+            build_protein_idr_layer(
+                protein_id=p["id"],
+                sequence=p["sequence"],
+                disorder_probs=preds[p["id"]],
+                plddt=(plddt_by_id or {}).get(p["id"]),
+                function_probs=function_by_id.get(p["id"]),
+                boltz_plddt_std=boltz_std.get(p["id"]),
+                uniprot_acc=p.get("uniprot_acc", ""),
+            )
+            for p in proteins if p["id"] in preds
+        ]
+        export_idr_layer_jsonl(full, os.path.join(out_dir, "idr_biology_layer.jsonl"))
+        manifest["idr_layer_proteins"] = len(full)
     return manifest
 
 
@@ -802,7 +873,10 @@ def stage_caid3_eval(args, cfg, proteins, fold_results, model, converter) -> dic
         checkpoint_dir=cfg.checkpoint_dir,
         use_tta=not args.skip_tta,
         n_folds=cfg.n_folds,
+        return_function=False,
     )
+    if isinstance(preds_by_id, tuple):
+        preds_by_id = preds_by_id[0]
 
     out_dir = os.path.join(cfg.checkpoint_dir, "caid3_submission")
     export_caid_predictions_dir(ref_proteins, preds_by_id, out_dir)
@@ -1002,6 +1076,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--idr-layer-max-proteins", type=int, default=100,
         help="Max proteins embedded in idr_biology_layer_report.json summary",
     )
+    p.add_argument(
+        "--export-idr-layer", action="store_true",
+        help="predict stage: also write IDR biology layer JSON/JSONL",
+    )
     p.add_argument("--caid3-reference", default=None, help="Path to CAID3 reference FASTA")
 
     # Predict
@@ -1036,6 +1114,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use mmseqs MSA server (default: MSA-free single sequence)",
     )
     p.add_argument("--boltz-sampling-steps", type=int, default=50)
+    p.add_argument(
+        "--boltz-diffusion-samples", type=int, default=5,
+        help="Boltz diffusion samples (≥2 enables variance proxy; mean pLDDT uses model_0)",
+    )
     p.add_argument("--boltz-shard-index", type=int, default=None)
     p.add_argument("--boltz-shard-count", type=int, default=None)
 

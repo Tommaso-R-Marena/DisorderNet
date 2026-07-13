@@ -165,7 +165,7 @@ def run_boltz_predict(
         "--accelerator", accelerator,
         "--recycling_steps", str(recycling_steps),
         "--sampling_steps", str(sampling_steps),
-        "--diffusion_samples", str(diffusion_samples),
+        "--diffusion_samples", str(max(1, int(diffusion_samples))),
         "--output_format", "mmcif",
     ]
     if use_msa_server:
@@ -214,12 +214,14 @@ def run_boltz_batch(
     pin_version: str = PINNED_BOLTZ_VERSION,
     ensure_install: bool = True,
     sampling_steps: int = 50,
+    diffusion_samples: int = 1,
     verbose: bool = True,
 ) -> dict:
     """
     Write YAMLs for pending proteins and run Boltz-2 predict.
 
     Outputs land under ``{boltz_root}/outputs/`` (Boltz adds ``predictions/``).
+    Set ``diffusion_samples>=2`` to enable the multi-sample pLDDT variance proxy.
     """
     from colab.boltz_plddt import select_proteins_for_boltz
 
@@ -245,7 +247,8 @@ def run_boltz_batch(
     if verbose:
         print(
             f"Boltz-2 batch: {len(done)} done, {len(pending)} pending "
-            f"(msa_free={msa_free}, pin={pin_version})",
+            f"(msa_free={msa_free}, pin={pin_version}, "
+            f"diffusion_samples={diffusion_samples})",
             flush=True,
         )
 
@@ -266,6 +269,7 @@ def run_boltz_batch(
             cache_dir=paths["cache_dir"],
             timeout_s=timeout_s,
             sampling_steps=sampling_steps,
+            diffusion_samples=diffusion_samples,
         )
         pred["protein_id"] = p["id"]
         pred["job_name"] = name

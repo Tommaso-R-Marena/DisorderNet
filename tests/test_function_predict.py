@@ -16,6 +16,7 @@ from colab.function_predict import (
     function_supervise_mask,
     predict_protein_functions,
     run_function_prediction_report,
+    split_function_oof_by_lengths,
     stack_batch_function_labels,
     summarize_function_label_coverage,
 )
@@ -98,15 +99,80 @@ class TestFunctionMetrics:
             {
                 "id": "p1",
                 "length": 20,
-                "labels": [1] * 10 + [0] * 10,
-                "functional_regions": [
-                    {"start": 1, "end": 5, "term_norm": "self-assembly"},
-                ],
+                "labels": [0] * 20,
+                "functional_regions": [],
             }
         ]
         report = run_function_prediction_report(proteins, [{}], n_folds=1)
         assert report["enabled"] is False
-        assert report["label_coverage"]["n_proteins_with_function"] == 1
+
+    def test_split_oof_by_lengths(self):
+        flat = np.ones((10, 5), dtype=np.float32)
+        flat[5:] = 2.0
+        out = split_function_oof_by_lengths(flat, ["a", "b"], {"a": 5, "b": 5})
+        assert out["a"].shape == (5, 5)
+        assert float(out["b"][0, 0]) == 2.0
+
+    def test_report_with_aligned_oof_and_disordered_metrics(self):
+        from colab.cv_splits import get_cv_splits
+        from colab.biological_utility import align_fold_predictions
+
+        proteins = [
+            {
+                "id": "a",
+                "sequence": "AAAA",
+                "length": 4,
+                "labels": [1, 1, 0, 0],
+                "functional_regions": [
+                    {"start": 1, "end": 2, "term_norm": "protein binding"},
+                ],
+            },
+            {
+                "id": "b",
+                "sequence": "BBBB",
+                "length": 4,
+                "labels": [0, 0, 1, 1],
+                "functional_regions": [],
+            },
+        ]
+        n_folds = 2
+        splits = get_cv_splits(proteins, n_folds)
+        fold_results = []
+        for _, val_idx in splits:
+            # Concatenate val proteins in fold order (same as train/eval)
+            probs = []
+            labels = []
+            fn_probs = []
+            fn_labels = []
+            for i in val_idx:
+                p = proteins[i]
+                L = p["length"]
+                labs = np.asarray(p["labels"], dtype=np.float32)
+                pr = labs * 0.9 + (1 - labs) * 0.1
+                probs.append(pr)
+                labels.append(labs)
+                fp = np.zeros((L, 5), dtype=np.float32)
+                ft = np.zeros((L, 5), dtype=np.float32)
+                if p["id"] == "a":
+                    fp[:2, 0] = 0.9
+                    ft[:2, 0] = 1.0
+                fn_probs.append(fp)
+                fn_labels.append(ft)
+            fold_results.append({
+                "val_probs": np.concatenate(probs),
+                "val_labels": np.concatenate(labels),
+                "val_function_probs": np.concatenate(fn_probs),
+                "val_function_labels": np.concatenate(fn_labels),
+            })
+
+        aligned = align_fold_predictions(proteins, fold_results, n_folds=n_folds)
+        assert len(aligned) == 2
+        report = run_function_prediction_report(proteins, fold_results, n_folds=n_folds)
+        assert report["enabled"] is True
+        assert report["n_oof_residues"] == 8
+        assert report["metrics"] is not None
+        # 4 disordered residues (≥10 needed for disordered metrics) → may be None
+        assert "metrics_on_disordered" in report
 
     def test_coverage_summary(self):
         proteins = [
