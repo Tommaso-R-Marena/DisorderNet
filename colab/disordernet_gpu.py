@@ -320,6 +320,8 @@ class TrainConfig:
         max      — higher capacity (rank 32, 25 epochs, larger physico stream)
         sota     — SOTA push: rank 64, Transformer head, Dice+EMA, compact ckpt
         ultra    — maximum push: rich features, attn fusion, FFN LoRA, v6-pro stack
+        screen   — fast paradigm check (~2h): 8 epochs, CNN head, 10 LoRA layers
+        screen_plus — paradigm fidelity (~4h): mini-ultra on subset
         """
         presets: dict[str, dict] = {
             "balanced": {},
@@ -403,6 +405,49 @@ class TrainConfig:
                 "lora_on_out_proj": True,
                 "lora_on_ffn": True,
                 "unfreeze_last_layers": 2,
+            },
+            "screen": {
+                "lora_rank": 32,
+                "lora_alpha": 64,
+                "lora_layers": 10,
+                "num_epochs": 8,
+                "patience": 3,
+                "lr_lora": 5e-5,
+                "lr_head": 3e-4,
+                "esm_fusion_layers": 4,
+                "head_type": "cnn",
+                "use_physico_features": True,
+                "physico_dim": 48,
+                "compact_checkpoints": True,
+                "early_stop_mode": "auc",
+                "use_v6_distill": False,
+                "use_rdrop": False,
+                "use_swa": False,
+                "use_ema": False,
+                "use_hallucination_weighting": False,
+            },
+            "screen_plus": {
+                "lora_rank": 64,
+                "lora_alpha": 128,
+                "lora_layers": 12,
+                "num_epochs": 10,
+                "patience": 4,
+                "lr_lora": 3e-5,
+                "lr_head": 2e-4,
+                "esm_fusion_layers": 6,
+                "head_type": "sota",
+                "physico_dim": 64,
+                "use_dice_loss": True,
+                "dice_loss_weight": 0.25,
+                "use_ema": True,
+                "compact_checkpoints": True,
+                "early_stop_mode": "auc",
+                "use_rich_features": True,
+                "fusion_type": "attention",
+                "use_v6_distill": False,
+                "use_rdrop": False,
+                "use_swa": False,
+                "use_hallucination_weighting": False,
             },
         }
         if profile not in presets:
