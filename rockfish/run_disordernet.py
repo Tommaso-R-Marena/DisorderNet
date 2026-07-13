@@ -401,6 +401,111 @@ def stage_af3(args, cfg, proteins) -> dict:
         batch["paths"] = paths
     return batch
 
+
+def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
+    """
+    Post-structure IDR biology layer: disorder + roles + hallucination + Boltz variance proxy.
+    """
+    from colab.biological_utility import align_fold_predictions
+    from colab.idr_biology_layer import (
+        build_protein_idr_layer,
+        build_proteome_idr_layer,
+        export_idr_layer_jsonl,
+        print_idr_layer_report,
+        save_idr_layer_report,
+    )
+
+    ckpt = cfg.checkpoint_dir
+    aligned = align_fold_predictions(proteins, fold_results, n_folds=cfg.n_folds)
+    disorder_by_id = {item["id"]: item["probs"] for item in aligned}
+
+    # Optional function OOF — only when flat length matches full val residue count
+    function_by_id: dict = {}
+    try:
+        from colab.function_predict import align_function_oof
+        _, y_prob, _ = align_function_oof(proteins, fold_results, n_folds=cfg.n_folds)
+        total_L = sum(len(item["probs"]) for item in aligned)
+        if len(y_prob) == total_L and total_L > 0:
+            offset = 0
+            for item in aligned:
+                L = len(item["probs"])
+                function_by_id[item["id"]] = y_prob[offset:offset + L]
+                offset += L
+            print(f"  Attached function OOF to {len(function_by_id)} proteins")
+        elif len(y_prob) > 0:
+            print(
+                "  Function OOF present but supervised-mask length ≠ full sequences; "
+                "role calls skipped (use ultra_fun inference for full maps)."
+            )
+    except Exception as exc:
+        print(f"  Function OOF not attached to layer: {exc}")
+
+    plddt_by_id: dict = {}
+    boltz_std: dict = {}
+    structure_source = "none"
+    if getattr(args, "boltz_mode", "off") != "off":
+        from colab.boltz_plddt import load_boltz_plddt_batch, load_boltz_variance_batch
+        from rockfish.boltz_rockfish import setup_boltz_for_rockfish
+
+        if args.boltz_mode in ("run", "auto"):
+            stage_boltz(args, cfg, proteins)
+        bcfg = setup_boltz_for_rockfish(
+            mode="ingest", boltz_root=args.boltz_root, ensure_install=False,
+        )
+        out_root = bcfg["paths"]["output_dir"]
+        plddt_by_id = load_boltz_plddt_batch(
+            proteins, out_root, cache_dir=os.path.join(ckpt, "boltz_plddt_cache"),
+        )
+        boltz_std = load_boltz_variance_batch(proteins, out_root, verbose=True)
+        structure_source = "boltz2"
+
+    if not plddt_by_id:
+        try:
+            from colab.af_plddt import fetch_plddt_batch
+            plddt_by_id = fetch_plddt_batch(
+                proteins,
+                cache_dir=os.path.join(ckpt, cfg.af_plddt_cache_dir),
+                sleep_s=0.05,
+                verbose=False,
+            )
+            if plddt_by_id:
+                structure_source = "af2"
+                print(f"  AF2 pLDDT fallback: {len(plddt_by_id)} proteins")
+        except Exception as exc:
+            print(f"  AF2 pLDDT fallback skipped: {exc}")
+
+    report = build_proteome_idr_layer(
+        proteins,
+        disorder_by_id,
+        plddt_by_id=plddt_by_id,
+        function_probs_by_id=function_by_id,
+        boltz_std_by_id=boltz_std,
+        structure_source=structure_source,
+        max_proteins_in_summary=getattr(args, "idr_layer_max_proteins", 100),
+    )
+    print_idr_layer_report(report)
+    save_idr_layer_report(report, os.path.join(ckpt, "idr_biology_layer_report.json"))
+
+    full_records = []
+    for p in proteins:
+        pid = p["id"]
+        if pid not in disorder_by_id:
+            continue
+        full_records.append(build_protein_idr_layer(
+            protein_id=pid,
+            sequence=p["sequence"],
+            disorder_probs=disorder_by_id[pid],
+            plddt=plddt_by_id.get(pid),
+            function_probs=function_by_id.get(pid),
+            boltz_plddt_std=boltz_std.get(pid),
+            uniprot_acc=p.get("uniprot_acc", ""),
+            structure_source=structure_source,
+        ))
+    export_idr_layer_jsonl(full_records, os.path.join(ckpt, "idr_biology_layer.jsonl"))
+    print(f"IDR layer JSONL: {len(full_records)} proteins → {ckpt}/idr_biology_layer.jsonl")
+    return report
+
+
 def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
     """Cells 8–11: CAID, biological utility, AF rescue, structure calibration, Phase 3."""
     import json
@@ -799,6 +904,10 @@ def run_pipeline(args) -> int:
         fold_results, cv_summary = _load_fold_results(cfg.checkpoint_dir)
         stage_eval(args, cfg, proteins, fold_results, cv_summary)
 
+    elif args.stage == "idr-layer":
+        fold_results, cv_summary = _load_fold_results(cfg.checkpoint_dir)
+        stage_idr_layer(args, cfg, proteins, fold_results)
+
     elif args.stage == "predict":
         stage_predict(args, cfg, model, converter)
 
@@ -818,6 +927,8 @@ def run_pipeline(args) -> int:
         fold_results, cv_summary = stage_stack(args, cfg, proteins, fold_results, cv_summary)
         stage_postprocess(args, cfg, proteins, fold_results, model, converter)
         stage_eval(args, cfg, proteins, fold_results, cv_summary)
+        if getattr(args, "run_idr_layer", False):
+            stage_idr_layer(args, cfg, proteins, fold_results)
         if args.run_caid3_eval:
             stage_caid3_eval(args, cfg, proteins, fold_results, model, converter)
 
@@ -838,7 +949,7 @@ def build_parser() -> argparse.ArgumentParser:
         "stage",
         choices=[
             "screen", "cv", "stack", "postprocess", "full",
-            "eval", "predict", "multi-seed-blend", "pipeline", "boltz", "af3",
+            "eval", "idr-layer", "predict", "multi-seed-blend", "pipeline", "boltz", "af3",
         ],
         help="Pipeline stage to run",
     )
@@ -883,6 +994,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Eval / CAID3
     p.add_argument("--run-caid3-eval", action="store_true", help="pipeline: also run CAID3 benchmark")
+    p.add_argument(
+        "--run-idr-layer", action="store_true",
+        help="pipeline: also export IDR biology layer (post-structure product)",
+    )
+    p.add_argument(
+        "--idr-layer-max-proteins", type=int, default=100,
+        help="Max proteins embedded in idr_biology_layer_report.json summary",
+    )
     p.add_argument("--caid3-reference", default=None, help="Path to CAID3 reference FASTA")
 
     # Predict

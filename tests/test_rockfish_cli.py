@@ -36,7 +36,7 @@ class TestRockfishCLI:
     def test_parser_all_stages(self):
         for stage in (
             "screen", "cv", "stack", "postprocess", "full",
-            "eval", "predict", "multi-seed-blend", "pipeline", "boltz", "af3",
+            "eval", "idr-layer", "predict", "multi-seed-blend", "pipeline", "boltz", "af3",
         ):
             extra = ["--fasta", "q.fasta"] if stage == "predict" else []
             args = build_parser().parse_args([stage, *extra])

@@ -228,6 +228,97 @@ def load_boltz_plddt_batch(
     return results
 
 
+def load_boltz_plddt_sample_stack(
+    job_dir: str,
+    max_samples: int = 8,
+) -> Optional[np.ndarray]:
+    """
+    Stack per-sample pLDDT arrays from a Boltz prediction folder.
+
+    Returns shape (n_samples, L) on 0–100 scale, or None if <2 samples.
+    Cheap ensemble / dynamics *proxy* — not a physical conformational ensemble.
+    """
+    npz_files = sorted(glob.glob(os.path.join(job_dir, "plddt_*_model_*.npz")))
+    if len(npz_files) < 2:
+        # Try CIF B-factors across models
+        cif_files = sorted(glob.glob(os.path.join(job_dir, "*_model_*.cif")))
+        if len(cif_files) < 2:
+            return None
+        rows: list[np.ndarray] = []
+        length = None
+        for cif in cif_files[:max_samples]:
+            with open(cif) as f:
+                plddt, _ = parse_plddt_from_mmcif(f.read())
+            plddt = normalize_plddt_scale(plddt)
+            if length is None:
+                length = len(plddt)
+            if len(plddt) != length:
+                continue
+            rows.append(plddt)
+        if len(rows) < 2:
+            return None
+        return np.stack(rows, axis=0)
+
+    rows = []
+    length = None
+    for path in npz_files[:max_samples]:
+        plddt = parse_plddt_from_boltz_npz(path)
+        if length is None:
+            length = len(plddt)
+        if len(plddt) != length:
+            continue
+        rows.append(plddt)
+    if len(rows) < 2:
+        return None
+    return np.stack(rows, axis=0)
+
+
+def boltz_plddt_variance_from_dir(
+    job_dir: str,
+    max_samples: int = 8,
+) -> Optional[np.ndarray]:
+    """Per-residue std of Boltz multi-sample pLDDT (ensemble proxy)."""
+    stack = load_boltz_plddt_sample_stack(job_dir, max_samples=max_samples)
+    if stack is None:
+        return None
+    return np.nanstd(stack, axis=0).astype(np.float32)
+
+
+def load_boltz_variance_batch(
+    proteins: list,
+    output_root: str,
+    max_samples: int = 8,
+    verbose: bool = True,
+) -> dict[str, np.ndarray]:
+    """Load Boltz multi-sample pLDDT std keyed by protein id."""
+    from tqdm.auto import tqdm
+
+    results: dict[str, np.ndarray] = {}
+    iterator = proteins
+    if verbose:
+        iterator = tqdm(proteins, desc="Boltz pLDDT variance")
+    for p in iterator:
+        job = find_boltz_prediction_dir(
+            output_root, p["id"], p.get("uniprot_acc", ""),
+        )
+        if not job:
+            continue
+        std = boltz_plddt_variance_from_dir(job, max_samples=max_samples)
+        if std is None:
+            continue
+        # Length-align if needed
+        L = p.get("length", len(p["sequence"]))
+        if len(std) == L:
+            results[p["id"]] = std
+        elif len(std) > L:
+            results[p["id"]] = std[:L]
+        else:
+            out = np.full(L, np.nan, dtype=np.float32)
+            out[: len(std)] = std
+            results[p["id"]] = out
+    return results
+
+
 def select_proteins_for_boltz(
     proteins: list,
     output_root: str,
