@@ -95,6 +95,7 @@ sbatch --partition=ica100 --export=ALL,... rockfish/slurm/train_ultra3b.sbatch
 | `full` | all training | cv → stack → postprocess |
 | `boltz` | structure | Boltz-2 pLDDT (pinned, auto-download) |
 | `af3` | structure | Optional AlphaFold 3 ingest/run |
+| `idr-layer` | product | Post-structure IDR biology layer export |
 | `eval` | 8–11 | CAID, AF/Boltz rescue, structure calibration, Phase 3 |
 | `pipeline` | all + eval | full → eval [→ CAID3 with `RUN_CAID3=1`] |
 | `predict` | deploy | FASTA batch inference + `.caid` export |
