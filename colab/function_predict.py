@@ -341,6 +341,99 @@ def compute_function_metrics(
     }
 
 
+def calibrate_function_probs(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    *,
+    group_names: tuple[str, ...] = FUNCTION_GROUP_NAMES,
+    min_positives: int = 10,
+) -> tuple[np.ndarray, dict]:
+    """
+    Per-group temperature scaling on OOF function probabilities.
+
+    Softens/sharpens role probs using held-out labels only — does not change
+    trained weights. Groups with too few positives keep T=1.0.
+    """
+    from colab.calibration import apply_temperature, fit_temperature_scaling
+
+    y_true = np.asarray(y_true, dtype=np.float32)
+    y_prob = np.asarray(y_prob, dtype=np.float32)
+    if y_prob.ndim == 1:
+        y_prob = y_prob.reshape(-1, 1)
+    if y_true.ndim == 1:
+        y_true = y_true.reshape(-1, 1)
+    n = min(y_true.shape[0], y_prob.shape[0])
+    n_groups = min(y_true.shape[1], y_prob.shape[1], len(group_names))
+    calibrated = y_prob[:n, :n_groups].copy()
+    per_group: dict = {}
+    if n == 0 or n_groups == 0:
+        return calibrated, {
+            "enabled": False,
+            "reason": "empty OOF function stream",
+            "per_group": {},
+            "temperatures": [],
+        }
+
+    for gi in range(n_groups):
+        name = group_names[gi]
+        yt = y_true[:n, gi]
+        yp = y_prob[:n, gi]
+        n_pos = int(yt.sum())
+        if n_pos < min_positives or len(np.unique(yt)) < 2:
+            per_group[name] = {
+                "temperature": 1.0,
+                "n_positives": n_pos,
+                "skipped": True,
+                "reason": "insufficient positives or class imbalance",
+            }
+            continue
+        report = fit_temperature_scaling(yt, yp)
+        t = float(report.get("temperature", 1.0))
+        calibrated[:, gi] = apply_temperature(yp, t)
+        per_group[name] = {
+            "temperature": t,
+            "n_positives": n_pos,
+            "skipped": False,
+            "nll_before": report.get("nll_before"),
+            "nll_after": report.get("nll_after"),
+            "auc_before": report.get("auc_before"),
+            "auc_after": report.get("auc_after"),
+        }
+
+    temps = [float(v["temperature"]) for v in per_group.values()]
+    return calibrated, {
+        "enabled": True,
+        "n_residues": n,
+        "n_groups": n_groups,
+        "per_group": per_group,
+        "temperatures": temps,
+        "mean_temperature": round(float(np.mean(temps)), 4) if temps else 1.0,
+        "note": (
+            "Per-group temperature scaling on OOF function probs; "
+            "logits/weights unchanged"
+        ),
+    }
+
+
+def apply_function_temperatures(
+    y_prob: np.ndarray,
+    temperatures: list,
+) -> np.ndarray:
+    """Apply previously fit per-group temperatures to a function probability matrix."""
+    from colab.calibration import apply_temperature
+
+    yp = np.asarray(y_prob, dtype=np.float32)
+    if yp.ndim == 1:
+        yp = yp.reshape(-1, 1)
+    out = yp.copy()
+    n_groups = min(out.shape[1], len(temperatures))
+    for gi in range(n_groups):
+        t = float(temperatures[gi])
+        if t != 1.0:
+            out[:, gi] = apply_temperature(out[:, gi], t)
+    return out
+
+
 def tune_function_threshold(
     y_true: np.ndarray,
     y_prob: np.ndarray,
