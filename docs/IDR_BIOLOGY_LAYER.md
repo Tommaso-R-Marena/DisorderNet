@@ -12,6 +12,10 @@ After Boltz / AlphaFold produce a structure, **DisorderNet is the layer that ans
 
 This is the path toward becoming a **default post-structure biology layer** — not an AlphaFold replacement, and **not** full MD conformational ensembles.
 
+The load-bearing paper bet for this layer is documented in
+[`docs/STRUCTURE_DISTRUST_ATLAS.md`](STRUCTURE_DISTRUST_ATLAS.md)
+(structure distrust as the default post-AF/Boltz layer).
+
 ## Explicit non-goals (frozen)
 
 | Non-goal | Why |
