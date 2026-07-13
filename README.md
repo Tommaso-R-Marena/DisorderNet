@@ -123,7 +123,16 @@ AlphaFold 3's diffusion architecture hallucinates structure in genuinely disorde
 2. Select **Runtime → Change runtime type → GPU (A100 or L4) + High RAM**
 3. Run all cells (~12–18 hours for full 5-fold CV with ESM-2 650M)
 
-The notebook auto-tunes batch size to your GPU VRAM, uses mixed precision (bfloat16 on A100), filters DisProt annotations by disorder-related terms, and shows live per-epoch metrics. Set `MOUNT_DRIVE = True` to persist checkpoints across sessions.
+The notebook auto-tunes batch size to your GPU VRAM, uses mixed precision (bfloat16 on A100), filters DisProt annotations by disorder-related terms, and shows live per-epoch metrics. Set `MOUNT_DRIVE = True` to persist checkpoints, DisProt cache, AF pLDDT cache, and final reports on Drive (`MyDrive/DisorderNet/results/`).
+
+### Evaluation rigor (GPU Colab path)
+
+- **Deterministic CV splits** — proteins sorted by DisProt ID; all modules share splits via `colab/cv_splits.py`
+- **Aligned OOF metrics** — CAID segment F1 and biological utility use per-protein out-of-fold alignment (not fold-concat order)
+- **Threshold reporting** — F1@0.5 (unbiased) plus per-fold optimal thresholds alongside pooled F1_max
+- **Statistical validation** — per-fold paired sign test + Wilcoxon vs inverse-pLDDT baseline
+- **Reproducibility manifest** — `run_manifest.json` records git revision, config/dataset fingerprints, and DisProt snapshot metadata
+- **Resume safety** — `checkpoints/cv_progress.json` v2 validates protein list, config, and DisProt hash before resuming CV
 
 ### Option 2: CPU (Quick, no GPU needed)
 
@@ -171,6 +180,8 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 |------|-------------|
 | `colab/DisorderNet_Colab_Pro.ipynb` | Full GPU notebook (ESM-2 650M + LoRA) |
 | `colab/disordernet_gpu.py` | Colab training module (data, model, CV loop) |
+| `colab/cv_splits.py` | Shared deterministic GroupKFold splits + fingerprints |
+| `colab/run_manifest.py` | Reproducibility manifest + Drive report mirroring |
 | `colab/colab_figures.py` | Publication figure generator for GPU runs |
 | `colab/biological_utility.py` | Phase 1 biological utility (segments, functional enrichment) |
 | `colab/af_plddt.py` | AlphaFold DB pLDDT fetch + alignment |
@@ -179,7 +190,8 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/af_hallucination.py` | Phase 2 hallucination rescue metrics |
 | `colab/phase3_synthesis.py` | Phase 3 fusion calibration & integrated report |
 | `colab/benchmark_tables.py` | Matched vs literature benchmark tables (Tier 1) |
-| `colab/caid_reporting.py` | CAID-style metrics + stratified evaluation |
+| `colab/caid_reporting.py` | CAID-style metrics + stratified evaluation + per-fold thresholds |
+| `colab/statistical_validation.py` | Per-fold paired sign/Wilcoxon tests + bootstrap CIs |
 | `colab/inference_fusion.py` | Post-CV AF pLDDT fusion (α-blend; AF2+AF3 combined map) |
 | `colab/downstream_refresh.py` | Refresh CAID/bio/benchmark after fusion updates |
 
