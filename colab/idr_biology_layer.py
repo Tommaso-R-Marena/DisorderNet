@@ -34,7 +34,7 @@ IDR_ROLE_GROUPS: tuple[str, ...] = (
     "lipid / small molecule binding",
 )
 
-LAYER_VERSION = "1.4.0"
+LAYER_VERSION = "1.5.0"
 
 # Cheap sequence cues that often co-occur with IDR biology (AF-blind)
 _MOTIF_PATTERNS: tuple[tuple[str, str], ...] = (
@@ -186,6 +186,52 @@ def detect_boundary_transition_regions(
     }
 
 
+def compute_quality_flags(record: dict) -> dict:
+    """
+    Deterministic QA / quarantine flags for a protein layer record.
+
+    Does not change predictions — surfaces when the export needs human review
+    or when a run should be quarantined from blind proteome stats.
+    """
+    flags: list[str] = []
+    n = int(record.get("length") or 0)
+    dis_frac = float(record.get("disorder_fraction") or 0.0)
+    halluc = record.get("hallucination")
+    n_halluc = int((halluc or {}).get("n_hallucinated") or 0)
+    has_structure = halluc is not None
+    if not has_structure:
+        flags.append("missing_structure_plddt")
+    if n > 0 and n < 30:
+        flags.append("short_chain")
+    if dis_frac >= 0.95 and n >= 30:
+        flags.append("extreme_disorder")
+    if dis_frac <= 0.01 and int(record.get("n_idr_segments") or 0) == 0:
+        flags.append("fully_ordered")
+    if n > 0 and n_halluc / n >= 0.25:
+        flags.append("high_hallucination_fraction")
+    if int(record.get("n_role_assignments") or 0) == 0 and dis_frac >= 0.3:
+        flags.append("idr_rich_no_role_calls")
+    if len(record.get("role_hallucination_intersections") or []) >= 2:
+        flags.append("multiple_role_structure_conflicts")
+
+    quarantine = any(
+        f in flags
+        for f in (
+            "high_hallucination_fraction",
+            "multiple_role_structure_conflicts",
+            "extreme_disorder",
+        )
+    )
+    severity = "quarantine" if quarantine else ("review" if flags else "ok")
+    return {
+        "flags": flags,
+        "severity": severity,
+        "quarantine": quarantine,
+        "n_flags": len(flags),
+        "has_structure_plddt": has_structure,
+    }
+
+
 def score_protein_triage(record: dict) -> dict:
     """
     Proteome ranking score — higher = investigate sooner.
@@ -203,6 +249,8 @@ def score_protein_triage(record: dict) -> dict:
         for s in record.get("idr_segments", [])
     )
     intersections = len(record.get("role_hallucination_intersections", []) or [])
+    quality = record.get("quality") or {}
+    quarantine_boost = 2.0 if quality.get("quarantine") else 0.0
 
     score = (
         3.0 * intersections
@@ -212,6 +260,7 @@ def score_protein_triage(record: dict) -> dict:
         + 0.02 * float(boundary)
         + 0.5 * cues
         + 2.0 * float(record.get("disorder_fraction", 0.0))
+        + quarantine_boost
     )
     reasons: list[str] = []
     if intersections:
@@ -224,6 +273,8 @@ def score_protein_triage(record: dict) -> dict:
         reasons.append("has_ensemble_proxy_regions")
     if cues:
         reasons.append("has_sequence_cues")
+    if quality.get("quarantine"):
+        reasons.append("quality_quarantine")
     return {
         "score": round(float(score), 4),
         "reasons": reasons,
@@ -482,6 +533,7 @@ def build_protein_idr_layer(
             segments, halluc, flexible_proxy_regions, conditional, intersections,
         ),
     }
+    record["quality"] = compute_quality_flags(record)
     record["triage"] = score_protein_triage(record)
     return record
 
@@ -682,12 +734,16 @@ def build_idr_layer_package(
     validate_roles: bool = True,
     max_workers: int = 1,
     cache_dir: Optional[str] = None,
+    cache_tag: str = "",
+    skip_protein_ids: Optional[set] = None,
+    prior_records: Optional[list[dict]] = None,
 ) -> dict:
     """
     Single-pass package: full records + summary report + triage ranking.
 
     ``max_workers>1`` threads protein builds (I/O-light; accuracy-identical).
     Optional ``cache_dir`` stores per-protein records keyed by content hash.
+    ``skip_protein_ids`` / ``prior_records`` support resume of large proteomes.
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -695,6 +751,7 @@ def build_idr_layer_package(
         layer_record_cache_key,
         load_cached_layer_record,
         proteome_landscape_summary,
+        quality_summary,
         save_cached_layer_record,
     )
 
@@ -703,8 +760,12 @@ def build_idr_layer_package(
     boltz_std_by_id = boltz_std_by_id or {}
     partners_by_id = partners_by_id or {}
     ligands_by_id = ligands_by_id or {}
+    skip = set(skip_protein_ids or set())
 
-    work = [p for p in proteins if p["id"] in disorder_probs_by_id]
+    work = [
+        p for p in proteins
+        if p["id"] in disorder_probs_by_id and p["id"] not in skip
+    ]
     cache_hits = 0
 
     def _one(p: dict) -> tuple[dict, bool]:
@@ -725,6 +786,7 @@ def build_idr_layer_package(
                 has_variance=pid in boltz_std_by_id,
                 has_partners=bool(partners),
                 has_ligands=bool(ligands),
+                cache_tag=cache_tag,
             )
             cached = load_cached_layer_record(cache_dir, key)
             if cached is not None:
@@ -754,7 +816,9 @@ def build_idr_layer_package(
 
     records: list[dict] = []
     workers = max(1, min(int(max_workers), len(work) or 1))
-    if workers == 1:
+    if not work:
+        records = []
+    elif workers == 1:
         for p in work:
             rec, hit = _one(p)
             records.append(rec)
@@ -770,6 +834,13 @@ def build_idr_layer_package(
                 if hit:
                     cache_hits += 1
             records = [by_id[p["id"]] for p in work if p["id"] in by_id]
+
+    # Merge resumed prior records (unchanged proteins) with newly built ones
+    if prior_records:
+        built_ids = {r["protein_id"] for r in records}
+        merged = [r for r in prior_records if r.get("protein_id") not in built_ids]
+        merged.extend(records)
+        records = merged
 
     records.sort(key=lambda r: -float((r.get("triage") or {}).get("score", 0.0)))
 
@@ -805,6 +876,7 @@ def build_idr_layer_package(
     )
     structure_distrust = summarize_structure_distrust(records)
     landscape = proteome_landscape_summary(records)
+    quality = quality_summary(records)
 
     report = {
         "layer_version": LAYER_VERSION,
@@ -818,6 +890,8 @@ def build_idr_layer_package(
             "alphafold_replacement",
         ],
         "n_proteins": len(records),
+        "n_built_this_run": len(work),
+        "n_resumed": len(skip),
         "total_hallucinated_residues": n_halluc,
         "total_role_assignments": n_roles,
         "n_proteins_with_condensate_call": n_condensate,
@@ -831,11 +905,13 @@ def build_idr_layer_package(
         "role_validation": role_validation,
         "structure_distrust": structure_distrust,
         "landscape": landscape,
+        "quality": quality,
         "cache": {
             "enabled": bool(cache_dir),
             "dir": cache_dir,
             "hits": cache_hits,
-            "n_proteins": len(records),
+            "n_proteins": len(work),
+            "tag": cache_tag or None,
         },
         "thresholds": {
             "disorder_threshold": disorder_threshold,
@@ -850,6 +926,7 @@ def build_idr_layer_package(
                 "reasons": (r.get("triage") or {}).get("reasons"),
                 "n_role_assignments": r.get("n_role_assignments"),
                 "n_hallucinated": (r.get("hallucination") or {}).get("n_hallucinated", 0),
+                "quality_severity": (r.get("quality") or {}).get("severity"),
             }
             for r in records[: min(20, len(records))]
         ],
@@ -879,6 +956,9 @@ def build_proteome_idr_layer(
     include_sequence_cues: bool = True,
     max_workers: int = 1,
     cache_dir: Optional[str] = None,
+    cache_tag: str = "",
+    skip_protein_ids: Optional[set] = None,
+    prior_records: Optional[list[dict]] = None,
 ) -> dict:
     """Proteome-scale IDR biology layer + summary stats (builds records once)."""
     package = build_idr_layer_package(
@@ -897,22 +977,36 @@ def build_proteome_idr_layer(
         include_sequence_cues=include_sequence_cues,
         max_workers=max_workers,
         cache_dir=cache_dir,
+        cache_tag=cache_tag,
+        skip_protein_ids=skip_protein_ids,
+        prior_records=prior_records,
     )
     return package["report"]
 
 
-def export_idr_layer_jsonl(records: list[dict], path: str, *, gzip: bool = False) -> str:
+def export_idr_layer_jsonl(
+    records: list[dict],
+    path: str,
+    *,
+    gzip: bool = False,
+    append: bool = False,
+) -> str:
     """Write one protein layer record per line (proteome-scale)."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     if gzip and not path.endswith(".gz"):
         path = path + ".gz"
+    mode = "at" if append else "wt"
     if gzip or path.endswith(".gz"):
         import gzip as _gzip
-        with _gzip.open(path, "wt", encoding="utf-8") as f:
-            for rec in records:
-                f.write(json.dumps(rec) + "\n")
+        # gzip append is byte-append; use "ab" + text wrapper via mode
+        gmode = "ab" if append else "wb"
+        with _gzip.open(path, gmode) as raw:
+            import io
+            with io.TextIOWrapper(raw, encoding="utf-8") as f:
+                for rec in records:
+                    f.write(json.dumps(rec) + "\n")
     else:
-        with open(path, "w") as f:
+        with open(path, mode, encoding="utf-8") as f:
             for rec in records:
                 f.write(json.dumps(rec) + "\n")
     return path
@@ -987,6 +1081,55 @@ def export_idr_disorder_bedgraph(
     return path
 
 
+def export_idr_role_bedgraphs(
+    proteins: list[dict],
+    function_probs_by_id: dict[str, np.ndarray],
+    out_dir: str,
+    *,
+    role_names: tuple[str, ...] = IDR_ROLE_GROUPS,
+) -> dict[str, str]:
+    """
+    One bedGraph per IDR role group (continuous mean role probability).
+
+    Useful for IGV / genome-browser style proteome review of role landscapes.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    paths: dict[str, str] = {}
+    if not function_probs_by_id:
+        return paths
+
+    for gi, name in enumerate(role_names):
+        safe = re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").lower()
+        path = os.path.join(out_dir, f"idr_role_{safe}.bedgraph")
+        with open(path, "w") as f:
+            f.write(
+                f'track type=bedGraph name="DisorderNet_{safe}" '
+                f'description="DisorderNet role: {name}"\n'
+            )
+            for p in proteins:
+                pid = p["id"]
+                if pid not in function_probs_by_id:
+                    continue
+                fn = np.asarray(function_probs_by_id[pid], dtype=np.float32)
+                if fn.ndim == 1:
+                    fn = fn.reshape(-1, 1)
+                if gi >= fn.shape[1]:
+                    continue
+                chrom = p.get("uniprot_acc") or pid
+                col = fn[:, gi]
+                n = min(len(p["sequence"]), len(col))
+                i = 0
+                while i < n:
+                    j = i + 1
+                    v = float(col[i])
+                    while j < n and abs(float(col[j]) - v) < 1e-4:
+                        j += 1
+                    f.write(f"{chrom}\t{i}\t{j}\t{v:.4f}\n")
+                    i = j
+        paths[name] = path
+    return paths
+
+
 def export_idr_layer_bed(
     records: list[dict],
     path: str,
@@ -1022,16 +1165,18 @@ def export_idr_triage_tsv(records: list[dict], path: str) -> str:
         f.write(
             "protein_id\tuniprot_acc\ttriage_score\tdisorder_fraction\t"
             "n_idr_segments\tn_role_assignments\tn_hallucinated\t"
-            "n_intersections\treasons\n"
+            "n_intersections\tquality\treasons\n"
         )
         for rec in records:
             tri = rec.get("triage") or {}
+            qual = (rec.get("quality") or {}).get("severity", "")
             f.write(
                 f"{rec['protein_id']}\t{rec.get('uniprot_acc') or ''}\t"
                 f"{tri.get('score', 0)}\t{rec.get('disorder_fraction', 0):.4f}\t"
                 f"{rec.get('n_idr_segments', 0)}\t{rec.get('n_role_assignments', 0)}\t"
                 f"{(rec.get('hallucination') or {}).get('n_hallucinated', 0)}\t"
                 f"{len(rec.get('role_hallucination_intersections') or [])}\t"
+                f"{qual}\t"
                 f"{','.join(tri.get('reasons') or [])}\n"
             )
     return path
@@ -1051,16 +1196,26 @@ def export_idr_layer_bundle(
     records: list[dict],
     proteins: list[dict],
     disorder_probs_by_id: dict[str, np.ndarray],
+    function_probs_by_id: Optional[dict[str, np.ndarray]] = None,
     gzip_jsonl: bool = False,
     export_caid: bool = True,
+    export_html: bool = True,
+    export_role_bedgraphs: bool = True,
+    validate_schema: bool = True,
 ) -> dict[str, str]:
     """Write the standard IDR layer artifact set; returns path map."""
     from colab.idr_layer_ops import (
         export_disorder_caid_bundle,
+        validate_idr_layer_records,
+        write_idr_layer_html,
         write_idr_layer_markdown,
     )
 
     os.makedirs(out_dir, exist_ok=True)
+    if validate_schema:
+        schema = validate_idr_layer_records(records)
+        report["schema_validation"] = schema
+
     paths = {
         "report": save_idr_layer_report(
             report, os.path.join(out_dir, "idr_biology_layer_report.json"),
@@ -1085,6 +1240,17 @@ def export_idr_layer_bundle(
             records, os.path.join(out_dir, "idr_biology_layer_roles.tsv"),
         ),
     }
+    if export_html:
+        paths["html"] = write_idr_layer_html(
+            report, os.path.join(out_dir, "idr_biology_layer_report.html"),
+        )
+    if export_role_bedgraphs and function_probs_by_id:
+        role_dir = os.path.join(out_dir, "idr_biology_layer_role_bedgraphs")
+        role_paths = export_idr_role_bedgraphs(
+            proteins, function_probs_by_id, role_dir,
+        )
+        paths["role_bedgraphs"] = role_dir
+        paths["role_bedgraph_n"] = str(len(role_paths))
     if export_caid:
         caid_dir = os.path.join(out_dir, "idr_biology_layer_caid")
         caid_paths = export_disorder_caid_bundle(
@@ -1121,6 +1287,18 @@ def print_idr_layer_report(report: dict) -> None:
             f"  structure distrust: halluc_prot={sd.get('n_proteins_with_hallucination', 0)}  "
             f"rescue_rate={sd.get('overall_rescue_rate', 0)}"
         )
+    qual = report.get("quality") or {}
+    if qual:
+        print(
+            f"  quality: quarantine={qual.get('n_quarantine', 0)}  "
+            f"review={qual.get('n_review', 0)}  ok={qual.get('n_ok', 0)}"
+        )
+    cal = report.get("function_calibration") or {}
+    if cal.get("enabled"):
+        print(
+            f"  function calibration: mean_T={cal.get('mean_temperature')}  "
+            f"groups={cal.get('n_groups')}"
+        )
     tune = report.get("function_threshold_tuning") or {}
     if tune.get("enabled"):
         print(
@@ -1130,6 +1308,8 @@ def print_idr_layer_report(report: dict) -> None:
     cache = report.get("cache") or {}
     if cache.get("enabled"):
         print(f"  cache hits={cache.get('hits')} / {cache.get('n_proteins')}")
+    if report.get("n_resumed"):
+        print(f"  resumed prior proteins={report.get('n_resumed')}  built={report.get('n_built_this_run')}")
     rv = report.get("role_validation") or {}
     if rv.get("enabled"):
         micro = rv.get("micro") or {}
@@ -1137,6 +1317,12 @@ def print_idr_layer_report(report: dict) -> None:
             f"  role validation (vs DisProt): "
             f"P={micro.get('precision')}  R={micro.get('recall')}  "
             f"F1={micro.get('f1')}  n_prot={rv.get('n_proteins_with_annotations')}"
+        )
+    schema = report.get("schema_validation") or {}
+    if schema:
+        print(
+            f"  schema: valid={schema.get('n_valid')}  "
+            f"invalid={schema.get('n_invalid')}"
         )
     top = report.get("top_priority_proteins") or []
     if top:

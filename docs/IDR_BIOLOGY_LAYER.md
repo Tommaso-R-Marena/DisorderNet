@@ -26,20 +26,23 @@ This is the path toward becoming a **default post-structure biology layer** — 
 |-------|----------|
 | Layer compose + proteome export | `colab/idr_biology_layer.py` |
 | Pred / partner / ligand I/O | `colab/idr_layer_io.py` |
-| Cache, landscape, markdown, compare | `colab/idr_layer_ops.py` |
-| Disorder → function head / labels | `colab/function_predict.py` + `ultra_fun` |
+| Cache, landscape, markdown/HTML, compare, schema | `colab/idr_layer_ops.py` |
+| Disorder → function head / labels / calibration | `colab/function_predict.py` + `ultra_fun` |
 | Boltz pLDDT + multi-sample variance | `colab/boltz_plddt.py` |
 | Rockfish stage | `python rockfish/run_disordernet.py idr-layer` |
 
 ## Phased roadmap
 
-### Phase A–C (shipped through v1.4)
-- Unified export bundle: JSON, Markdown, JSONL[.gz], triage, BED, bedGraph, roles TSV, CAID dir
+### Phase A–C (shipped through v1.5)
+- Unified export bundle: JSON, Markdown, HTML, JSONL[.gz], triage, BED, bedGraph, roles TSV, CAID dir, per-role bedGraphs
 - Partner / ligand / sequence cues with transparent `conditioned_prob`
 - Role validation vs DisProt; structure-distrust aggregate; proteome landscape
 - OOF-tuned function threshold (`--idr-auto-threshold`)
+- Per-group OOF temperature calibration (`--idr-calibrate-function`)
+- Quality / quarantine flags on every protein record
 - Per-protein record cache (`--idr-cache` / `--idr-cache-dir`)
-- JSONL compare (`--idr-compare`) for before/after QA
+- Resume large proteomes (`--idr-resume`)
+- Schema validation + JSONL compare (`--idr-compare`)
 - Threaded proteome builds + threshold / worker CLI knobs
 
 ### Phase D — optional biophysics collaborations
@@ -51,7 +54,12 @@ This is the path toward becoming a **default post-structure biology layer** — 
 python rockfish/run_disordernet.py idr-layer \
   --structure-backend boltz --boltz-mode ingest \
   --idr-partners partners.json --idr-ligands ligands.json \
-  --idr-auto-threshold --idr-cache --idr-workers 8
+  --idr-auto-threshold --idr-calibrate-function \
+  --idr-cache --idr-workers 8
+
+# Resume a partial proteome export:
+python rockfish/run_disordernet.py idr-layer \
+  --idr-resume checkpoints/idr_biology_layer.jsonl.gz
 
 # Diff against a previous export:
 python rockfish/run_disordernet.py idr-layer \
@@ -59,7 +67,8 @@ python rockfish/run_disordernet.py idr-layer \
 ```
 
 Outputs:
-- `idr_biology_layer_report.json` / `.md`
+- `idr_biology_layer_report.json` / `.md` / `.html`
 - `idr_biology_layer.jsonl[.gz]`, `_triage.tsv`, `.bed`, `_disorder.bedgraph`, `_roles.tsv`
+- `idr_biology_layer_role_bedgraphs/` — per-role probability tracks
 - `idr_biology_layer_caid/` — CAID-format disorder predictions
 - `idr_biology_layer_compare.json` — when `--idr-compare` is set

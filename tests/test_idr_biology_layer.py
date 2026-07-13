@@ -17,19 +17,25 @@ from colab.boltz_plddt import (  # noqa: E402
     load_boltz_structure_features,
     load_boltz_variance_for_protein,
 )
-from colab.function_predict import split_function_oof_by_lengths, tune_function_threshold  # noqa: E402
+from colab.function_predict import (  # noqa: E402
+    calibrate_function_probs,
+    split_function_oof_by_lengths,
+    tune_function_threshold,
+)
 from colab.idr_biology_layer import (  # noqa: E402
     LAYER_VERSION,
     build_idr_layer_package,
     build_protein_idr_layer,
     build_proteome_idr_layer,
     compute_idr_sequence_cues,
+    compute_quality_flags,
     detect_boundary_transition_regions,
     evaluate_role_calls_against_annotations,
     export_idr_disorder_bedgraph,
     export_idr_layer_bed,
     export_idr_layer_bundle,
     export_idr_layer_jsonl,
+    export_idr_role_bedgraphs,
     export_idr_triage_tsv,
     score_protein_triage,
 )
@@ -42,7 +48,12 @@ from colab.idr_layer_io import (  # noqa: E402
 )
 from colab.idr_layer_ops import (  # noqa: E402
     compare_idr_layer_jsonl,
+    load_idr_layer_jsonl,
     proteome_landscape_summary,
+    resume_protein_ids_from_jsonl,
+    validate_idr_layer_record,
+    validate_idr_layer_records,
+    write_idr_layer_html,
     write_idr_layer_markdown,
 )
 from rockfish.run_disordernet import build_parser  # noqa: E402
@@ -76,8 +87,10 @@ class TestIdrBiologyLayer:
             boltz_plddt_std=np.linspace(1, 20, 40).astype(np.float32),
         )
         assert rec["layer_version"] == LAYER_VERSION
-        assert LAYER_VERSION.startswith("1.4")
+        assert LAYER_VERSION.startswith("1.5")
         assert rec["n_idr_segments"] >= 1
+        assert "quality" in rec
+        assert rec["quality"]["severity"] in ("ok", "review", "quarantine")
         roles = {r["group"] for s in rec["idr_segments"] for r in s["predicted_roles"]}
         assert "protein binding" in roles
         assert "condensate / assembly" in roles
@@ -87,6 +100,7 @@ class TestIdrBiologyLayer:
         assert rec["conditional_disorder"] is not None
         assert rec["triage"]["score"] > 0
         assert rec["role_hallucination_intersections"]  # halluc on role-bearing IDR
+        assert validate_idr_layer_record(rec) == []
 
     def test_sequence_cues_corroborate_condensate(self):
         # Charged + aromatic + RGG motif IDR
@@ -343,12 +357,91 @@ class TestIdrBiologyLayer:
             "--idr-workers", "8",
             "--idr-gzip",
             "--idr-auto-threshold",
+            "--idr-calibrate-function",
             "--idr-cache",
             "--idr-compare", "old.jsonl",
+            "--idr-resume", "partial.jsonl",
         ])
         assert args.idr_auto_threshold is True
+        assert args.idr_calibrate_function is True
         assert args.idr_cache is True
         assert args.idr_compare == "old.jsonl"
+        assert args.idr_resume == "partial.jsonl"
+
+    def test_v15_quality_calibration_resume_html(self, tmp_path):
+        # Quality: missing structure + short chain + idr-rich no roles
+        short = build_protein_idr_layer(
+            protein_id="S1",
+            sequence="A" * 20,
+            disorder_probs=np.ones(20, dtype=np.float32) * 0.9,
+        )
+        assert "missing_structure_plddt" in short["quality"]["flags"]
+        assert "short_chain" in short["quality"]["flags"]
+        assert short["quality"]["severity"] == "review"
+
+        # Calibration on synthetic OOF
+        yt = np.zeros((200, 5), dtype=np.float32)
+        yt[:80, 0] = 1
+        yp = np.clip(yt + np.random.RandomState(0).normal(0, 0.15, yt.shape), 0.01, 0.99)
+        yp = yp.astype(np.float32)
+        cal_probs, cal_rep = calibrate_function_probs(yt, yp, min_positives=10)
+        assert cal_rep["enabled"] is True
+        assert cal_probs.shape == (200, 5)
+        assert "protein binding" in cal_rep["per_group"]
+
+        proteins = [
+            {"id": "a", "sequence": "A" * 40, "length": 40, "uniprot_acc": "A1"},
+            {"id": "b", "sequence": "T" * 40, "length": 40, "uniprot_acc": "B1"},
+        ]
+        preds = {
+            "a": np.array([0.9] * 25 + [0.1] * 15, dtype=np.float32),
+            "b": np.array([0.2] * 40, dtype=np.float32),
+        }
+        fn = {
+            "a": np.zeros((40, 5), dtype=np.float32),
+            "b": np.zeros((40, 5), dtype=np.float32),
+        }
+        fn["a"][:20, 0] = 0.85
+        package = build_idr_layer_package(
+            proteins, preds, function_probs_by_id=fn, max_workers=2,
+        )
+        assert package["report"]["quality"]["n_ok"] + package["report"]["quality"]["n_review"] >= 1
+        schema = validate_idr_layer_records(package["records"])
+        assert schema["ok"] is True
+
+        # First export, then resume skipping "a"
+        paths = export_idr_layer_bundle(
+            out_dir=str(tmp_path / "out1"),
+            report=package["report"],
+            records=package["records"],
+            proteins=proteins,
+            disorder_probs_by_id=preds,
+            function_probs_by_id=fn,
+        )
+        assert Path(paths["html"]).exists()
+        assert "DisorderNet" in Path(paths["html"]).read_text()
+        assert Path(paths["role_bedgraphs"]).is_dir()
+        html_path = write_idr_layer_html(package["report"], str(tmp_path / "x.html"))
+        assert Path(html_path).stat().st_size > 100
+
+        prior = load_idr_layer_jsonl(paths["jsonl"])
+        skip = resume_protein_ids_from_jsonl(paths["jsonl"])
+        assert "a" in skip and "b" in skip
+        resumed = build_idr_layer_package(
+            proteins, preds, function_probs_by_id=fn,
+            skip_protein_ids={"a"},
+            prior_records=[r for r in prior if r["protein_id"] == "a"],
+        )
+        assert resumed["report"]["n_resumed"] == 1
+        assert resumed["report"]["n_built_this_run"] == 1
+        assert {r["protein_id"] for r in resumed["records"]} == {"a", "b"}
+
+        role_paths = export_idr_role_bedgraphs(proteins, fn, str(tmp_path / "roles_bg"))
+        assert len(role_paths) == 5
+        assert "track type=bedGraph" in Path(next(iter(role_paths.values()))).read_text()
+
+        q = compute_quality_flags(short)
+        assert q["n_flags"] >= 2
 
 
 class TestBoltzVariance:
@@ -449,3 +542,16 @@ class TestIdrLayerCLI:
         assert abs(args.idr_disorder_threshold - 0.55) < 1e-9
         assert args.idr_auto_threshold is True
         assert args.idr_cache is True
+
+    def test_v15_flags(self):
+        args = build_parser().parse_args([
+            "idr-layer",
+            "--idr-calibrate-function",
+            "--idr-resume", "partial.jsonl.gz",
+            "--idr-no-html",
+            "--idr-no-role-bedgraphs",
+        ])
+        assert args.idr_calibrate_function is True
+        assert args.idr_resume == "partial.jsonl.gz"
+        assert args.idr_no_html is True
+        assert args.idr_no_role_bedgraphs is True

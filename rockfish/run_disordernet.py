@@ -407,6 +407,8 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
     """
     Post-structure IDR biology layer: disorder + roles + hallucination + Boltz variance proxy.
     """
+    import numpy as np
+
     from colab.biological_utility import align_fold_predictions
     from colab.idr_biology_layer import (
         build_idr_layer_package,
@@ -443,9 +445,14 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
     function_oof_metrics = None
     function_threshold = float(getattr(args, "idr_function_threshold", 0.5))
     threshold_tuning = None
+    function_calibration = None
+    cache_tag = ""
+    y_true = np.zeros((0, 1), dtype=np.float32)
+    y_prob = np.zeros((0, 1), dtype=np.float32)
     try:
         from colab.function_predict import (
             align_function_oof,
+            calibrate_function_probs,
             run_function_prediction_report,
             split_function_oof_by_lengths,
             tune_function_threshold,
@@ -472,6 +479,32 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
                     "role calls skipped (retrain with function head)."
                 )
         if function_by_id:
+            if getattr(args, "idr_calibrate_function", False) and len(y_true) > 0:
+                from colab.function_predict import (
+                    FUNCTION_GROUP_NAMES,
+                    apply_function_temperatures,
+                )
+
+                calibrated, function_calibration = calibrate_function_probs(y_true, y_prob)
+                temps = [
+                    float(
+                        (function_calibration.get("per_group") or {})
+                        .get(g, {})
+                        .get("temperature", 1.0)
+                    )
+                    for g in FUNCTION_GROUP_NAMES
+                ]
+                if function_calibration.get("enabled"):
+                    for pid in list(function_by_id):
+                        function_by_id[pid] = apply_function_temperatures(
+                            function_by_id[pid], temps,
+                        )
+                    y_prob = calibrated
+                    cache_tag = "calibrated"
+                    print(
+                        f"  Function temperature calibration mean_T="
+                        f"{function_calibration.get('mean_temperature')}"
+                    )
             function_oof_metrics = run_function_prediction_report(
                 proteins, fold_results, n_folds=cfg.n_folds,
             )
@@ -528,6 +561,15 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
     if cache_dir is None and getattr(args, "idr_cache", False):
         cache_dir = os.path.join(ckpt, "idr_layer_cache")
 
+    skip_ids = set()
+    prior_records = None
+    resume_path = getattr(args, "idr_resume", None)
+    if resume_path:
+        from colab.idr_layer_ops import load_idr_layer_jsonl, resume_protein_ids_from_jsonl
+        skip_ids = resume_protein_ids_from_jsonl(resume_path)
+        prior_records = load_idr_layer_jsonl(resume_path)
+        print(f"  Resume: skipping {len(skip_ids)} proteins from {resume_path}")
+
     package = build_idr_layer_package(
         proteins,
         disorder_by_id,
@@ -542,10 +584,15 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
         max_proteins_in_summary=getattr(args, "idr_layer_max_proteins", 100),
         max_workers=getattr(args, "idr_workers", 4),
         cache_dir=cache_dir,
+        cache_tag=cache_tag,
+        skip_protein_ids=skip_ids,
+        prior_records=prior_records,
     )
     report, full_records = package["report"], package["records"]
     if function_oof_metrics is not None:
         report["function_oof_metrics"] = function_oof_metrics
+    if function_calibration is not None:
+        report["function_calibration"] = function_calibration
     if threshold_tuning is not None:
         report["function_threshold_tuning"] = threshold_tuning
         report["thresholds"]["function_threshold"] = function_threshold
@@ -556,8 +603,11 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
         records=full_records,
         proteins=proteins,
         disorder_probs_by_id=disorder_by_id,
+        function_probs_by_id=function_by_id,
         gzip_jsonl=getattr(args, "idr_gzip", False),
         export_caid=not getattr(args, "idr_no_caid", False),
+        export_html=not getattr(args, "idr_no_html", False),
+        export_role_bedgraphs=not getattr(args, "idr_no_role_bedgraphs", False),
     )
     compare_path = getattr(args, "idr_compare", None)
     if compare_path:
@@ -878,8 +928,11 @@ def stage_predict(args, cfg, model, converter) -> dict:
             records=full,
             proteins=proteins,
             disorder_probs_by_id=preds,
+            function_probs_by_id=function_by_id,
             gzip_jsonl=getattr(args, "idr_gzip", False),
             export_caid=not getattr(args, "idr_no_caid", False),
+            export_html=not getattr(args, "idr_no_html", False),
+            export_role_bedgraphs=not getattr(args, "idr_no_role_bedgraphs", False),
         )
         manifest["idr_layer_proteins"] = len(full)
         manifest["idr_layer_paths"] = paths
@@ -1196,6 +1249,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--idr-compare", default=None,
         help="Compare current JSONL export against a prior JSONL/.gz path",
+    )
+    p.add_argument(
+        "--idr-resume", default=None,
+        help="Resume proteome export: skip protein_ids already in this JSONL/.gz",
+    )
+    p.add_argument(
+        "--idr-calibrate-function", action="store_true",
+        help="idr-layer: per-group temperature scaling of OOF function probs",
+    )
+    p.add_argument(
+        "--idr-no-html", action="store_true",
+        help="Skip HTML summary in the IDR layer bundle",
+    )
+    p.add_argument(
+        "--idr-no-role-bedgraphs", action="store_true",
+        help="Skip per-role bedGraph tracks in the IDR layer bundle",
     )
     p.add_argument(
         "--idr-no-caid", action="store_true",
