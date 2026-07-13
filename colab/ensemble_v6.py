@@ -226,6 +226,7 @@ def apply_gpu_v6_ensemble(
     v6_cache_path: str = "v6_oof_probs_cache.json",
     run_v6_if_missing: bool = True,
     seed: int = 42,
+    use_v6_pro: bool = False,
 ) -> tuple[dict, list, dict[str, np.ndarray]]:
     """
     Optimize blend weight (if needed), ensemble GPU + v6 OOF predictions.
@@ -241,14 +242,22 @@ def apply_gpu_v6_ensemble(
     v6_meta: dict = {"source": "cache" if v6_probs_by_id else "lite_cv"}
 
     if v6_probs_by_id is None and run_v6_if_missing:
-        oof_probs, oof_labels, fold_meta = run_v6_lite_oof(proteins, n_folds=n_folds, seed=seed)
-        v6_probs_by_id = aligned_probs_from_oof(proteins, oof_probs)
-        save_v6_probs_cache(v6_probs_by_id, v6_cache_path)
-        v6_meta.update({
-            "source": "lite_cv",
-            "lite_cv_auc": float(roc_auc_score(oof_labels, oof_probs)),
-            "fold_meta": fold_meta,
-        })
+        if use_v6_pro:
+            from colab.v6_pro_ensemble import get_v6_pro_oof_probs
+            pro_cache = v6_cache_path.replace(".json", "_pro.json")
+            v6_probs_by_id = get_v6_pro_oof_probs(
+                proteins, n_folds=n_folds, seed=seed, cache_path=pro_cache,
+            )
+            v6_meta.update({"source": "v6_pro", "cache": pro_cache})
+        else:
+            oof_probs, oof_labels, fold_meta = run_v6_lite_oof(proteins, n_folds=n_folds, seed=seed)
+            v6_probs_by_id = aligned_probs_from_oof(proteins, oof_probs)
+            save_v6_probs_cache(v6_probs_by_id, v6_cache_path)
+            v6_meta.update({
+                "source": "lite_cv",
+                "lite_cv_auc": float(roc_auc_score(oof_labels, oof_probs)),
+                "fold_meta": fold_meta,
+            })
     elif v6_probs_by_id is None:
         raise ValueError("v6 probabilities unavailable and run_v6_if_missing=False")
 

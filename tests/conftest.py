@@ -80,6 +80,10 @@ class _MockLayer(nn.Module):
     def __init__(self, dim: int = 128):
         super().__init__()
         self.self_attn = _MockAttn(dim)
+        self.self_attn_layer_norm = nn.LayerNorm(dim)
+        self.final_layer_norm = nn.LayerNorm(dim)
+        self.fc1 = nn.Linear(dim, dim * 4)
+        self.fc2 = nn.Linear(dim * 4, dim)
 
 
 class MockESM(nn.Module):
