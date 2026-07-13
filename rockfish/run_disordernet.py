@@ -14,7 +14,9 @@ Stages:
   pipeline         — full → eval (complete Rockfish production run)
 
 Example (interactive debug on Rockfish):
-  python rockfish/run_disordernet.py cv --profile ultra --backbone 650M\n  python rockfish/run_disordernet.py boltz --boltz-mode auto   # Boltz-2 default
+  python rockfish/run_disordernet.py cv --profile ultra --backbone 650M
+  python rockfish/run_disordernet.py boltz --boltz-mode auto   # Boltz-2 default
+  python rockfish/run_disordernet.py cv --profile ultra_fun   # disorder→function
 
 Example (submit via Slurm):
   sbatch rockfish/slurm/train_ultra.sbatch
@@ -67,8 +69,7 @@ def _build_cfg(args, workdir: str):
     from colab.disordernet_gpu import TrainConfig, setup_environment
     from colab.esm_backbone import apply_backbone_to_config
 
-    cfg = TrainConfig.from_profile(
-        args.profile,
+    overrides = dict(
         seed=args.seed,
         n_folds=args.n_folds,
         esm_backbone=args.backbone,
@@ -78,6 +79,13 @@ def _build_cfg(args, workdir: str):
         else args.data_cache,
         num_workers=args.num_workers,
     )
+    if getattr(args, "function_head", False):
+        overrides["use_function_head"] = True
+    if getattr(args, "no_function_head", False):
+        overrides["use_function_head"] = False
+    if getattr(args, "function_loss_weight", None) is not None:
+        overrides["function_loss_weight"] = args.function_loss_weight
+    cfg = TrainConfig.from_profile(args.profile, **overrides)
     cfg = setup_environment(cfg)
     cfg = apply_backbone_to_config(cfg, args.backbone)
     return cfg
@@ -426,6 +434,21 @@ def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
         proteins, fold_results, n_folds=cfg.n_folds, print_reports=True,
     )
 
+    # Disorder → function (multi-label) OOF report
+    from colab.function_predict import (
+        print_function_report,
+        run_function_prediction_report,
+        save_function_report,
+        summarize_function_label_coverage,
+    )
+    func_report = run_function_prediction_report(
+        proteins, fold_results, n_folds=cfg.n_folds,
+    )
+    if not func_report.get("enabled"):
+        func_report["label_coverage"] = summarize_function_label_coverage(proteins)
+    print_function_report(func_report)
+    save_function_report(func_report, os.path.join(ckpt, "function_prediction_report.json"))
+
     af_cache = os.path.join(ckpt, cfg.af_plddt_cache_dir)
     af_report, plddt_by_id = fetch_and_run_af_rescue_report(
         proteins=proteins,
@@ -576,6 +599,10 @@ def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
         "phase3_headline": phase3.get("headline"),
         "af_rescue_rate": af_report.get("pooled", {}).get("rescue_rate"),
         "fusion_delta_auc": fusion_report.get("delta_auc_pooled"),
+        "function_macro_auc": (
+            func_report.get("metrics", {}) or {}
+        ).get("macro_auc"),
+        "function_enabled": bool(func_report.get("enabled")),
     }
     with open(os.path.join(ckpt, "eval_summary.json"), "w") as f:
         json.dump(eval_summary, f, indent=2)
@@ -831,6 +858,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     # CV
     p.add_argument("--prefetch-af-plddt", action="store_true", help="Prefetch AF pLDDT cache")
+    p.add_argument(
+        "--function-head", action="store_true",
+        help="Enable disorder→function multi-label head (or use --profile ultra_fun)",
+    )
+    p.add_argument(
+        "--no-function-head", action="store_true",
+        help="Disable function head even if profile enables it",
+    )
+    p.add_argument(
+        "--function-loss-weight", type=float, default=None,
+        help="Weight for function multi-label BCE (default: profile / 0.35)",
+    )
 
     # Postprocess
     p.add_argument("--skip-soup", action="store_true")

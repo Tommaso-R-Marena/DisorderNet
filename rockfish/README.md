@@ -186,6 +186,7 @@ sbatch --account=$DISORDERNET_ACCOUNT --array=0-7 \
 | CAID3 benchmark eval | 0.895 ref | ✓ `caid3_eval_report.json` |
 | AF / Boltz hallucination rescue | ✗ | ✓ Boltz-2 default (+ optional AF3) |
 | Train-time pLDDT channel | ✗ | ✓ `use_plddt_features` in ultra |
+| Disorder → function (IDR roles) | ✗ | ✓ `ultra_fun` / `--function-head` |
 | Proteome FASTA deploy | limited | ✓ `predict` stage |
 
 Interactive debug (salloc GPU node):
@@ -195,6 +196,10 @@ salloc --partition=a100 --qos=qos_gpu --account=$DISORDERNET_ACCOUNT \
 source ~/venvs/disordernet/bin/activate
 cd ~/DisorderNet
 python rockfish/run_disordernet.py screen --screen-mode flash --backbone 650M
+
+# Disorder → function multi-label training
+python rockfish/run_disordernet.py cv --profile ultra_fun
+# or: --profile ultra --function-head
 ```
 
 ## Fault tolerance
