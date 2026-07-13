@@ -113,6 +113,103 @@ def _read_score_caid(path: str) -> Optional[np.ndarray]:
     return np.asarray(scores, dtype=np.float32) if scores else None
 
 
+def load_function_preds_from_dir(
+    pred_dir: str,
+    *,
+    proteins: Optional[list[dict]] = None,
+    n_groups: int = 5,
+) -> dict[str, np.ndarray]:
+    """
+    Load per-residue multi-label function probs from a directory.
+
+    Supports:
+      - ``*.npy`` — shape ``(L, G)`` or ``(L,)``
+      - ``*.tsv`` — ``position\\tresidue\\tg0\\tg1\\t...`` (header optional)
+      - JSON map ``{protein_id: [[...], ...]}`` if ``function_preds.json`` present
+    """
+    pred_dir = str(pred_dir)
+    if not os.path.isdir(pred_dir):
+        return {}
+
+    by_stem: dict[str, np.ndarray] = {}
+    json_path = os.path.join(pred_dir, "function_preds.json")
+    if os.path.isfile(json_path):
+        with open(json_path) as f:
+            raw = json.load(f)
+        for k, v in raw.items():
+            arr = np.asarray(v, dtype=np.float32)
+            if arr.ndim == 1:
+                arr = arr.reshape(-1, 1)
+            by_stem[k] = arr
+
+    for name in os.listdir(pred_dir):
+        path = os.path.join(pred_dir, name)
+        if not os.path.isfile(path):
+            continue
+        lower = name.lower()
+        stem = Path(name).stem
+        if lower.endswith(".npy"):
+            arr = np.load(path).astype(np.float32)
+            if arr.ndim == 1:
+                arr = arr.reshape(-1, 1)
+            by_stem[stem] = arr
+        elif lower.endswith(".tsv") and stem != "function_preds":
+            arr = _read_function_tsv(path, n_groups=n_groups)
+            if arr is not None:
+                by_stem[stem] = arr
+
+    if not proteins:
+        return by_stem
+
+    out: dict[str, np.ndarray] = {}
+    for p in proteins:
+        pid = p["id"]
+        candidates = {
+            pid,
+            re.sub(r"[^\w\-.]", "_", pid),
+            (p.get("uniprot_acc") or ""),
+            re.sub(r"[^\w\-.]", "_", p.get("uniprot_acc") or ""),
+        }
+        for key in candidates:
+            if key and key in by_stem:
+                out[pid] = by_stem[key]
+                break
+            for stem, arr in by_stem.items():
+                if key and stem.lower() == key.lower():
+                    out[pid] = arr
+                    break
+            if pid in out:
+                break
+    return out
+
+
+def _read_function_tsv(path: str, *, n_groups: int = 5) -> Optional[np.ndarray]:
+    rows: list[list[float]] = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            # Skip header
+            if parts[0].lower() in ("position", "pos", "residue"):
+                continue
+            try:
+                # position, residue, then group probs
+                if len(parts) >= 2 + n_groups:
+                    vals = [float(x) for x in parts[2:2 + n_groups]]
+                elif len(parts) >= n_groups:
+                    vals = [float(x) for x in parts[:n_groups]]
+                else:
+                    continue
+                rows.append(vals)
+            except ValueError:
+                continue
+    if not rows:
+        return None
+    return np.asarray(rows, dtype=np.float32)
+
+
 def load_partner_map(path: Optional[str]) -> dict[str, list[str]]:
     """
     Load optional partner sequences for conditioned role cues.
@@ -134,7 +231,7 @@ def load_partner_map(path: Optional[str]) -> dict[str, list[str]]:
                 out[k] = [str(x) for x in v if x]
         return out
 
-    out = {}
+    out: dict[str, list[str]] = {}
     with open(path) as f:
         for line in f:
             line = line.strip()

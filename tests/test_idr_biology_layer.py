@@ -24,6 +24,7 @@ from colab.function_predict import (  # noqa: E402
 )
 from colab.idr_biology_layer import (  # noqa: E402
     LAYER_VERSION,
+    annotate_role_call_confidence,
     build_idr_layer_package,
     build_protein_idr_layer,
     build_proteome_idr_layer,
@@ -39,15 +40,23 @@ from colab.idr_biology_layer import (  # noqa: E402
     export_idr_triage_tsv,
     score_protein_triage,
 )
+from colab.idr_layer_biophysics import (  # noqa: E402
+    compute_idr_biophysics_cues,
+    kappa_lite,
+    scd_lite,
+)
 from colab.idr_layer_io import (  # noqa: E402
     ligand_binding_support,
     load_disorder_preds_from_dir,
+    load_function_preds_from_dir,
     load_ligand_map,
     load_partner_map,
     partner_binding_support,
 )
 from colab.idr_layer_ops import (  # noqa: E402
     compare_idr_layer_jsonl,
+    export_idr_layer_gff3,
+    filter_layer_records,
     load_idr_layer_jsonl,
     proteome_landscape_summary,
     resume_protein_ids_from_jsonl,
@@ -55,6 +64,8 @@ from colab.idr_layer_ops import (  # noqa: E402
     validate_idr_layer_records,
     write_idr_layer_html,
     write_idr_layer_markdown,
+    write_idr_run_manifest,
+    write_triage_protein_cards,
 )
 from rockfish.run_disordernet import build_parser  # noqa: E402
 
@@ -87,7 +98,7 @@ class TestIdrBiologyLayer:
             boltz_plddt_std=np.linspace(1, 20, 40).astype(np.float32),
         )
         assert rec["layer_version"] == LAYER_VERSION
-        assert LAYER_VERSION.startswith("1.5")
+        assert LAYER_VERSION.startswith("1.6")
         assert rec["n_idr_segments"] >= 1
         assert "quality" in rec
         assert rec["quality"]["severity"] in ("ok", "review", "quarantine")
@@ -443,6 +454,71 @@ class TestIdrBiologyLayer:
         q = compute_quality_flags(short)
         assert q["n_flags"] >= 2
 
+    def test_v16_biophysics_gff_cards_function_reload(self, tmp_path):
+        # Blocky charged IDR → patterning cues
+        seq = ("KKKK" + "EEEE") * 4 + "A" * 10
+        bio = compute_idr_biophysics_cues(seq, 0, 32)
+        assert "fcr" in bio and bio["fcr"] > 0.5
+        assert bio["kappa_lite"] is not None or bio["scd_lite"] != 0.0
+        assert scd_lite("K" * 10 + "E" * 10) != 0.0
+        assert kappa_lite("KE" * 20) is not None or kappa_lite("KKKKKEEEEE" * 3) is not None
+
+        cues = compute_idr_sequence_cues("RGGFYKEN" + "A" * 20, 0, 28)
+        assert "biophysics" in cues
+        assert any(m["motif"] in ("RGG", "KEN_box") for m in cues["motifs"])
+
+        roles = annotate_role_call_confidence([
+            {"group": "protein binding", "mean_prob": 0.8, "max_prob": 0.9, "evidence": ["sequence_cue_agrees"]},
+            {"group": "nucleic acid binding", "mean_prob": 0.75, "max_prob": 0.85},
+            {"group": "condensate / assembly", "mean_prob": 0.72, "max_prob": 0.8},
+        ])
+        assert all("confidence" in r for r in roles)
+        assert any(r.get("multi_role_conflict") for r in roles)
+
+        proteins = [
+            {"id": "a", "sequence": seq, "length": len(seq), "uniprot_acc": "A1"},
+            {"id": "b", "sequence": "T" * 40, "length": 40, "uniprot_acc": "B1"},
+        ]
+        preds = {
+            "a": np.array([0.95] * 32 + [0.1] * 10, dtype=np.float32),
+            "b": np.ones(40, dtype=np.float32) * 0.1,
+        }
+        fn = {"a": np.zeros((42, 5), dtype=np.float32), "b": np.zeros((40, 5), dtype=np.float32)}
+        fn["a"][:32, 3] = 0.88
+        package = build_idr_layer_package(proteins, preds, function_probs_by_id=fn)
+        rec = next(r for r in package["records"] if r["protein_id"] == "a")
+        assert rec["idr_segments"][0]["predicted_roles"][0].get("confidence") is not None
+        assert "biophysics" in rec["idr_segments"][0]["sequence_cues"]
+
+        paths = export_idr_layer_bundle(
+            out_dir=str(tmp_path / "bundle"),
+            report=package["report"],
+            records=package["records"],
+            proteins=proteins,
+            disorder_probs_by_id=preds,
+            function_probs_by_id=fn,
+            cards_top_n=2,
+        )
+        assert Path(paths["gff3"]).exists()
+        assert "##gff-version 3" in Path(paths["gff3"]).read_text()
+        assert Path(paths["cards_dir"]).is_dir()
+        assert Path(paths["manifest"]).exists()
+        assert int(paths["cards_n"]) >= 1
+        gff = export_idr_layer_gff3(package["records"], str(tmp_path / "x.gff3"))
+        assert "IDR_segment" in Path(gff).read_text()
+        cards = write_triage_protein_cards(package["records"], str(tmp_path / "cards"), top_n=1)
+        assert len(cards) == 1
+        write_idr_run_manifest(str(tmp_path / "man.json"), layer_version=LAYER_VERSION)
+        filtered = filter_layer_records(package["records"], min_triage_score=0.0)
+        assert len(filtered) == len(package["records"])
+
+        # Function pred reload
+        fn_dir = tmp_path / "fn"
+        fn_dir.mkdir()
+        np.save(fn_dir / "a.npy", fn["a"])
+        loaded = load_function_preds_from_dir(str(fn_dir), proteins=proteins)
+        assert "a" in loaded and loaded["a"].shape[1] == 5
+
 
 class TestBoltzVariance:
     def test_sample_stack_and_std(self, tmp_path):
@@ -550,8 +626,20 @@ class TestIdrLayerCLI:
             "--idr-resume", "partial.jsonl.gz",
             "--idr-no-html",
             "--idr-no-role-bedgraphs",
+            "--idr-function-preds-dir", "fn/",
+            "--idr-min-triage", "2.5",
+            "--idr-quarantine-only",
+            "--idr-no-gff",
+            "--idr-no-cards",
+            "--idr-cards-top-n", "12",
         ])
         assert args.idr_calibrate_function is True
         assert args.idr_resume == "partial.jsonl.gz"
         assert args.idr_no_html is True
         assert args.idr_no_role_bedgraphs is True
+        assert args.idr_function_preds_dir == "fn/"
+        assert abs(args.idr_min_triage - 2.5) < 1e-9
+        assert args.idr_quarantine_only is True
+        assert args.idr_no_gff is True
+        assert args.idr_no_cards is True
+        assert args.idr_cards_top_n == 12
