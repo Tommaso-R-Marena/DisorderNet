@@ -96,6 +96,17 @@ Breaking **0.90+ consistently** on DisProt likely needs **ESM-2 3B** (`ultra3b`)
 
 **Decision rule:** If step 2 stacked AUC **< 0.87**, skip another 650M run and do step 3. If step 3 stacked AUC **≥ 0.86**, commit to step 4.
 
+### Rockfish / Slurm (recommended for production)
+
+If you have access to JHU Rockfish (or any Slurm cluster with A100s), use the HPC pipeline instead of Colab for 3B runs and multi-day jobs. See **[rockfish/README.md](rockfish/README.md)** for setup, `sbatch` templates, and fault-tolerant resume.
+
+```bash
+bash rockfish/setup_env.sh && source ~/venvs/disordernet/bin/activate
+export DISORDERNET_ACCOUNT=your_pi_gpu
+sbatch --account=$DISORDERNET_ACCOUNT rockfish/slurm/quick_screen.sbatch
+sbatch --account=$DISORDERNET_ACCOUNT rockfish/slurm/train_ultra3b.sbatch
+```
+
 ### SOTA track (`QUALITY_PROFILE = "sota"`)
 
 Designed to close the gap to ESMDisPred (0.895 CAID3 reference):
@@ -240,6 +251,9 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/DisorderNet_Colab_Pro.ipynb` | Full GPU notebook (ESM-2 650M + LoRA) — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb) |
 | `colab/quick_screen.py` | Quick screen logic (stratified subsample, verdict tiers) |
 | `colab/esm_backbone.py` | ESM-2 backbone registry (650M → 3B) + VRAM batch presets |
+| `rockfish/run_disordernet.py` | HPC CLI: screen / cv / stack / postprocess / full |
+| `rockfish/slurm/*.sbatch` | JHU Rockfish Slurm job templates (A100, 72 h) |
+| `colab/inference_tta.py` | MC-dropout test-time augmentation (ultra Cell 7d) |
 | `colab/multi_seed_blend.py` | Optional multi-seed OOF average (Cell 7e) |
 | `colab/disordernet_gpu.py` | Colab training module (data, model, CV loop) |
 | `colab/cv_splits.py` | Shared deterministic GroupKFold splits + fingerprints |

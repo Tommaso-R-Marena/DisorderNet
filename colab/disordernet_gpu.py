@@ -569,8 +569,8 @@ def setup_environment(cfg: TrainConfig) -> TrainConfig:
     """GPU detection, seeding, and performance flags. Mutates and returns cfg."""
     if not torch.cuda.is_available():
         raise RuntimeError(
-            "No GPU detected. In Colab: Runtime → Change runtime type → "
-            "GPU (A100 or L4 recommended)."
+            "No GPU detected. Use a GPU partition (Rockfish: a100 + qos_gpu) or "
+            "Colab: Runtime → Change runtime type → GPU."
         )
 
     props = torch.cuda.get_device_properties(0)
