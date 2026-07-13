@@ -67,6 +67,7 @@ AlphaFold 3's diffusion architecture hallucinates structure in genuinely disorde
 | GPU SOTA track (`sota` profile) | target ≥0.88–0.90 | — | Transformer head, Dice+EMA, 3-way stack, compact ckpt |
 | GPU ULTRA track (`ultra` profile) | target 0.88–0.92 | — | Rich features, FFN LoRA, v6-pro meta-stack, MC-dropout TTA |
 | GPU ULTRA 3B (`ultra3b` profile) | target 0.90–0.93 | — | ESM-2 3B backbone on A100 40GB+ |
+| GPU ULTRA + function (`ultra_fun`) | disorder + IDR roles | — | Multi-label Disorder→function head |
 
 ### Performance ceiling (honest)
 
@@ -259,7 +260,8 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/caid3_eval.py` | CAID3 Disorder-PDB benchmark harness |
 | `colab/structure_encoder.py` | Train-time pLDDT feature channel |
 | `colab/predict_batch.py` | FASTA proteome inference + `.caid` export |
-| `colab/novel_use_cases.py` | AF hallucination screening, rescue manifest |
+| `colab/novel_use_cases.py` | AF hallucination screening, rescue manifest, IDR function annotation |
+| `colab/function_predict.py` | Disorder→function multi-label head, labels, OOF metrics |
 | `colab/inference_tta.py` | MC-dropout test-time augmentation (ultra Cell 7d) |
 | `colab/multi_seed_blend.py` | Optional multi-seed OOF average (Cell 7e) |
 | `colab/disordernet_gpu.py` | Colab training module (data, model, CV loop) |
@@ -297,6 +299,14 @@ After GPU cross-validation, the notebook runs `colab/biological_utility.py` to r
 - **Transition zones** — performance at disorder↔order boundaries
 
 Outputs: `biological_utility_report.json` and `fig5_biological_utility.png`.
+
+### Disorder → function (multi-label IDR roles)
+
+Train with `--profile ultra_fun` (or `--function-head`) to add a multi-label head that predicts DisProt functional groups on disordered residues:
+
+- protein binding · nucleic acid binding · PTM regulation · condensate/assembly · lipid/small-molecule binding
+
+OOF metrics land in `function_prediction_report.json`. Proteome exports use `annotate_idr_functions` / `predict_protein_functions`.
 
 ### AlphaFold hallucination rescue (Phase 2)
 

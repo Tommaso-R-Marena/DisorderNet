@@ -17,8 +17,10 @@ TRAINABLE_KEY_MARKERS = (
     "lora_A",
     "lora_B",
     "head.",
+    "function_head.",
     "layer_fusion.",
     "physico.",
+    "rich_encoder.",
     "plddt_encoder.",
 )
 
