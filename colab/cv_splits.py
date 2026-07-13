@@ -49,6 +49,11 @@ _FINGERPRINT_KEYS = (
     "hallucination_weight",
     "high_plddt_threshold",
     "early_stop_mode",
+    "head_type",
+    "use_dice_loss",
+    "dice_loss_weight",
+    "use_ema",
+    "compact_checkpoints",
 )
 
 

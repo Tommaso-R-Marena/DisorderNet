@@ -265,6 +265,15 @@ class TrainConfig:
     # Checkpoint selection: "composite" (AUC+AP+SegF1) or "auc" (AUC-only, rigor-first)
     early_stop_mode: str = "composite"
 
+    # SOTA track (profile "sota")
+    head_type: str = "cnn"  # "cnn" | "sota" (CNN + Transformer)
+    use_dice_loss: bool = False
+    dice_loss_weight: float = 0.25
+    label_smoothing: float = 0.0
+    use_ema: bool = False
+    ema_decay: float = 0.999
+    compact_checkpoints: bool = False
+
     # AF hallucination hard-negative weighting (disordered + high pLDDT)
     use_hallucination_weighting: bool = True
     hallucination_weight: float = 3.0
@@ -288,6 +297,7 @@ class TrainConfig:
 
         balanced — default v2 (rank 16, 20 epochs)
         max      — higher capacity (rank 32, 25 epochs, larger physico stream)
+        sota     — SOTA push: rank 64, Transformer head, Dice+EMA, compact ckpt
         """
         presets: dict[str, dict] = {
             "balanced": {},
@@ -302,9 +312,35 @@ class TrainConfig:
                 "physico_dim": 48,
                 "focal_gamma": 2.5,
             },
+            "sota": {
+                "lora_rank": 64,
+                "lora_alpha": 128,
+                "lora_layers": 16,
+                "num_epochs": 30,
+                "patience": 10,
+                "lr_lora": 3e-5,
+                "lr_head": 2e-4,
+                "boundary_weight": 3.5,
+                "physico_dim": 64,
+                "focal_gamma": 2.5,
+                "esm_fusion_layers": 8,
+                "head_type": "sota",
+                "use_dice_loss": True,
+                "dice_loss_weight": 0.3,
+                "label_smoothing": 0.02,
+                "use_ema": True,
+                "ema_decay": 0.999,
+                "compact_checkpoints": True,
+                "auc_score_weight": 0.45,
+                "ap_score_weight": 0.20,
+                "segment_score_weight": 0.35,
+                "hallucination_weight": 3.5,
+            },
         }
         if profile not in presets:
-            raise ValueError(f"Unknown profile '{profile}'. Choose: {list(presets)}")
+            raise ValueError(
+                f"Unknown profile '{profile}'. Choose: {list(presets)}"
+            )
         obj = cls(**{**presets[profile], **overrides})
         obj._profile_name = profile  # type: ignore[attr-defined]
         return obj
@@ -638,6 +674,8 @@ def print_training_config_summary(cfg: TrainConfig, proteins: Optional[list] = N
           f"({cfg.auc_score_weight}·AUC + {cfg.ap_score_weight}·AP + "
           f"{cfg.segment_score_weight}·SegF1)")
     print(f"  Early-stop mode    : {cfg.early_stop_mode}")
+    print(f"  Head / SOTA        : {cfg.head_type}  dice={cfg.use_dice_loss}  ema={cfg.use_ema}")
+    print(f"  Compact ckpt       : {cfg.compact_checkpoints}")
     print(f"  Hallucination wt   : {cfg.use_hallucination_weighting} "
           f"(×{cfg.hallucination_weight} @ pLDDT≥{cfg.high_plddt_threshold})")
     if proteins is not None:
@@ -847,7 +885,12 @@ class DisorderNetGPU(nn.Module):
             self.physico = None
             head_in = 1280
 
-        self.head = DisorderCNNHead(in_dim=head_in, dropout=cfg.head_dropout)
+        self.head_type = cfg.head_type
+        if cfg.head_type == "sota":
+            from colab.sota_heads import DisorderSOTAHead
+            self.head = DisorderSOTAHead(in_dim=head_in, dropout=cfg.head_dropout)
+        else:
+            self.head = DisorderCNNHead(in_dim=head_in, dropout=cfg.head_dropout)
 
         if verbose:
             total = sum(p.numel() for p in self.parameters())
@@ -879,7 +922,12 @@ class DisorderNetGPU(nn.Module):
             params.extend(self.physico.parameters())
         return iter(params)
 
-    def forward(self, tokens: torch.Tensor, aa_idx: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(
+        self,
+        tokens: torch.Tensor,
+        aa_idx: Optional[torch.Tensor] = None,
+        pad_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         out = self.esm(tokens, repr_layers=self._fusion_layer_ids, return_contacts=False)
         layer_hiddens = [
             out["representations"][i][:, 1:-1, :] for i in self._fusion_layer_ids
@@ -892,6 +940,13 @@ class DisorderNetGPU(nn.Module):
                 raise ValueError("aa_idx required when use_physico_features=True")
             embeddings = torch.cat([embeddings, self.physico(aa_idx)], dim=-1)
 
+        if self.head_type == "sota":
+            if pad_mask is None:
+                pad_mask = torch.ones(
+                    embeddings.shape[0], embeddings.shape[1],
+                    dtype=torch.bool, device=embeddings.device,
+                )
+            return self.head(embeddings, pad_mask=pad_mask)
         return self.head(embeddings)
 
 
@@ -1018,14 +1073,45 @@ def _compute_pos_weight(proteins: list, device: torch.device) -> torch.Tensor:
     return torch.tensor([pw], device=device)
 
 
+def _sequence_pad_mask(tokens: torch.Tensor, seq_mask: torch.Tensor) -> torch.Tensor:
+    """Valid residue positions (B, L) from token batch and collate mask."""
+    return seq_mask
+
+
+def _forward_logits(
+    model: nn.Module,
+    tokens: torch.Tensor,
+    aa_idx: Optional[torch.Tensor],
+    mask: torch.Tensor,
+) -> torch.Tensor:
+    use_physico = getattr(model, "use_physico", False)
+    aa = aa_idx if use_physico else None
+    if getattr(model, "head_type", "cnn") == "sota":
+        return model(tokens, aa_idx=aa, pad_mask=mask)
+    return model(tokens, aa_idx=aa)
+
+
 def _disorder_loss(
     logits: torch.Tensor,
     labels: torch.Tensor,
     pos_weight: Optional[torch.Tensor],
     sample_weight: Optional[torch.Tensor],
     cfg: TrainConfig,
+    mask: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    """Focal or BCE loss with optional per-residue boundary weights."""
+    """Focal or BCE loss; delegates to SOTA composite loss when Dice enabled."""
+    if getattr(cfg, "use_dice_loss", False) and mask is not None and logits.dim() == 2:
+        from colab.sota_losses import composite_disorder_loss
+        return composite_disorder_loss(
+            logits, labels, mask, pos_weight, sample_weight, cfg,
+        )
+
+    if mask is not None and logits.dim() == 2:
+        logits = logits[mask]
+        labels = labels[mask]
+        if sample_weight is not None:
+            sample_weight = sample_weight[mask]
+
     if cfg.use_focal_loss:
         bce = nn.functional.binary_cross_entropy_with_logits(
             logits, labels, pos_weight=pos_weight, reduction="none",
@@ -1075,11 +1161,13 @@ def eval_epoch(
         sample_weight = sample_weight.to(device, non_blocking=True)
 
         with autocast(device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda"):
-            logits = model(tokens, aa_idx=aa_idx if getattr(model, "use_physico", False) else None)
+            logits = _forward_logits(
+                model, tokens, aa_idx if getattr(model, "use_physico", False) else None, mask,
+            )
 
         if cfg is not None:
             loss = _disorder_loss(
-                logits[mask], labels[mask], pos_weight, sample_weight[mask], cfg,
+                logits, labels, pos_weight, sample_weight, cfg, mask=mask,
             )
         else:
             loss = nn.functional.binary_cross_entropy_with_logits(
@@ -1183,6 +1271,11 @@ def train_fold(
     global_step = 0
     fold_t0 = time.time()
 
+    ema = None
+    if cfg.use_ema:
+        from colab.model_ema import ModelEMA
+        ema = ModelEMA(fold_model, decay=cfg.ema_decay)
+
     for epoch in range(cfg.num_epochs):
         fold_model.train()
         train_loss = 0.0
@@ -1204,9 +1297,14 @@ def train_fold(
             sample_weight = sample_weight.to(device, non_blocking=True)
 
             with autocast(device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda"):
-                logits = fold_model(tokens, aa_idx=aa_idx if fold_model.use_physico else None)
+                logits = _forward_logits(
+                    fold_model,
+                    tokens,
+                    aa_idx if fold_model.use_physico else None,
+                    mask,
+                )
                 loss = _disorder_loss(
-                    logits[mask], labels[mask], pos_weight, sample_weight[mask], cfg,
+                    logits, labels, pos_weight, sample_weight, cfg, mask=mask,
                 ) / cfg.accum_steps
 
             if amp_dtype == torch.float16:
@@ -1230,6 +1328,9 @@ def train_fold(
                     )
                     optimizer.step()
 
+                if ema is not None:
+                    ema.update(fold_model)
+
                 optimizer.zero_grad(set_to_none=True)
                 scheduler.step()
                 global_step += 1
@@ -1239,7 +1340,11 @@ def train_fold(
             pbar.set_postfix(loss=f"{loss.item() * cfg.accum_steps:.4f}")
 
         avg_train_loss = train_loss / max(n_batches, 1)
+        if ema is not None:
+            ema.apply_shadow(fold_model)
         val_metrics = eval_epoch(fold_model, val_dl, device, amp_dtype, pos_weight, cfg)
+        if ema is not None:
+            ema.restore(fold_model)
 
         from colab.segment_postprocess import composite_early_stop_score, pooled_segment_f1
 
@@ -1292,11 +1397,30 @@ def train_fold(
             best_auc = val_metrics["auc"]
             best_ap = val_metrics["ap"]
             best_epoch = epoch + 1
+            if ema is not None:
+                ema.apply_shadow(fold_model)
             best_state = copy.deepcopy(fold_model.state_dict())
+            if ema is not None:
+                ema.restore(fold_model)
             best_probs = val_metrics["probs"]
             best_labels = val_metrics["labels"]
             patience_counter = 0
-            torch.save(best_state, ckpt_path)
+            meta = {
+                "fold": fold_idx + 1,
+                "best_auc": best_auc,
+                "best_ap": best_ap,
+                "best_epoch": best_epoch,
+                "profile": getattr(cfg, "_profile_name", "custom"),
+            }
+            if cfg.compact_checkpoints:
+                from colab.compact_checkpoint import save_compact_checkpoint
+                if ema is not None:
+                    ema.apply_shadow(fold_model)
+                save_compact_checkpoint(ckpt_path, fold_model, metadata=meta)
+                if ema is not None:
+                    ema.restore(fold_model)
+            else:
+                torch.save(best_state, ckpt_path)
             marker = " ◀ BEST"
         else:
             patience_counter += 1
