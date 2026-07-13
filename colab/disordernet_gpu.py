@@ -187,9 +187,17 @@ def build_plddt_cache_for_training(
         if (plddt := _load_plddt_for_protein(p, cache_dir)) is not None
     }
     missing = [p for p in proteins if p["id"] not in existing and p.get("uniprot_acc")]
+    n_cached = len(existing)
     if missing:
+        print(
+            f"  pLDDT cache: {n_cached} hit, {len(missing)} to fetch "
+            f"({len(proteins) - n_cached - len(missing)} without UniProt)"
+        )
         fetched = fetch_plddt_batch(missing, cache_dir=cache_dir, sleep_s=sleep_s)
         existing.update(fetched)
+        print(f"  pLDDT fetch done: {len(existing)}/{len(proteins)} proteins cached")
+    elif n_cached:
+        print(f"  pLDDT cache warm: {n_cached}/{len(proteins)} proteins (no fetch needed)")
     return existing
 
 
@@ -380,6 +388,9 @@ def setup_environment(cfg: TrainConfig) -> TrainConfig:
     print(f"  AMP dtype   : {cfg.amp_dtype}")
     print(f"  Batch × accum = {cfg.batch_size} × {cfg.accum_steps} "
           f"(effective {cfg.effective_batch()})")
+    if _in_colab() and cfg.num_workers != 0:
+        cfg.num_workers = 0
+        print("  DataLoader workers: 0 (Colab-safe; avoids multiprocessing hangs)")
     print(f"{'=' * 55}")
     return cfg
 
@@ -1279,6 +1290,72 @@ def train_fold(
     }
 
 
+def _serialize_fold_result(result: dict) -> dict:
+    """JSON-safe fold result (numpy arrays → lists)."""
+    out = dict(result)
+    if out.get("val_probs") is not None:
+        out["val_probs"] = np.asarray(out["val_probs"]).tolist()
+    if out.get("val_labels") is not None:
+        out["val_labels"] = np.asarray(out["val_labels"]).tolist()
+    return out
+
+
+def _deserialize_fold_result(data: dict) -> dict:
+    """Restore fold result from cv_progress.json."""
+    out = dict(data)
+    if out.get("val_probs") is not None:
+        out["val_probs"] = np.asarray(out["val_probs"], dtype=np.float32)
+    if out.get("val_labels") is not None:
+        out["val_labels"] = np.asarray(out["val_labels"], dtype=np.float32)
+    return out
+
+
+def save_cv_progress(
+    path: str,
+    fold_results: list,
+    cfg: TrainConfig,
+    n_proteins: int,
+) -> None:
+    """Persist completed folds so Colab can resume after disconnect."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    payload = {
+        "version": 1,
+        "n_proteins": n_proteins,
+        "n_folds": cfg.n_folds,
+        "seed": cfg.seed,
+        "fold_results": [_serialize_fold_result(r) for r in fold_results],
+    }
+    with open(path, "w") as f:
+        json.dump(payload, f)
+
+
+def load_cv_progress(
+    path: str,
+    cfg: TrainConfig,
+    n_proteins: int,
+) -> list:
+    """Load completed folds if progress file matches current run."""
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path) as f:
+            payload = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+    if payload.get("version") != 1:
+        return []
+    if (
+        payload.get("n_proteins") != n_proteins
+        or payload.get("n_folds") != cfg.n_folds
+        or payload.get("seed") != cfg.seed
+    ):
+        print(
+            "  ⚠ cv_progress.json mismatch (proteins/folds/seed changed) — ignoring saved folds"
+        )
+        return []
+    return [_deserialize_fold_result(r) for r in payload.get("fold_results", [])]
+
+
 def run_cross_validation(
     proteins: list,
     esm_backbone: nn.Module,
@@ -1294,6 +1371,7 @@ def run_cross_validation(
     Run N-fold GroupKFold CV. Returns (fold_results, summary_dict).
 
     resume_from_fold: skip folds < this index (0-based) for Colab reconnect.
+    Completed folds are loaded from checkpoints/cv_progress.json when resuming.
     prefetch_af_plddt: fetch AF pLDDT cache before training (hallucination weights).
     """
     if plddt_by_id is None and cfg.use_hallucination_weighting and prefetch_af_plddt:
@@ -1306,7 +1384,29 @@ def run_cross_validation(
     gkf = GroupKFold(n_splits=cfg.n_folds)
     groups = np.arange(len(proteins))
 
+    progress_path = os.path.join(cfg.checkpoint_dir, "cv_progress.json")
     fold_results: list = []
+    if resume_from_fold > 0:
+        loaded = load_cv_progress(progress_path, cfg, len(proteins))
+        if len(loaded) >= resume_from_fold:
+            fold_results = loaded[:resume_from_fold]
+            print(
+                f"  Resumed {len(fold_results)} fold(s) from {progress_path} "
+                f"(AUCs: {[round(r['best_auc'], 4) for r in fold_results]})"
+            )
+        elif loaded:
+            print(
+                f"  ⚠ cv_progress has {len(loaded)} fold(s) but resume_from_fold="
+                f"{resume_from_fold} — using saved folds and continuing"
+            )
+            fold_results = loaded
+            resume_from_fold = len(loaded)
+        else:
+            print(
+                f"  ⚠ No cv_progress.json at {progress_path}; "
+                f"folds 1–{resume_from_fold} will be missing from pooled metrics"
+            )
+
     cv_t0 = time.time()
 
     print(f"\nStarting {cfg.n_folds}-fold cross-validation on {len(proteins)} proteins")
@@ -1337,6 +1437,7 @@ def run_cross_validation(
             on_epoch_end=on_epoch_end,
         )
         fold_results.append(result)
+        save_cv_progress(progress_path, fold_results, cfg, len(proteins))
 
         if on_fold_complete:
             on_fold_complete(result)

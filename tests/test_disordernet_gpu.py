@@ -264,3 +264,38 @@ class TestSetupEnvironment:
             with pytest.raises(RuntimeError, match="No GPU detected"):
                 from colab.disordernet_gpu import setup_environment
                 setup_environment(cfg)
+
+
+class TestCvProgress:
+    def test_roundtrip_save_load(self, tmp_path):
+        from colab.disordernet_gpu import load_cv_progress, save_cv_progress
+
+        cfg = TrainConfig(seed=7, n_folds=5)
+        fold_results = [
+            {
+                "fold": 1,
+                "best_auc": 0.81,
+                "best_ap": 0.42,
+                "history": [],
+                "val_probs": np.array([0.1, 0.9], dtype=np.float32),
+                "val_labels": np.array([0.0, 1.0], dtype=np.float32),
+                "ckpt_path": "fold1_best.pt",
+                "total_time": 100.0,
+            }
+        ]
+        path = str(tmp_path / "cv_progress.json")
+        save_cv_progress(path, fold_results, cfg, n_proteins=600)
+        loaded = load_cv_progress(path, cfg, n_proteins=600)
+        assert len(loaded) == 1
+        assert loaded[0]["best_auc"] == 0.81
+        np.testing.assert_allclose(loaded[0]["val_probs"], [0.1, 0.9])
+        np.testing.assert_allclose(loaded[0]["val_labels"], [0.0, 1.0])
+
+    def test_mismatch_returns_empty(self, tmp_path):
+        from colab.disordernet_gpu import load_cv_progress, save_cv_progress
+
+        cfg = TrainConfig(seed=7, n_folds=5)
+        path = str(tmp_path / "cv_progress.json")
+        save_cv_progress(path, [], cfg, n_proteins=600)
+        assert load_cv_progress(path, TrainConfig(seed=99), 600) == []
+        assert load_cv_progress(path, cfg, n_proteins=500) == []
