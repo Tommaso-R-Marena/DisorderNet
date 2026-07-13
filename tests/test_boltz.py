@@ -134,6 +134,12 @@ class TestBoltzRockfishCLI:
         assert args.stage == "boltz"
         assert args.boltz_mode == "ingest"
 
+    def test_diffusion_samples_cli(self):
+        args = build_parser().parse_args(
+            ["boltz", "--boltz-diffusion-samples", "5"],
+        )
+        assert args.boltz_diffusion_samples == 5
+
     def test_setup_off(self, tmp_path):
         cfg = setup_boltz_for_rockfish(
             mode="off", boltz_root=str(tmp_path / "b"), ensure_install=False,

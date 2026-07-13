@@ -1659,14 +1659,14 @@ def eval_epoch(
 
         if use_fn and fn_logits is not None and proteins_by_id is not None:
             from colab.function_predict import stack_batch_function_labels
-            fn_labels, fn_sup = stack_batch_function_labels(
+            fn_labels, _fn_sup = stack_batch_function_labels(
                 list(batch_ids), proteins_by_id, mask.shape[1], device,
                 disordered_only=cfg.function_on_disordered_only,
             )
-            valid = mask & fn_sup
-            if valid.any():
-                all_fn_probs.append(torch.sigmoid(fn_logits)[valid].float().cpu().numpy())
-                all_fn_labels.append(fn_labels[valid].cpu().numpy())
+            # Same residue stream as disorder OOF (pad mask) — enables IDR-layer align.
+            # Loss still uses supervise mask above; this export is accuracy-neutral.
+            all_fn_probs.append(torch.sigmoid(fn_logits)[mask].float().cpu().numpy())
+            all_fn_labels.append(fn_labels[mask].cpu().numpy())
 
     all_probs = np.concatenate(all_probs)
     all_labels = np.concatenate(all_labels)

@@ -134,10 +134,16 @@ def predict_fasta_batch(
     use_tta: bool = True,
     tta_passes: int = 6,
     n_folds: int = 5,
-) -> dict[str, np.ndarray]:
+    return_function: bool = False,
+):
     """
     Score a FASTA file with fold-model soup (average of all fold checkpoints).
+
+    If return_function=True and models have a function head, returns
+    (disorder_by_id, function_by_id); otherwise a single disorder dict.
     """
+    from colab.fold_model_soup import _predict_proteins_multitask
+
     proteins = parse_fasta(fasta_path)
     if plddt_by_id:
         for p in proteins:
@@ -147,21 +153,35 @@ def predict_fasta_batch(
     models = load_fold_ensemble_models(checkpoint_dir, esm_backbone, cfg, cfg.device, n_folds)
     token_cache: dict = {}
     accum: dict[str, list[np.ndarray]] = {}
+    accum_fn: dict[str, list[np.ndarray]] = {}
+    # Only change return type when the caller asks — cfg.use_function_head alone
+    # must not turn a dict into a tuple (breaks CAID3 / legacy callers).
+    want_fn = bool(return_function)
 
     for model in models:
-        preds = _predict_proteins(
+        dis, fn = _predict_proteins_multitask(
             model, proteins, batch_converter, token_cache, cfg,
             plddt_by_id=plddt_by_id,
-            use_tta=use_tta and cfg.use_mc_dropout_tta,
+            use_tta=use_tta and cfg.use_mc_dropout_tta and not want_fn,
             tta_passes=tta_passes or cfg.mc_dropout_tta_passes,
+            return_function=want_fn,
         )
-        for pid, arr in preds.items():
+        for pid, arr in dis.items():
             accum.setdefault(pid, []).append(arr)
+        for pid, arr in fn.items():
+            accum_fn.setdefault(pid, []).append(arr)
 
-    return {
+    disorder = {
         pid: np.mean(np.stack(v, axis=0), axis=0).astype(np.float32)
         for pid, v in accum.items()
     }
+    if not want_fn:
+        return disorder
+    function = {
+        pid: np.mean(np.stack(v, axis=0), axis=0).astype(np.float32)
+        for pid, v in accum_fn.items()
+    }
+    return disorder, function
 
 
 def export_predictions(

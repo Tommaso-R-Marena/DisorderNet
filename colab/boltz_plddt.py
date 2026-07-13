@@ -206,16 +206,15 @@ def load_boltz_plddt_batch(
     output_root: str,
     cache_dir: str = DEFAULT_BOLTZ_CACHE_DIR,
     verbose: bool = True,
+    max_workers: int = 8,
 ) -> dict[str, np.ndarray]:
-    """Load Boltz pLDDT for all proteins with outputs under output_root."""
+    """Load Boltz pLDDT for all proteins (threaded; same cache contract)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from tqdm.auto import tqdm
 
     results: dict[str, np.ndarray] = {}
-    iterator = proteins
-    if verbose:
-        iterator = tqdm(proteins, desc="Loading Boltz pLDDT")
 
-    for p in iterator:
+    def _one(p: dict):
         plddt = load_boltz_plddt_for_protein(
             protein_id=p["id"],
             target_sequence=p["sequence"],
@@ -223,8 +222,18 @@ def load_boltz_plddt_batch(
             uniprot_acc=p.get("uniprot_acc", ""),
             cache_dir=cache_dir,
         )
-        if plddt is not None:
-            results[p["id"]] = plddt
+        return p["id"], plddt
+
+    workers = max(1, min(max_workers, len(proteins) or 1))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = [ex.submit(_one, p) for p in proteins]
+        iterator = as_completed(futs)
+        if verbose:
+            iterator = tqdm(iterator, total=len(futs), desc="Loading Boltz pLDDT")
+        for fut in iterator:
+            pid, plddt = fut.result()
+            if plddt is not None:
+                results[pid] = plddt
     return results
 
 
@@ -284,39 +293,124 @@ def boltz_plddt_variance_from_dir(
     return np.nanstd(stack, axis=0).astype(np.float32)
 
 
+def load_boltz_variance_for_protein(
+    protein_id: str,
+    target_sequence: str,
+    output_root: str,
+    uniprot_acc: str = "",
+    cache_dir: str = "boltz_variance_cache",
+    max_samples: int = 8,
+) -> Optional[np.ndarray]:
+    """Disk-cached multi-sample pLDDT std (ensemble proxy)."""
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f"{protein_id}.json")
+    if os.path.exists(cache_path):
+        with open(cache_path) as f:
+            cached = json.load(f)
+        if (
+            cached.get("target_sequence") == target_sequence
+            and cached.get("max_samples") == max_samples
+            and "std" in cached
+        ):
+            return np.asarray(cached["std"], dtype=np.float32)
+
+    job_dir = find_boltz_prediction_dir(output_root, protein_id, uniprot_acc)
+    if not job_dir:
+        return None
+    std = boltz_plddt_variance_from_dir(job_dir, max_samples=max_samples)
+    if std is None:
+        return None
+    L = len(target_sequence)
+    if len(std) > L:
+        std = std[:L]
+    elif len(std) < L:
+        out = np.full(L, np.nan, dtype=np.float32)
+        out[: len(std)] = std
+        std = out
+    with open(cache_path, "w") as f:
+        json.dump({
+            "protein_id": protein_id,
+            "target_sequence": target_sequence,
+            "max_samples": max_samples,
+            "std": std.tolist(),
+            "source": "boltz2_multisample",
+        }, f)
+    return std
+
+
 def load_boltz_variance_batch(
     proteins: list,
     output_root: str,
     max_samples: int = 8,
     verbose: bool = True,
+    cache_dir: str = "boltz_variance_cache",
+    max_workers: int = 8,
 ) -> dict[str, np.ndarray]:
-    """Load Boltz multi-sample pLDDT std keyed by protein id."""
+    """Load Boltz multi-sample pLDDT std keyed by protein id (threaded + cached)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from tqdm.auto import tqdm
 
     results: dict[str, np.ndarray] = {}
-    iterator = proteins
-    if verbose:
-        iterator = tqdm(proteins, desc="Boltz pLDDT variance")
-    for p in iterator:
-        job = find_boltz_prediction_dir(
-            output_root, p["id"], p.get("uniprot_acc", ""),
+
+    def _one(p: dict):
+        std = load_boltz_variance_for_protein(
+            p["id"], p["sequence"], output_root,
+            uniprot_acc=p.get("uniprot_acc", ""),
+            cache_dir=cache_dir,
+            max_samples=max_samples,
         )
-        if not job:
-            continue
-        std = boltz_plddt_variance_from_dir(job, max_samples=max_samples)
-        if std is None:
-            continue
-        # Length-align if needed
-        L = p.get("length", len(p["sequence"]))
-        if len(std) == L:
-            results[p["id"]] = std
-        elif len(std) > L:
-            results[p["id"]] = std[:L]
-        else:
-            out = np.full(L, np.nan, dtype=np.float32)
-            out[: len(std)] = std
-            results[p["id"]] = out
+        return p["id"], std
+
+    workers = max(1, min(max_workers, len(proteins) or 1))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = [ex.submit(_one, p) for p in proteins]
+        iterator = as_completed(futs)
+        if verbose:
+            iterator = tqdm(iterator, total=len(futs), desc="Boltz pLDDT variance")
+        for fut in iterator:
+            pid, std = fut.result()
+            if std is not None:
+                results[pid] = std
     return results
+
+
+def load_boltz_structure_features(
+    proteins: list,
+    output_root: str,
+    *,
+    plddt_cache_dir: str = DEFAULT_BOLTZ_CACHE_DIR,
+    variance_cache_dir: str = "boltz_variance_cache",
+    max_samples: int = 8,
+    max_workers: int = 8,
+    verbose: bool = True,
+) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+    """
+    Overlap pLDDT + multi-sample variance loads (I/O bound).
+
+    Returns ``(plddt_by_id, variance_by_id)``. Accuracy-identical to sequential loads;
+    cache hits dominate after the first pass.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        fut_plddt = ex.submit(
+            load_boltz_plddt_batch,
+            proteins,
+            output_root,
+            cache_dir=plddt_cache_dir,
+            verbose=verbose,
+            max_workers=max_workers,
+        )
+        fut_var = ex.submit(
+            load_boltz_variance_batch,
+            proteins,
+            output_root,
+            max_samples=max_samples,
+            verbose=verbose,
+            cache_dir=variance_cache_dir,
+            max_workers=max_workers,
+        )
+        return fut_plddt.result(), fut_var.result()
 
 
 def select_proteins_for_boltz(

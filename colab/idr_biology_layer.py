@@ -147,9 +147,11 @@ def build_protein_idr_layer(
     flexible_proxy_regions: list[tuple[int, int]] = []
     if var is not None:
         # High cross-sample disagreement in disordered regions → cheap ensemble cue
-        high_var = (var >= np.nanpercentile(var[np.isfinite(var)], 75) if np.isfinite(var).any() else False)
-        if isinstance(high_var, np.ndarray):
-            flex = (dis >= disorder_threshold) & high_var & np.isfinite(var)
+        finite = var[np.isfinite(var)]
+        if finite.size:
+            thr = float(np.percentile(finite, 75))
+            high_var = (var >= thr) & np.isfinite(var)
+            flex = (dis >= disorder_threshold) & high_var
             flexible_proxy_regions = [
                 (s, e) for s, e in intervals_from_binary(flex.astype(np.int8), min_len=3)
             ][:20]

@@ -390,6 +390,36 @@ def align_function_oof(
     return np.concatenate(y_true_parts), np.concatenate(y_prob_parts), protein_ids
 
 
+def split_function_oof_by_lengths(
+    y_prob: np.ndarray,
+    protein_ids: list[str],
+    lengths_by_id: dict[str, int],
+) -> dict[str, np.ndarray]:
+    """
+    Slice flat OOF function probs into per-protein (L, G) maps.
+
+    Requires ``sum(lengths) == len(y_prob)`` — the contract after full-sequence
+    (pad-mask) function export in ``eval_epoch``.
+    """
+    if y_prob is None or len(y_prob) == 0:
+        return {}
+    y = np.asarray(y_prob, dtype=np.float32)
+    if y.ndim == 1:
+        y = y.reshape(-1, N_FUNCTION_GROUPS)
+    expected = sum(int(lengths_by_id[pid]) for pid in protein_ids)
+    if expected != len(y):
+        raise ValueError(
+            f"Function OOF length {len(y)} ≠ sum of protein lengths {expected}"
+        )
+    out: dict[str, np.ndarray] = {}
+    offset = 0
+    for pid in protein_ids:
+        L = int(lengths_by_id[pid])
+        out[pid] = y[offset:offset + L]
+        offset += L
+    return out
+
+
 def run_function_prediction_report(
     proteins: list,
     fold_results: list,
@@ -406,14 +436,37 @@ def run_function_prediction_report(
             "reason": "No val_function_probs in fold results — train with use_function_head=True",
             "label_coverage": coverage,
         }
-    metrics = compute_function_metrics(y_true, y_prob, threshold=threshold)
+    metrics_all = compute_function_metrics(y_true, y_prob, threshold=threshold)
+
+    # Also restrict to disordered residues (matches training supervise prior)
+    metrics_disordered = None
+    try:
+        from colab.biological_utility import align_fold_predictions
+        aligned = align_fold_predictions(proteins, fold_results, n_folds=n_folds)
+        dis_parts = [item["labels"] for item in aligned]
+        if dis_parts:
+            dis = np.concatenate([np.asarray(d, dtype=np.float32).ravel() for d in dis_parts])
+            if len(dis) == len(y_true):
+                m = dis > 0.5
+                if int(m.sum()) >= 10:
+                    metrics_disordered = compute_function_metrics(
+                        y_true[m], y_prob[m], threshold=threshold,
+                    )
+    except Exception:
+        metrics_disordered = None
+
     return {
         "enabled": True,
         "insufficient_data": False,
         "label_coverage": coverage,
-        "metrics": metrics,
+        "metrics": metrics_all,
+        "metrics_on_disordered": metrics_disordered,
         "n_oof_residues": int(y_true.shape[0]),
         "use_case": "Disorder → function (multi-label IDR roles)",
+        "note": (
+            "metrics = all OOF residues (aligned to disorder stream); "
+            "metrics_on_disordered = disordered residues only"
+        ),
     }
 
 
