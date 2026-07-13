@@ -1,13 +1,15 @@
 """
 SOTA-oriented training losses for DisorderNet GPU.
 
-Combines focal/BCE with soft Dice (region-friendly) and optional label smoothing.
+Combines focal/BCE with soft Dice (region-friendly), Tversky, R-Drop, and
+optional v6 teacher distillation.
 """
 
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 def soft_dice_from_logits(
@@ -49,6 +51,59 @@ def apply_label_smoothing(labels: torch.Tensor, smoothing: float) -> torch.Tenso
     if smoothing <= 0:
         return labels
     return labels * (1.0 - smoothing) + 0.5 * smoothing
+
+
+def batch_mean_tversky_loss(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    mask: torch.Tensor,
+    alpha: float = 0.3,
+    beta: float = 0.7,
+    smooth: float = 1.0,
+) -> torch.Tensor:
+    """Per-sequence Tversky loss (alpha=FN weight, beta=FP weight)."""
+    losses: list[torch.Tensor] = []
+    for b in range(logits.shape[0]):
+        m = mask[b]
+        if m.sum() < 2:
+            continue
+        probs = torch.sigmoid(logits[b][m])
+        y = labels[b][m].float()
+        tp = (probs * y).sum()
+        fn = (y * (1.0 - probs)).sum()
+        fp = ((1.0 - y) * probs).sum()
+        tversky = (tp + smooth) / (tp + alpha * fn + beta * fp + smooth)
+        losses.append(1.0 - tversky)
+    if not losses:
+        return torch.zeros((), device=logits.device, dtype=logits.dtype)
+    return torch.stack(losses).mean()
+
+
+def rdrop_symmetric_kl(
+    logits_a: torch.Tensor,
+    logits_b: torch.Tensor,
+    mask: torch.Tensor,
+) -> torch.Tensor:
+    """Symmetric KL between two dropout views (R-Drop consistency term)."""
+    log_pa = F.log_softmax(torch.stack([logits_a, -logits_a], dim=-1), dim=-1)[..., 0]
+    log_pb = F.log_softmax(torch.stack([logits_b, -logits_b], dim=-1), dim=-1)[..., 0]
+    pa = log_pa.exp()
+    pb = log_pb.exp()
+    kl_ab = (pa * (log_pa - log_pb))[mask].mean()
+    kl_ba = (pb * (log_pb - log_pa))[mask].mean()
+    return 0.5 * (kl_ab + kl_ba)
+
+
+def v6_distillation_loss(
+    logits: torch.Tensor,
+    teacher_probs: torch.Tensor,
+    mask: torch.Tensor,
+    temperature: float = 2.0,
+) -> torch.Tensor:
+    """BCE distillation from v6 OOF teacher probabilities (soft targets)."""
+    student_logits = logits[mask] / temperature
+    teacher = teacher_probs[mask].clamp(1e-6, 1.0 - 1e-6)
+    return F.binary_cross_entropy_with_logits(student_logits, teacher)
 
 
 def composite_disorder_loss(
@@ -103,5 +158,13 @@ def composite_disorder_loss(
         dice = batch_mean_dice_loss(logits, labels, mask)
         w = getattr(cfg, "dice_loss_weight", 0.25)
         total = total + w * dice
+
+    if getattr(cfg, "use_tversky_loss", False) and logits.dim() == 2:
+        tversky = batch_mean_tversky_loss(
+            logits, labels, mask,
+            alpha=getattr(cfg, "tversky_alpha", 0.3),
+            beta=getattr(cfg, "tversky_beta", 0.7),
+        )
+        total = total + getattr(cfg, "tversky_weight", 0.15) * tversky
 
     return total

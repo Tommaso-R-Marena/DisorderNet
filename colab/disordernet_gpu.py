@@ -274,6 +274,19 @@ class TrainConfig:
     ema_decay: float = 0.999
     compact_checkpoints: bool = False
 
+    # Advanced SOTA training (profile "sota")
+    use_rdrop: bool = False
+    rdrop_weight: float = 0.5
+    use_tversky_loss: bool = False
+    tversky_alpha: float = 0.3
+    tversky_beta: float = 0.7
+    tversky_weight: float = 0.15
+    use_swa: bool = False
+    swa_start_frac: float = 0.75
+    use_v6_distill: bool = False
+    v6_distill_weight: float = 0.15
+    v6_distill_temperature: float = 2.0
+
     # AF hallucination hard-negative weighting (disordered + high pLDDT)
     use_hallucination_weighting: bool = True
     hallucination_weight: float = 3.0
@@ -335,6 +348,14 @@ class TrainConfig:
                 "ap_score_weight": 0.20,
                 "segment_score_weight": 0.35,
                 "hallucination_weight": 3.5,
+                "use_rdrop": True,
+                "rdrop_weight": 0.5,
+                "use_tversky_loss": True,
+                "tversky_weight": 0.12,
+                "use_swa": True,
+                "swa_start_frac": 0.70,
+                "use_v6_distill": True,
+                "v6_distill_weight": 0.12,
             },
         }
         if profile not in presets:
@@ -1196,6 +1217,32 @@ def eval_epoch(
     }
 
 
+def _pad_teacher_probs(
+    batch_ids: list[str],
+    proteins_by_id: dict[str, dict],
+    teacher_by_id: dict[str, np.ndarray],
+    max_seq: int,
+    device: torch.device,
+) -> Optional[torch.Tensor]:
+    """Pad per-residue v6 teacher probabilities for a batch."""
+    if not teacher_by_id:
+        return None
+    padded = torch.zeros(len(batch_ids), max_seq, dtype=torch.float32, device=device)
+    has_any = False
+    for i, pid in enumerate(batch_ids):
+        if pid not in teacher_by_id:
+            continue
+        teacher = teacher_by_id[pid]
+        p = proteins_by_id.get(pid)
+        if p is None:
+            continue
+        length = min(len(teacher), p["length"], max_seq)
+        if length > 0:
+            padded[i, :length] = torch.from_numpy(teacher[:length])
+            has_any = True
+    return padded if has_any else None
+
+
 def train_fold(
     fold_idx: int,
     proteins_train: list,
@@ -1205,6 +1252,7 @@ def train_fold(
     token_cache: dict,
     cfg: TrainConfig,
     plddt_by_id: Optional[dict[str, np.ndarray]] = None,
+    v6_teacher_by_id: Optional[dict[str, np.ndarray]] = None,
     on_epoch_end: Optional[Callable[[dict], None]] = None,
 ) -> dict:
     """Train one CV fold. Returns metrics dict including best checkpoint path."""
@@ -1276,6 +1324,15 @@ def train_fold(
         from colab.model_ema import ModelEMA
         ema = ModelEMA(fold_model, decay=cfg.ema_decay)
 
+    swa = None
+    swa_start_epoch = int(cfg.num_epochs * cfg.swa_start_frac) if cfg.use_swa else cfg.num_epochs + 1
+    if cfg.use_swa:
+        from colab.model_swa import ModelSWA
+        swa = ModelSWA(fold_model)
+
+    proteins_by_id = {p["id"]: p for p in proteins_train + proteins_val}
+    use_distill = cfg.use_v6_distill and bool(v6_teacher_by_id)
+
     for epoch in range(cfg.num_epochs):
         fold_model.train()
         train_loss = 0.0
@@ -1289,23 +1346,48 @@ def train_fold(
             leave=False,
         )
 
-        for step, (tokens, labels, mask, aa_idx, sample_weight, _) in enumerate(pbar):
+        for step, (tokens, labels, mask, aa_idx, sample_weight, batch_ids) in enumerate(pbar):
             tokens = tokens.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             mask = mask.to(device, non_blocking=True)
             aa_idx = aa_idx.to(device, non_blocking=True)
             sample_weight = sample_weight.to(device, non_blocking=True)
+            max_seq = mask.shape[1]
+            teacher_probs = None
+            if use_distill and v6_teacher_by_id is not None:
+                teacher_probs = _pad_teacher_probs(
+                    list(batch_ids), proteins_by_id, v6_teacher_by_id, max_seq, device,
+                )
 
             with autocast(device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda"):
-                logits = _forward_logits(
-                    fold_model,
-                    tokens,
-                    aa_idx if fold_model.use_physico else None,
-                    mask,
-                )
-                loss = _disorder_loss(
-                    logits, labels, pos_weight, sample_weight, cfg, mask=mask,
-                ) / cfg.accum_steps
+                aa = aa_idx if fold_model.use_physico else None
+                if cfg.use_rdrop:
+                    logits_a = _forward_logits(fold_model, tokens, aa, mask)
+                    logits_b = _forward_logits(fold_model, tokens, aa, mask)
+                    loss_a = _disorder_loss(
+                        logits_a, labels, pos_weight, sample_weight, cfg, mask=mask,
+                    )
+                    loss_b = _disorder_loss(
+                        logits_b, labels, pos_weight, sample_weight, cfg, mask=mask,
+                    )
+                    from colab.sota_losses import rdrop_symmetric_kl
+                    cons = rdrop_symmetric_kl(logits_a, logits_b, mask)
+                    loss = 0.5 * (loss_a + loss_b) + cfg.rdrop_weight * cons
+                    logits = logits_a
+                else:
+                    logits = _forward_logits(fold_model, tokens, aa, mask)
+                    loss = _disorder_loss(
+                        logits, labels, pos_weight, sample_weight, cfg, mask=mask,
+                    )
+
+                if use_distill and teacher_probs is not None:
+                    from colab.sota_losses import v6_distillation_loss
+                    d_loss = v6_distillation_loss(
+                        logits, teacher_probs, mask, temperature=cfg.v6_distill_temperature,
+                    )
+                    loss = loss + cfg.v6_distill_weight * d_loss
+
+                loss = loss / cfg.accum_steps
 
             if amp_dtype == torch.float16:
                 scaler.scale(loss).backward()
@@ -1340,11 +1422,21 @@ def train_fold(
             pbar.set_postfix(loss=f"{loss.item() * cfg.accum_steps:.4f}")
 
         avg_train_loss = train_loss / max(n_batches, 1)
+        if swa is not None and epoch >= swa_start_epoch:
+            swa.update(fold_model)
+
+        swa_backup = None
         if ema is not None:
             ema.apply_shadow(fold_model)
+        elif swa is not None and swa.ready and epoch >= swa_start_epoch:
+            swa_backup = swa.apply_swa(fold_model)
+
         val_metrics = eval_epoch(fold_model, val_dl, device, amp_dtype, pos_weight, cfg)
+
         if ema is not None:
             ema.restore(fold_model)
+        elif swa_backup is not None:
+            swa.restore(fold_model, swa_backup)
 
         from colab.segment_postprocess import composite_early_stop_score, pooled_segment_f1
 
@@ -1399,9 +1491,14 @@ def train_fold(
             best_epoch = epoch + 1
             if ema is not None:
                 ema.apply_shadow(fold_model)
-            best_state = copy.deepcopy(fold_model.state_dict())
-            if ema is not None:
+                best_state = copy.deepcopy(fold_model.state_dict())
                 ema.restore(fold_model)
+            elif swa is not None and swa.ready and epoch >= swa_start_epoch:
+                swa_backup = swa.apply_swa(fold_model)
+                best_state = copy.deepcopy(fold_model.state_dict())
+                swa.restore(fold_model, swa_backup)
+            else:
+                best_state = copy.deepcopy(fold_model.state_dict())
             best_probs = val_metrics["probs"]
             best_labels = val_metrics["labels"]
             patience_counter = 0
@@ -1632,6 +1729,14 @@ def run_cross_validation(
     elif cfg.use_hallucination_weighting:
         print("  AF pLDDT cache     : none (hallucination weights = boundary only)")
 
+    v6_teacher_by_id: Optional[dict[str, np.ndarray]] = None
+    if cfg.use_v6_distill:
+        print("Pre-computing v6 OOF teacher probabilities for distillation...")
+        from colab.ensemble_v6 import aligned_probs_from_oof, run_v6_lite_oof
+        oof_probs, _, _ = run_v6_lite_oof(proteins, n_folds=cfg.n_folds, seed=cfg.seed)
+        v6_teacher_by_id = aligned_probs_from_oof(proteins, oof_probs)
+        print(f"  v6 teacher probs for {len(v6_teacher_by_id)} proteins")
+
     for fold_idx, (train_idx, val_idx) in enumerate(splits):
         if fold_idx < resume_from_fold:
             print(f"  Skipping fold {fold_idx + 1} (resume_from_fold={resume_from_fold})")
@@ -1649,6 +1754,7 @@ def run_cross_validation(
             token_cache=token_cache,
             cfg=cfg,
             plddt_by_id=plddt_by_id,
+            v6_teacher_by_id=v6_teacher_by_id,
             on_epoch_end=on_epoch_end,
         )
         fold_results.append(result)
