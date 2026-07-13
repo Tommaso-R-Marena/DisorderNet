@@ -34,8 +34,12 @@ class TestRockfishCLI:
         assert args.profile == "ultra3b"
 
     def test_parser_all_stages(self):
-        for stage in ("screen", "cv", "stack", "postprocess", "full"):
-            args = build_parser().parse_args([stage])
+        for stage in (
+            "screen", "cv", "stack", "postprocess", "full",
+            "eval", "predict", "multi-seed-blend", "pipeline",
+        ):
+            extra = ["--fasta", "q.fasta"] if stage == "predict" else []
+            args = build_parser().parse_args([stage, *extra])
             assert args.stage == stage
 
     def test_resolve_workdir_explicit(self, tmp_path):
@@ -49,3 +53,14 @@ class TestRockfishCLI:
         monkeypatch.delenv("SCRATCH", raising=False)
         wd = _resolve_workdir(None)
         assert os.path.isdir(wd)
+
+    def test_pipeline_stage(self):
+        args = build_parser().parse_args(["pipeline", "--run-caid3-eval"])
+        assert args.stage == "pipeline"
+        assert args.run_caid3_eval is True
+
+    def test_multi_seed_blend(self):
+        args = build_parser().parse_args(
+            ["multi-seed-blend", "--seed-dirs", "a,b,c"],
+        )
+        assert args.seed_dirs == "a,b,c"

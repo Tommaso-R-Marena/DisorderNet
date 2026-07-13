@@ -103,9 +103,10 @@ If you have access to JHU Rockfish (or any Slurm cluster with A100s), use the HP
 ```bash
 bash rockfish/setup_env.sh && source ~/venvs/disordernet/bin/activate
 export DISORDERNET_ACCOUNT=your_pi_gpu
-sbatch --account=$DISORDERNET_ACCOUNT rockfish/slurm/quick_screen.sbatch
-sbatch --account=$DISORDERNET_ACCOUNT rockfish/slurm/train_ultra3b.sbatch
+sbatch --account=$DISORDERNET_ACCOUNT rockfish/slurm/pipeline_ultra.sbatch
 ```
+
+Ultra profile on Rockfish now uses **homology-safe CV**, **train-time pLDDT features**, and optional **CAID3 benchmark** scoring for fair comparison vs ESMDisPred (0.895).
 
 ### SOTA track (`QUALITY_PROFILE = "sota"`)
 
@@ -252,7 +253,13 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/quick_screen.py` | Quick screen logic (stratified subsample, verdict tiers) |
 | `colab/esm_backbone.py` | ESM-2 backbone registry (650M → 3B) + VRAM batch presets |
 | `rockfish/run_disordernet.py` | HPC CLI: screen / cv / stack / postprocess / full |
-| `rockfish/slurm/*.sbatch` | JHU Rockfish Slurm job templates (A100, 72 h) |
+| `rockfish/slurm/pipeline_ultra.sbatch` | Full production + eval + optional CAID3 |
+| `rockfish/slurm/multi_seed.sbatch` | Slurm array for seeds 42/43/44 |
+| `colab/homology_splits.py` | CAID-credible homology-clustered CV |
+| `colab/caid3_eval.py` | CAID3 Disorder-PDB benchmark harness |
+| `colab/structure_encoder.py` | Train-time pLDDT feature channel |
+| `colab/predict_batch.py` | FASTA proteome inference + `.caid` export |
+| `colab/novel_use_cases.py` | AF hallucination screening, rescue manifest |
 | `colab/inference_tta.py` | MC-dropout test-time augmentation (ultra Cell 7d) |
 | `colab/multi_seed_blend.py` | Optional multi-seed OOF average (Cell 7e) |
 | `colab/disordernet_gpu.py` | Colab training module (data, model, CV loop) |
