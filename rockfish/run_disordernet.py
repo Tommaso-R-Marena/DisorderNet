@@ -417,6 +417,7 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
     )
     from colab.idr_layer_io import (
         load_disorder_preds_from_dir,
+        load_function_preds_from_dir,
         load_ligand_map,
         load_partner_map,
     )
@@ -432,6 +433,13 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
         if loaded:
             disorder_by_id.update(loaded)
             print(f"  Loaded disorder scores from {preds_dir}: {len(loaded)} proteins")
+
+    fn_preds_dir = getattr(args, "idr_function_preds_dir", None)
+    function_overlay: dict = {}
+    if fn_preds_dir:
+        function_overlay = load_function_preds_from_dir(fn_preds_dir, proteins=proteins)
+        if function_overlay:
+            print(f"  Loaded function scores from {fn_preds_dir}: {len(function_overlay)} proteins")
 
     partners_by_id = load_partner_map(getattr(args, "idr_partners", None))
     if partners_by_id:
@@ -518,6 +526,9 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
                     )
     except Exception as exc:
         print(f"  Function OOF not attached to layer: {exc}")
+
+    if function_overlay:
+        function_by_id.update(function_overlay)
 
     plddt_by_id: dict = {}
     boltz_std: dict = {}
@@ -608,6 +619,12 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
         export_caid=not getattr(args, "idr_no_caid", False),
         export_html=not getattr(args, "idr_no_html", False),
         export_role_bedgraphs=not getattr(args, "idr_no_role_bedgraphs", False),
+        export_gff=not getattr(args, "idr_no_gff", False),
+        export_cards=not getattr(args, "idr_no_cards", False),
+        cards_top_n=getattr(args, "idr_cards_top_n", 20),
+        min_triage_score=getattr(args, "idr_min_triage", None),
+        quarantine_only=getattr(args, "idr_quarantine_only", False),
+        run_args=args,
     )
     compare_path = getattr(args, "idr_compare", None)
     if compare_path:
@@ -933,6 +950,12 @@ def stage_predict(args, cfg, model, converter) -> dict:
             export_caid=not getattr(args, "idr_no_caid", False),
             export_html=not getattr(args, "idr_no_html", False),
             export_role_bedgraphs=not getattr(args, "idr_no_role_bedgraphs", False),
+            export_gff=not getattr(args, "idr_no_gff", False),
+            export_cards=not getattr(args, "idr_no_cards", False),
+            cards_top_n=getattr(args, "idr_cards_top_n", 20),
+            min_triage_score=getattr(args, "idr_min_triage", None),
+            quarantine_only=getattr(args, "idr_quarantine_only", False),
+            run_args=args,
         )
         manifest["idr_layer_proteins"] = len(full)
         manifest["idr_layer_paths"] = paths
@@ -1211,6 +1234,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="idr-layer: optional predict-dir of .tsv/.caid scores to overlay",
     )
     p.add_argument(
+        "--idr-function-preds-dir", default=None,
+        help="idr-layer: optional dir of function .npy/.tsv/JSON to overlay role probs",
+    )
+    p.add_argument(
         "--idr-partners", default=None,
         help="Optional partner map JSON/TSV for conditioned binding cues",
     )
@@ -1259,12 +1286,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="idr-layer: per-group temperature scaling of OOF function probs",
     )
     p.add_argument(
+        "--idr-min-triage", type=float, default=None,
+        help="Filter triage cards to proteins with triage score ≥ this value",
+    )
+    p.add_argument(
+        "--idr-quarantine-only", action="store_true",
+        help="Write triage cards only for quality-quarantined proteins",
+    )
+    p.add_argument(
+        "--idr-cards-top-n", type=int, default=20,
+        help="Number of Markdown triage cards to write",
+    )
+    p.add_argument(
         "--idr-no-html", action="store_true",
         help="Skip HTML summary in the IDR layer bundle",
     )
     p.add_argument(
         "--idr-no-role-bedgraphs", action="store_true",
         help="Skip per-role bedGraph tracks in the IDR layer bundle",
+    )
+    p.add_argument(
+        "--idr-no-gff", action="store_true",
+        help="Skip GFF3 IDR segment export",
+    )
+    p.add_argument(
+        "--idr-no-cards", action="store_true",
+        help="Skip per-protein Markdown triage cards",
     )
     p.add_argument(
         "--idr-no-caid", action="store_true",

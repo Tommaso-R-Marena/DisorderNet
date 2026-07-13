@@ -34,7 +34,7 @@ IDR_ROLE_GROUPS: tuple[str, ...] = (
     "lipid / small molecule binding",
 )
 
-LAYER_VERSION = "1.5.0"
+LAYER_VERSION = "1.6.0"
 
 # Cheap sequence cues that often co-occur with IDR biology (AF-blind)
 _MOTIF_PATTERNS: tuple[tuple[str, str], ...] = (
@@ -48,6 +48,14 @@ _MOTIF_PATTERNS: tuple[tuple[str, str], ...] = (
     ("LxxLL", r"L..LL"),
     ("PxxP", r"P..P"),
     ("NxS_T", r"N.[ST]"),  # N-glycosylation motif (PTM cue)
+    ("NLS_monopartite", r"K(?:K|R)(?:K|R).{0,2}(?:K|R)"),
+    ("NES_leucine", r"L.{2,3}L.{2,3}L.{1,2}L"),
+    ("KEN_box", r"KEN"),
+    ("D_box", r"R..L"),
+    ("SH3_classI", r"R.LP.P"),
+    ("WW_PPxY", r"PP.Y"),
+    ("TRAF", r"P.Q.T"),
+    ("PDZ_Cterm", r"[ST].[VIL]$"),
 )
 
 _AA_SETS = {
@@ -74,11 +82,14 @@ def _as_f32(x: Optional[np.ndarray], n: int) -> Optional[np.ndarray]:
 
 def compute_idr_sequence_cues(sequence: str, start: int, end: int) -> dict:
     """
-    Composition + short linear motif cues for one IDR segment (0-based half-open).
+    Composition + short linear motif + biophysics cues for one IDR segment
+    (0-based half-open).
 
     These are interpretation aids / triage features — they do not change model
     logits. Matching a motif with a high role score strengthens the call.
     """
+    from colab.idr_layer_biophysics import compute_idr_biophysics_cues
+
     seg = (sequence[start:end] or "").upper()
     L = max(len(seg), 1)
     counts = {k: 0 for k in _AA_SETS}
@@ -99,9 +110,9 @@ def compute_idr_sequence_cues(sequence: str, start: int, end: int) -> dict:
                 "end": start + m.end(),
                 "match": m.group(0),
             })
-            if len(motifs) >= 12:
+            if len(motifs) >= 16:
                 break
-        if len(motifs) >= 12:
+        if len(motifs) >= 16:
             break
 
     # Role-biased cue tags (heuristic, reviewable)
@@ -110,19 +121,63 @@ def compute_idr_sequence_cues(sequence: str, start: int, end: int) -> dict:
         cue_tags.append("condensate_prone_composition")
     if any(m["motif"] in ("RGG", "FG_repeat", "polyQ") for m in motifs):
         cue_tags.append("condensate_motif")
-    if any(m["motif"] in ("LxxLL", "PxxP") for m in motifs) or frac["frac_hydrophobic"] >= 0.35:
+    if any(m["motif"] in ("LxxLL", "PxxP", "SH3_classI", "WW_PPxY", "TRAF") for m in motifs) or (
+        frac["frac_hydrophobic"] >= 0.35
+    ):
         cue_tags.append("binding_motif_or_hydrophobic_patch")
-    if any(m["motif"] == "NxS_T" for m in motifs) or frac["frac_polar"] >= 0.35:
+    if any(m["motif"] in ("NxS_T", "KEN_box", "D_box") for m in motifs) or frac["frac_polar"] >= 0.35:
         cue_tags.append("ptm_prone_composition")
     if frac["frac_hydrophobic"] >= 0.4 and frac["frac_charged"] < 0.15:
         cue_tags.append("lipid_prone_hydrophobic")
+    if any(m["motif"] in ("NLS_monopartite", "NES_leucine") for m in motifs):
+        cue_tags.append("nuclear_transport_motif")
+    if any(m["motif"] == "PDZ_Cterm" for m in motifs):
+        cue_tags.append("pdz_ligand_cterm")
+
+    biophysics = compute_idr_biophysics_cues(sequence, start, end)
+    for tag in biophysics.get("cue_tags") or []:
+        if tag not in cue_tags:
+            cue_tags.append(tag)
 
     return {
         "length": end - start,
         "composition": {**frac, "net_charge_density": round(float(net_charge), 4)},
         "motifs": motifs,
+        "biophysics": biophysics,
         "cue_tags": cue_tags,
     }
+
+
+def annotate_role_call_confidence(roles: list[dict]) -> list[dict]:
+    """
+    Attach per-role confidence / uncertainty without changing decision thresholds.
+
+    confidence blends mean_prob with evidence corroboration; uncertainty is the
+    max−mean gap (peaky segment calls).
+    """
+    if not roles:
+        return roles
+    n_roles = len(roles)
+    for role in roles:
+        mean_p = float(role.get("mean_prob", 0.0))
+        max_p = float(role.get("max_prob", mean_p))
+        n_ev = len(role.get("evidence") or [])
+        cond = role.get("conditioned_prob")
+        base = float(cond) if cond is not None else mean_p
+        confidence = min(1.0, 0.65 * base + 0.2 * max_p + 0.1 * min(n_ev, 3) / 3 + 0.05)
+        role["confidence"] = round(confidence, 4)
+        role["uncertainty"] = round(max(0.0, max_p - mean_p), 4)
+        role["n_evidence"] = n_ev
+    if n_roles >= 3:
+        top_means = sorted((float(r.get("mean_prob", 0.0)) for r in roles), reverse=True)
+        if top_means[2] >= (top_means[0] - 0.12):
+            for role in roles:
+                ev = list(role.get("evidence") or [])
+                if "multi_role_conflict" not in ev:
+                    ev.append("multi_role_conflict")
+                role["evidence"] = ev
+                role["multi_role_conflict"] = True
+    return roles
 
 
 def detect_boundary_transition_regions(
@@ -213,6 +268,8 @@ def compute_quality_flags(record: dict) -> dict:
         flags.append("idr_rich_no_role_calls")
     if len(record.get("role_hallucination_intersections") or []) >= 2:
         flags.append("multiple_role_structure_conflicts")
+    if any(s.get("multi_role_conflict") for s in record.get("idr_segments") or []):
+        flags.append("multi_role_conflict")
 
     quarantine = any(
         f in flags
@@ -251,6 +308,15 @@ def score_protein_triage(record: dict) -> dict:
     intersections = len(record.get("role_hallucination_intersections", []) or [])
     quality = record.get("quality") or {}
     quarantine_boost = 2.0 if quality.get("quarantine") else 0.0
+    mean_conf = 0.0
+    n_conf = 0
+    for s in record.get("idr_segments") or []:
+        for role in s.get("predicted_roles") or []:
+            if "confidence" in role:
+                mean_conf += float(role["confidence"])
+                n_conf += 1
+    if n_conf:
+        mean_conf /= n_conf
 
     score = (
         3.0 * intersections
@@ -261,6 +327,7 @@ def score_protein_triage(record: dict) -> dict:
         + 0.5 * cues
         + 2.0 * float(record.get("disorder_fraction", 0.0))
         + quarantine_boost
+        + 0.5 * mean_conf
     )
     reasons: list[str] = []
     if intersections:
@@ -275,9 +342,12 @@ def score_protein_triage(record: dict) -> dict:
         reasons.append("has_sequence_cues")
     if quality.get("quarantine"):
         reasons.append("quality_quarantine")
+    if any(s.get("multi_role_conflict") for s in record.get("idr_segments") or []):
+        reasons.append("multi_role_conflict")
     return {
         "score": round(float(score), 4),
         "reasons": reasons,
+        "mean_role_confidence": round(mean_conf, 4) if n_conf else None,
     }
 
 
@@ -365,17 +435,34 @@ def build_idr_segment_records(
                 support: list[str] = []
                 g = role["group"]
                 if g == "condensate / assembly" and (
-                    "condensate_prone_composition" in tags or "condensate_motif" in tags
+                    "condensate_prone_composition" in tags
+                    or "condensate_motif" in tags
+                    or "aromatic_charged_sticker_spacer" in tags
+                    or "blocky_charge_patterning" in tags
+                    or "low_complexity_idr" in tags
                 ):
                     support.append("sequence_cue_agrees")
                 if g in ("protein binding", "nucleic acid binding") and (
                     "binding_motif_or_hydrophobic_patch" in tags
+                    or "nuclear_transport_motif" in tags
+                    or "pdz_ligand_cterm" in tags
+                    or "mixed_charge_compact_electrostatics" in tags
                 ):
                     support.append("sequence_cue_agrees")
                 if g == "post-translational regulation" and "ptm_prone_composition" in tags:
                     support.append("sequence_cue_agrees")
                 if g == "lipid / small molecule binding" and "lipid_prone_hydrophobic" in tags:
                     support.append("sequence_cue_agrees")
+                bio_tags = {
+                    "blocky_charge_patterning",
+                    "mixed_charge_compact_electrostatics",
+                    "segregated_charge_stretching",
+                    "aromatic_charged_sticker_spacer",
+                    "low_complexity_idr",
+                    "strongly_signed_polyelectrolyte",
+                }
+                if support and (tags & bio_tags):
+                    support.append("biophysics_cue_agrees")
                 if support:
                     role["evidence"] = support
 
@@ -417,6 +504,10 @@ def build_idr_segment_records(
                             4,
                         )
                         role["evidence"] = ev
+
+        rec["predicted_roles"] = annotate_role_call_confidence(roles)
+        if any(r.get("multi_role_conflict") for r in roles):
+            rec["multi_role_conflict"] = True
         records.append(rec)
     return records
 
@@ -582,6 +673,13 @@ def _recommended_actions(
         for s in segments for r in s.get("predicted_roles", [])
     ):
         actions.append("ligand_context_supports_role_calls")
+    if any(
+        "biophysics_cue_agrees" in (r.get("evidence") or [])
+        for s in segments for r in s.get("predicted_roles", [])
+    ):
+        actions.append("biophysics_patterning_corroborates_roles")
+    if any(s.get("multi_role_conflict") for s in segments):
+        actions.append("review_multi_role_idr_segments")
     return actions
 
 
@@ -1201,20 +1299,42 @@ def export_idr_layer_bundle(
     export_caid: bool = True,
     export_html: bool = True,
     export_role_bedgraphs: bool = True,
+    export_gff: bool = True,
+    export_cards: bool = True,
+    cards_top_n: int = 20,
     validate_schema: bool = True,
+    min_triage_score: Optional[float] = None,
+    quarantine_only: bool = False,
+    run_args: Optional[object] = None,
 ) -> dict[str, str]:
     """Write the standard IDR layer artifact set; returns path map."""
     from colab.idr_layer_ops import (
         export_disorder_caid_bundle,
+        export_idr_layer_gff3,
+        filter_layer_records,
         validate_idr_layer_records,
         write_idr_layer_html,
         write_idr_layer_markdown,
+        write_idr_run_manifest,
+        write_triage_protein_cards,
     )
 
     os.makedirs(out_dir, exist_ok=True)
     if validate_schema:
         schema = validate_idr_layer_records(records)
         report["schema_validation"] = schema
+
+    filtered = filter_layer_records(
+        records,
+        min_triage_score=min_triage_score,
+        quarantine_only=quarantine_only,
+    )
+    report["export_filter"] = {
+        "min_triage_score": min_triage_score,
+        "quarantine_only": quarantine_only,
+        "n_filtered_for_cards": len(filtered),
+        "n_total": len(records),
+    }
 
     paths = {
         "report": save_idr_layer_report(
@@ -1239,7 +1359,24 @@ def export_idr_layer_bundle(
         "roles": export_idr_role_tracks_tsv(
             records, os.path.join(out_dir, "idr_biology_layer_roles.tsv"),
         ),
+        "manifest": write_idr_run_manifest(
+            os.path.join(out_dir, "idr_biology_layer_manifest.json"),
+            layer_version=str(report.get("layer_version") or LAYER_VERSION),
+            args_ns=run_args,
+            extra={"n_proteins": len(records), "thresholds": report.get("thresholds")},
+        ),
     }
+    if export_gff:
+        paths["gff3"] = export_idr_layer_gff3(
+            records, os.path.join(out_dir, "idr_biology_layer.gff3"),
+        )
+    if export_cards:
+        cards_dir = os.path.join(out_dir, "idr_biology_layer_cards")
+        card_paths = write_triage_protein_cards(
+            filtered or records, cards_dir, top_n=cards_top_n,
+        )
+        paths["cards_dir"] = cards_dir
+        paths["cards_n"] = str(len(card_paths))
     if export_html:
         paths["html"] = write_idr_layer_html(
             report, os.path.join(out_dir, "idr_biology_layer_report.html"),

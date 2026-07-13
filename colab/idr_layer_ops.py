@@ -139,6 +139,142 @@ def quality_summary(records: list[dict]) -> dict:
     }
 
 
+def filter_layer_records(
+    records: list[dict],
+    *,
+    min_triage_score: Optional[float] = None,
+    quarantine_only: bool = False,
+    exclude_quarantine: bool = False,
+) -> list[dict]:
+    """Filter protein records for focused triage exports (does not recompute)."""
+    out = list(records)
+    if quarantine_only:
+        out = [r for r in out if (r.get("quality") or {}).get("quarantine")]
+    elif exclude_quarantine:
+        out = [r for r in out if not (r.get("quality") or {}).get("quarantine")]
+    if min_triage_score is not None:
+        out = [
+            r for r in out
+            if float((r.get("triage") or {}).get("score") or 0.0) >= float(min_triage_score)
+        ]
+    return out
+
+
+def write_idr_run_manifest(
+    path: str,
+    *,
+    layer_version: str,
+    args_ns: Optional[object] = None,
+    extra: Optional[dict] = None,
+) -> str:
+    """Capture reproducibility recipe for an IDR layer run."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    payload: dict = {
+        "layer_version": layer_version,
+        "artifact": "idr_biology_layer_run_manifest",
+    }
+    if args_ns is not None:
+        try:
+            payload["cli"] = {
+                k: getattr(args_ns, k)
+                for k in dir(args_ns)
+                if k.startswith("idr_") or k in (
+                    "stage", "boltz_mode", "boltz_diffusion_samples",
+                    "structure_backend", "export_idr_layer",
+                )
+            }
+        except Exception:
+            payload["cli"] = str(args_ns)
+    if extra:
+        payload["extra"] = extra
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2, default=str)
+    return path
+
+
+def write_triage_protein_cards(
+    records: list[dict],
+    out_dir: str,
+    *,
+    top_n: int = 20,
+) -> list[str]:
+    """Write short Markdown cards for the top triage proteins."""
+    os.makedirs(out_dir, exist_ok=True)
+    paths: list[str] = []
+    ranked = sorted(
+        records,
+        key=lambda r: -float((r.get("triage") or {}).get("score") or 0.0),
+    )[:top_n]
+    for rec in ranked:
+        pid = rec.get("protein_id") or "unknown"
+        safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in pid)
+        path = os.path.join(out_dir, f"{safe}.md")
+        roles = []
+        for seg in rec.get("idr_segments") or []:
+            for role in seg.get("predicted_roles") or []:
+                roles.append(
+                    f"- {seg['start']}-{seg['end']}: {role['group']} "
+                    f"(p={role.get('mean_prob')}, conf={role.get('confidence')})"
+                )
+        cues = []
+        for seg in rec.get("idr_segments") or []:
+            for tag in (seg.get("sequence_cues") or {}).get("cue_tags") or []:
+                cues.append(f"- {tag}")
+        lines = [
+            f"# {pid}",
+            "",
+            f"- UniProt: `{rec.get('uniprot_acc') or ''}`",
+            f"- length: {rec.get('length')}",
+            f"- disorder fraction: {rec.get('disorder_fraction')}",
+            f"- triage: {(rec.get('triage') or {}).get('score')}",
+            f"- quality: {(rec.get('quality') or {}).get('severity')}",
+            f"- actions: {', '.join(rec.get('actions') or [])}",
+            "",
+            "## Role calls",
+            "",
+            *(roles or ["- none"]),
+            "",
+            "## Cue tags",
+            "",
+            *(cues[:20] or ["- none"]),
+            "",
+        ]
+        with open(path, "w") as f:
+            f.write("\n".join(lines))
+        paths.append(path)
+    return paths
+
+
+def export_idr_layer_gff3(records: list[dict], path: str) -> str:
+    """GFF3 of IDR segments + role attributes for genome-browser style tools."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
+        f.write("##gff-version 3\n")
+        f.write("# DisorderNet IDR biology layer\n")
+        for rec in records:
+            chrom = rec.get("uniprot_acc") or rec["protein_id"]
+            for seg in rec.get("idr_segments") or []:
+                start = int(seg["start"])
+                end = int(seg["end"])
+                roles = seg.get("predicted_roles") or []
+                top = roles[0]["group"] if roles else "IDR"
+                conf = roles[0].get("confidence", "") if roles else ""
+                role_str = ",".join(r["group"].replace(" ", "_") for r in roles[:3])
+                attrs = (
+                    f"ID={rec['protein_id']}_{start}_{end};"
+                    f"Name={top.replace(' ', '_')};"
+                    f"roles={role_str};"
+                    f"disorder={float(seg.get('mean_disorder_prob', 0)):.3f};"
+                    f"confidence={conf}"
+                )
+                score = float(seg.get("mean_disorder_prob", 0.0))
+                f.write(
+                    f"{chrom}\tDisorderNet\tIDR_segment\t{start}\t{end}\t"
+                    f"{score:.3f}\t.\t.\t{attrs}\n"
+                )
+    return path
+
+
 _REQUIRED_RECORD_KEYS = (
     "layer_version",
     "protein_id",
@@ -472,10 +608,25 @@ def compare_idr_layer_jsonl(path_a: str, path_b: str) -> dict:
     only_b = sorted(set(b) - set(a))
 
     deltas: list[dict] = []
+    role_group_deltas: Counter = Counter()
     for pid in shared:
         ra, rb = a[pid], b[pid]
         sa = float((ra.get("triage") or {}).get("score", 0.0))
         sb = float((rb.get("triage") or {}).get("score", 0.0))
+        roles_a = {
+            role["group"]
+            for seg in ra.get("idr_segments") or []
+            for role in seg.get("predicted_roles") or []
+        }
+        roles_b = {
+            role["group"]
+            for seg in rb.get("idr_segments") or []
+            for role in seg.get("predicted_roles") or []
+        }
+        for g in roles_a - roles_b:
+            role_group_deltas[f"lost:{g}"] += 1
+        for g in roles_b - roles_a:
+            role_group_deltas[f"gained:{g}"] += 1
         deltas.append({
             "protein_id": pid,
             "triage_delta": round(sb - sa, 4),
@@ -484,6 +635,10 @@ def compare_idr_layer_jsonl(path_a: str, path_b: str) -> dict:
             "roles_delta": int(rb.get("n_role_assignments", 0)) - int(ra.get("n_role_assignments", 0)),
             "halluc_a": (ra.get("hallucination") or {}).get("n_hallucinated", 0),
             "halluc_b": (rb.get("hallucination") or {}).get("n_hallucinated", 0),
+            "quality_a": (ra.get("quality") or {}).get("severity"),
+            "quality_b": (rb.get("quality") or {}).get("severity"),
+            "roles_gained": sorted(roles_b - roles_a),
+            "roles_lost": sorted(roles_a - roles_b),
         })
     deltas.sort(key=lambda d: -abs(d["triage_delta"]))
 
@@ -496,6 +651,10 @@ def compare_idr_layer_jsonl(path_a: str, path_b: str) -> dict:
         "only_in_a": only_a[:50],
         "only_in_b": only_b[:50],
         "largest_triage_deltas": deltas[:30],
+        "role_group_change_counts": dict(role_group_deltas.most_common(20)),
+        "n_quality_severity_changes": sum(
+            1 for d in deltas if d.get("quality_a") != d.get("quality_b")
+        ),
         "mean_abs_triage_delta": (
             round(float(np.mean([abs(d["triage_delta"]) for d in deltas])), 4)
             if deltas else 0.0
