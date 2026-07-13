@@ -52,3 +52,12 @@ class TestSOTAProfile:
         assert cfg.use_tversky_loss is True
         assert cfg.use_swa is True
         assert cfg.use_v6_distill is True
+
+    def test_ultra_profile_fields(self):
+        cfg = TrainConfig.from_profile("ultra")
+        assert cfg.lora_rank == 128
+        assert cfg.use_rich_features is True
+        assert cfg.fusion_type == "attention"
+        assert cfg.lora_on_ffn is True
+        assert cfg.lora_on_out_proj is True
+        assert cfg.unfreeze_last_layers == 2

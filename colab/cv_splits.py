@@ -58,6 +58,11 @@ _FINGERPRINT_KEYS = (
     "use_tversky_loss",
     "use_swa",
     "use_v6_distill",
+    "use_rich_features",
+    "fusion_type",
+    "lora_on_out_proj",
+    "lora_on_ffn",
+    "unfreeze_last_layers",
 )
 
 

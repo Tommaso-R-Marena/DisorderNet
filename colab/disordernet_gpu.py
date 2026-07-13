@@ -287,6 +287,14 @@ class TrainConfig:
     v6_distill_weight: float = 0.15
     v6_distill_temperature: float = 2.0
 
+    # Ultra / radical SOTA track
+    use_rich_features: bool = False  # full 162-dim features_fast stream
+    fusion_type: str = "softmax"  # "softmax" | "attention"
+    lora_on_out_proj: bool = False
+    lora_on_ffn: bool = False
+    unfreeze_last_layers: int = 0  # fine-tune tail LayerNorm + FFN
+    lr_esm_tail: float = 1e-5
+
     # AF hallucination hard-negative weighting (disordered + high pLDDT)
     use_hallucination_weighting: bool = True
     hallucination_weight: float = 3.0
@@ -311,6 +319,7 @@ class TrainConfig:
         balanced — default v2 (rank 16, 20 epochs)
         max      — higher capacity (rank 32, 25 epochs, larger physico stream)
         sota     — SOTA push: rank 64, Transformer head, Dice+EMA, compact ckpt
+        ultra    — maximum push: rich features, attn fusion, FFN LoRA, v6-pro stack
         """
         presets: dict[str, dict] = {
             "balanced": {},
@@ -356,6 +365,44 @@ class TrainConfig:
                 "swa_start_frac": 0.70,
                 "use_v6_distill": True,
                 "v6_distill_weight": 0.12,
+            },
+            "ultra": {
+                "lora_rank": 128,
+                "lora_alpha": 256,
+                "lora_layers": 20,
+                "num_epochs": 35,
+                "patience": 12,
+                "lr_lora": 2e-5,
+                "lr_head": 1.5e-4,
+                "lr_esm_tail": 8e-6,
+                "boundary_weight": 4.0,
+                "physico_dim": 96,
+                "focal_gamma": 3.0,
+                "esm_fusion_layers": 12,
+                "head_type": "sota",
+                "use_dice_loss": True,
+                "dice_loss_weight": 0.35,
+                "label_smoothing": 0.03,
+                "use_ema": True,
+                "ema_decay": 0.9995,
+                "compact_checkpoints": True,
+                "auc_score_weight": 0.40,
+                "ap_score_weight": 0.15,
+                "segment_score_weight": 0.45,
+                "hallucination_weight": 4.0,
+                "use_rdrop": True,
+                "rdrop_weight": 0.6,
+                "use_tversky_loss": True,
+                "tversky_weight": 0.15,
+                "use_swa": True,
+                "swa_start_frac": 0.65,
+                "use_v6_distill": True,
+                "v6_distill_weight": 0.15,
+                "use_rich_features": True,
+                "fusion_type": "attention",
+                "lora_on_out_proj": True,
+                "lora_on_ffn": True,
+                "unfreeze_last_layers": 2,
             },
         }
         if profile not in presets:
@@ -696,6 +743,9 @@ def print_training_config_summary(cfg: TrainConfig, proteins: Optional[list] = N
           f"{cfg.segment_score_weight}·SegF1)")
     print(f"  Early-stop mode    : {cfg.early_stop_mode}")
     print(f"  Head / SOTA        : {cfg.head_type}  dice={cfg.use_dice_loss}  ema={cfg.use_ema}")
+    print(f"  Rich features      : {cfg.use_rich_features}  fusion={cfg.fusion_type}")
+    print(f"  LoRA FFN/out       : {cfg.lora_on_ffn}/{cfg.lora_on_out_proj}  "
+          f"unfreeze_tail={cfg.unfreeze_last_layers}")
     print(f"  Compact ckpt       : {cfg.compact_checkpoints}")
     print(f"  Hallucination wt   : {cfg.use_hallucination_weighting} "
           f"(×{cfg.hallucination_weight} @ pLDDT≥{cfg.high_plddt_threshold})")
@@ -782,6 +832,28 @@ class ESMLayerFusion(nn.Module):
         return self.norm(fused)
 
 
+class ESMAttentionFusion(nn.Module):
+    """Context-dependent attention over ESM layer stack (stronger than scalar softmax)."""
+
+    def __init__(self, n_layers: int, dim: int = 1280):
+        super().__init__()
+        hidden = max(dim // 8, 64)
+        self.gate = nn.Sequential(
+            nn.Linear(dim, hidden),
+            nn.GELU(),
+            nn.Linear(hidden, n_layers),
+        )
+        self.norm = nn.LayerNorm(dim)
+
+    def forward(self, layer_stack: torch.Tensor) -> torch.Tensor:
+        """layer_stack: (B, L, D, N_layers)."""
+        context = layer_stack[..., -1]
+        scores = self.gate(context)
+        w = torch.softmax(scores, dim=-1)
+        fused = (layer_stack * w.unsqueeze(-2)).sum(dim=-1)
+        return self.norm(fused)
+
+
 class DisorderCNNHead(nn.Module):
     """Multi-scale dilated 1D CNN — sharper IDR boundaries than single-kernel stack."""
 
@@ -856,7 +928,7 @@ class DisorderCNNHeadLegacy(nn.Module):
 
 
 class DisorderNetGPU(nn.Module):
-    """ESM-2 650M + LoRA (Q/V, last N layers) + CNN disorder head."""
+    """ESM-2 650M + LoRA (Q/V/K/out/FFN, last N layers) + disorder head."""
 
     def __init__(
         self,
@@ -872,7 +944,6 @@ class DisorderNetGPU(nn.Module):
             p.requires_grad = False
 
         if cfg.use_gradient_checkpointing:
-            # fair-esm exposes this on the ESM2 model class
             if hasattr(self.esm, "set_gradient_checkpointing"):
                 self.esm.set_gradient_checkpointing(True)
 
@@ -882,9 +953,12 @@ class DisorderNetGPU(nn.Module):
         proj_names = ["q_proj", "v_proj"]
         if cfg.lora_on_k:
             proj_names.append("k_proj")
+        if cfg.lora_on_out_proj:
+            proj_names.append("out_proj")
 
         for layer_idx in range(start, n_layers):
-            attn = self.esm.layers[layer_idx].self_attn
+            layer = self.esm.layers[layer_idx]
+            attn = layer.self_attn
             for proj_name in proj_names:
                 proj = getattr(attn, proj_name, None)
                 if isinstance(proj, nn.Linear):
@@ -894,31 +968,79 @@ class DisorderNetGPU(nn.Module):
                     setattr(attn, proj_name, lora)
                     self._lora_modules.append(lora)
 
+            if cfg.lora_on_ffn:
+                for ffn_name in ("fc1", "fc2"):
+                    ffn = getattr(layer, ffn_name, None)
+                    if isinstance(ffn, nn.Linear):
+                        lora = LoRALinear(
+                            ffn, cfg.lora_rank, cfg.lora_alpha, cfg.lora_dropout
+                        )
+                        setattr(layer, ffn_name, lora)
+                        self._lora_modules.append(lora)
+
+        self._esm_tail_params: list[nn.Parameter] = []
+        if cfg.unfreeze_last_layers > 0:
+            tail_start = n_layers - cfg.unfreeze_last_layers
+            for layer_idx in range(tail_start, n_layers):
+                layer = self.esm.layers[layer_idx]
+                for mod_name in ("self_attn_layer_norm", "final_layer_norm"):
+                    mod = getattr(layer, mod_name, None)
+                    if mod is not None:
+                        for p in mod.parameters():
+                            p.requires_grad = True
+                            self._esm_tail_params.append(p)
+                if not cfg.lora_on_ffn:
+                    for ffn_name in ("fc1", "fc2"):
+                        mod = getattr(layer, ffn_name, None)
+                        if isinstance(mod, nn.Linear):
+                            for p in mod.parameters():
+                                p.requires_grad = True
+                                self._esm_tail_params.append(p)
+
         fusion_n = min(cfg.esm_fusion_layers, n_layers)
         self._fusion_layer_ids = list(range(n_layers - fusion_n, n_layers))
-        self.layer_fusion = ESMLayerFusion(fusion_n, dim=1280)
-
-        self.use_physico = cfg.use_physico_features
-        if self.use_physico:
-            self.physico = PhysicoFeatureEncoder(cfg.physico_dim)
-            head_in = 1280 + cfg.physico_dim
+        if cfg.fusion_type == "attention":
+            self.layer_fusion = ESMAttentionFusion(fusion_n, dim=1280)
         else:
-            self.physico = None
-            head_in = 1280
+            self.layer_fusion = ESMLayerFusion(fusion_n, dim=1280)
+
+        self.use_rich = cfg.use_rich_features
+        self.use_physico = cfg.use_physico_features and not self.use_rich
+        extra_dim = 0
+        self.rich_encoder = None
+        self.physico = None
+
+        if self.use_rich:
+            from colab.rich_features import RichFeatureEncoder
+            self.rich_encoder = RichFeatureEncoder(out_dim=cfg.physico_dim)
+            extra_dim = cfg.physico_dim
+        elif self.use_physico:
+            self.physico = PhysicoFeatureEncoder(cfg.physico_dim)
+            extra_dim = cfg.physico_dim
+
+        head_in = 1280 + extra_dim
 
         self.head_type = cfg.head_type
         if cfg.head_type == "sota":
             from colab.sota_heads import DisorderSOTAHead
-            self.head = DisorderSOTAHead(in_dim=head_in, dropout=cfg.head_dropout)
+            self.head = DisorderSOTAHead(
+                in_dim=head_in,
+                dropout=cfg.head_dropout,
+                n_transformer_layers=3 if cfg.use_rich_features else 2,
+            )
         else:
             self.head = DisorderCNNHead(in_dim=head_in, dropout=cfg.head_dropout)
 
         if verbose:
             total = sum(p.numel() for p in self.parameters())
             trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
+            lora_projs = len(self._lora_modules)
             print(
-                f"  LoRA layers {start}–{n_layers - 1} "
-                f"({len(self._lora_modules)} projections)"
+                f"  LoRA layers {start}–{n_layers - 1} ({lora_projs} projections)"
+            )
+            print(
+                f"  Fusion={cfg.fusion_type}  rich={self.use_rich}  "
+                f"unfreeze_tail={cfg.unfreeze_last_layers}"
             )
             print(
                 f"  Parameters: {total / 1e6:.1f}M total, "
@@ -941,13 +1063,19 @@ class DisorderNetGPU(nn.Module):
         params.extend(self.layer_fusion.parameters())
         if self.physico is not None:
             params.extend(self.physico.parameters())
+        if self.rich_encoder is not None:
+            params.extend(self.rich_encoder.parameters())
         return iter(params)
+
+    def get_esm_tail_params(self) -> Iterator[nn.Parameter]:
+        return iter(self._esm_tail_params)
 
     def forward(
         self,
         tokens: torch.Tensor,
         aa_idx: Optional[torch.Tensor] = None,
         pad_mask: Optional[torch.Tensor] = None,
+        rich_feats: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         out = self.esm(tokens, repr_layers=self._fusion_layer_ids, return_contacts=False)
         layer_hiddens = [
@@ -956,7 +1084,11 @@ class DisorderNetGPU(nn.Module):
         stack = torch.stack(layer_hiddens, dim=-1)
         embeddings = self.layer_fusion(stack)
 
-        if self.physico is not None:
+        if self.rich_encoder is not None:
+            if rich_feats is None:
+                raise ValueError("rich_feats required when use_rich_features=True")
+            embeddings = torch.cat([embeddings, self.rich_encoder(rich_feats)], dim=-1)
+        elif self.physico is not None:
             if aa_idx is None:
                 raise ValueError("aa_idx required when use_physico_features=True")
             embeddings = torch.cat([embeddings, self.physico(aa_idx)], dim=-1)
@@ -1034,12 +1166,18 @@ class DisProtDataset(Dataset):
                 ]
 
                 aa_idx = [AA_TO_IDX.get(c, 0) for c in p["sequence"]]
-                self._cache[p["id"]] = {
+                entry = {
                     "tokens": tokens.squeeze(0),
                     "labels": torch.tensor(labels, dtype=torch.float32),
                     "aa_idx": torch.tensor(aa_idx, dtype=torch.long),
                     "sample_weight": torch.tensor(sample_weight, dtype=torch.float32),
                 }
+                if self.cfg is not None and self.cfg.use_rich_features:
+                    from colab.rich_features import compute_rich_features
+                    rich = compute_rich_features(p["sequence"])
+                    length = min(len(labels), rich.shape[0])
+                    entry["rich_feats"] = torch.tensor(rich[:length], dtype=torch.float32)
+                self._cache[p["id"]] = entry
 
     def __len__(self) -> int:
         return len(self.proteins)
@@ -1049,18 +1187,20 @@ class DisProtDataset(Dataset):
         item = self._cache[p["id"]]
         labels = item["labels"]
         mask = torch.ones(labels.shape[0], dtype=torch.bool)
+        rich = item.get("rich_feats")
         return (
             item["tokens"],
             labels,
             mask,
             item["aa_idx"],
             item["sample_weight"],
+            rich,
             p["id"],
         )
 
 
 def disprot_collate(batch):
-    tokens_list, labels_list, mask_list, aa_list, weight_list, ids = zip(*batch)
+    tokens_list, labels_list, mask_list, aa_list, weight_list, rich_list, ids = zip(*batch)
     max_tok = max(t.shape[0] for t in tokens_list)
     max_seq = max_tok - 2
     pad_idx = 1
@@ -1070,6 +1210,15 @@ def disprot_collate(batch):
     mask_padded = torch.zeros(len(batch), max_seq, dtype=torch.bool)
     aa_padded = torch.zeros(len(batch), max_seq, dtype=torch.long)
     weight_padded = torch.ones(len(batch), max_seq, dtype=torch.float32)
+    rich_padded = None
+    if any(r is not None for r in rich_list):
+        from colab.rich_features import RICH_FEATURE_DIM
+        rich_padded = torch.zeros(len(batch), max_seq, RICH_FEATURE_DIM, dtype=torch.float32)
+        for i, rich in enumerate(rich_list):
+            if rich is None:
+                continue
+            lr = rich.shape[0]
+            rich_padded[i, :lr] = rich
 
     for i, (tok, lab, msk, aa, wt) in enumerate(
         zip(tokens_list, labels_list, mask_list, aa_list, weight_list)
@@ -1081,7 +1230,7 @@ def disprot_collate(batch):
         aa_padded[i, :ls] = aa
         weight_padded[i, :ls] = wt
 
-    return tokens_padded, labels_padded, mask_padded, aa_padded, weight_padded, list(ids)
+    return tokens_padded, labels_padded, mask_padded, aa_padded, weight_padded, rich_padded, list(ids)
 
 
 # ---------------------------------------------------------------------------
@@ -1104,12 +1253,13 @@ def _forward_logits(
     tokens: torch.Tensor,
     aa_idx: Optional[torch.Tensor],
     mask: torch.Tensor,
+    rich_feats: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     use_physico = getattr(model, "use_physico", False)
     aa = aa_idx if use_physico else None
     if getattr(model, "head_type", "cnn") == "sota":
-        return model(tokens, aa_idx=aa, pad_mask=mask)
-    return model(tokens, aa_idx=aa)
+        return model(tokens, aa_idx=aa, pad_mask=mask, rich_feats=rich_feats)
+    return model(tokens, aa_idx=aa, rich_feats=rich_feats)
 
 
 def _disorder_loss(
@@ -1174,16 +1324,20 @@ def eval_epoch(
     all_probs, all_labels = [], []
     total_loss, n_batches = 0.0, 0
 
-    for tokens, labels, mask, aa_idx, sample_weight, _ in loader:
+    for tokens, labels, mask, aa_idx, sample_weight, rich_feats, _ in loader:
         tokens = tokens.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
         mask = mask.to(device, non_blocking=True)
         aa_idx = aa_idx.to(device, non_blocking=True)
         sample_weight = sample_weight.to(device, non_blocking=True)
+        rich_t = None
+        if rich_feats is not None:
+            rich_t = rich_feats.to(device, non_blocking=True)
 
         with autocast(device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda"):
             logits = _forward_logits(
                 model, tokens, aa_idx if getattr(model, "use_physico", False) else None, mask,
+                rich_feats=rich_t,
             )
 
         if cfg is not None:
@@ -1290,14 +1444,18 @@ def train_fold(
 
     lora_params = list(fold_model.get_lora_params())
     head_params = list(fold_model.get_head_params())
-    optimizer = AdamW(
-        [
-            {"params": lora_params, "lr": cfg.lr_lora, "weight_decay": cfg.weight_decay},
-            {"params": head_params, "lr": cfg.lr_head, "weight_decay": cfg.weight_decay},
-        ],
-        betas=(0.9, 0.999),
-        eps=1e-8,
-    )
+    esm_tail_params = list(fold_model.get_esm_tail_params())
+    param_groups = [
+        {"params": lora_params, "lr": cfg.lr_lora, "weight_decay": cfg.weight_decay},
+        {"params": head_params, "lr": cfg.lr_head, "weight_decay": cfg.weight_decay},
+    ]
+    if esm_tail_params:
+        param_groups.append({
+            "params": esm_tail_params,
+            "lr": cfg.lr_esm_tail,
+            "weight_decay": cfg.weight_decay * 0.1,
+        })
+    optimizer = AdamW(param_groups, betas=(0.9, 0.999), eps=1e-8)
 
     steps_per_epoch = math.ceil(len(train_dl) / cfg.accum_steps)
     total_steps = steps_per_epoch * cfg.num_epochs
@@ -1346,12 +1504,15 @@ def train_fold(
             leave=False,
         )
 
-        for step, (tokens, labels, mask, aa_idx, sample_weight, batch_ids) in enumerate(pbar):
+        for step, (tokens, labels, mask, aa_idx, sample_weight, rich_feats, batch_ids) in enumerate(pbar):
             tokens = tokens.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             mask = mask.to(device, non_blocking=True)
             aa_idx = aa_idx.to(device, non_blocking=True)
             sample_weight = sample_weight.to(device, non_blocking=True)
+            rich_t = None
+            if rich_feats is not None:
+                rich_t = rich_feats.to(device, non_blocking=True)
             max_seq = mask.shape[1]
             teacher_probs = None
             if use_distill and v6_teacher_by_id is not None:
@@ -1362,8 +1523,8 @@ def train_fold(
             with autocast(device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda"):
                 aa = aa_idx if fold_model.use_physico else None
                 if cfg.use_rdrop:
-                    logits_a = _forward_logits(fold_model, tokens, aa, mask)
-                    logits_b = _forward_logits(fold_model, tokens, aa, mask)
+                    logits_a = _forward_logits(fold_model, tokens, aa, mask, rich_feats=rich_t)
+                    logits_b = _forward_logits(fold_model, tokens, aa, mask, rich_feats=rich_t)
                     loss_a = _disorder_loss(
                         logits_a, labels, pos_weight, sample_weight, cfg, mask=mask,
                     )
@@ -1375,7 +1536,7 @@ def train_fold(
                     loss = 0.5 * (loss_a + loss_b) + cfg.rdrop_weight * cons
                     logits = logits_a
                 else:
-                    logits = _forward_logits(fold_model, tokens, aa, mask)
+                    logits = _forward_logits(fold_model, tokens, aa, mask, rich_feats=rich_t)
                     loss = _disorder_loss(
                         logits, labels, pos_weight, sample_weight, cfg, mask=mask,
                     )
@@ -1468,6 +1629,8 @@ def train_fold(
             "lr_lora": optimizer.param_groups[0]["lr"],
             "lr_head": optimizer.param_groups[1]["lr"],
         }
+        if len(optimizer.param_groups) > 2:
+            row["lr_esm_tail"] = optimizer.param_groups[2]["lr"]
         history.append(row)
 
         marker = ""
@@ -1732,9 +1895,17 @@ def run_cross_validation(
     v6_teacher_by_id: Optional[dict[str, np.ndarray]] = None
     if cfg.use_v6_distill:
         print("Pre-computing v6 OOF teacher probabilities for distillation...")
-        from colab.ensemble_v6 import aligned_probs_from_oof, run_v6_lite_oof
-        oof_probs, _, _ = run_v6_lite_oof(proteins, n_folds=cfg.n_folds, seed=cfg.seed)
-        v6_teacher_by_id = aligned_probs_from_oof(proteins, oof_probs)
+        profile = getattr(cfg, "_profile_name", "custom")
+        if profile == "ultra":
+            from colab.v6_pro_ensemble import get_v6_pro_oof_probs
+            v6_teacher_by_id = get_v6_pro_oof_probs(
+                proteins, n_folds=cfg.n_folds, seed=cfg.seed,
+                cache_path="v6_pro_oof_probs_cache.json",
+            )
+        else:
+            from colab.ensemble_v6 import aligned_probs_from_oof, run_v6_lite_oof
+            oof_probs, _, _ = run_v6_lite_oof(proteins, n_folds=cfg.n_folds, seed=cfg.seed)
+            v6_teacher_by_id = aligned_probs_from_oof(proteins, oof_probs)
         print(f"  v6 teacher probs for {len(v6_teacher_by_id)} proteins")
 
     for fold_idx, (train_idx, val_idx) in enumerate(splits):

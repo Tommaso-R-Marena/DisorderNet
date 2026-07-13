@@ -54,15 +54,17 @@ def _predict_proteins(
     amp_dtype = cfg.amp_dtype
     out: dict[str, np.ndarray] = {}
 
-    for tokens, labels, mask, aa_idx, _, ids in dl:
+    for tokens, labels, mask, aa_idx, _, rich_feats, ids in dl:
         tokens = tokens.to(device, non_blocking=True)
         mask = mask.to(device, non_blocking=True)
         aa_idx = aa_idx.to(device, non_blocking=True)
+        rich_t = rich_feats.to(device, non_blocking=True) if rich_feats is not None else None
         with torch.amp.autocast(
             device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda",
         ):
             logits = _forward_logits(
                 model, tokens, aa_idx if model.use_physico else None, mask,
+                rich_feats=rich_t,
             )
         probs = torch.sigmoid(logits).float().cpu().numpy()
         mask_np = mask.cpu().numpy()
