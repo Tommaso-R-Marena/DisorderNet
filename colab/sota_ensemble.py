@@ -124,6 +124,8 @@ def apply_sota_stack(
     v6_cache_path: str = "v6_oof_probs_cache.json",
     run_v6_if_missing: bool = True,
     seed: int = 42,
+    use_v6_pro: bool = False,
+    use_meta_ensemble: bool = False,
 ) -> tuple[dict, list, dict[str, np.ndarray]]:
     """
     GPU → optional v6 blend → three-way stack with physics prior.
@@ -137,9 +139,39 @@ def apply_sota_stack(
     if v6_probs_by_id is None:
         v6_probs_by_id = load_v6_probs_cache(v6_cache_path)
     if v6_probs_by_id is None and run_v6_if_missing:
-        oof_probs, oof_labels, _ = run_v6_lite_oof(proteins, n_folds=n_folds, seed=seed)
-        v6_probs_by_id = aligned_probs_from_oof(proteins, oof_probs)
-        save_v6_probs_cache(v6_probs_by_id, v6_cache_path)
+        if use_v6_pro:
+            from colab.v6_pro_ensemble import get_v6_pro_oof_probs
+            pro_cache = v6_cache_path.replace(".json", "_pro.json")
+            v6_probs_by_id = get_v6_pro_oof_probs(
+                proteins, n_folds=n_folds, seed=seed, cache_path=pro_cache,
+            )
+        else:
+            oof_probs, oof_labels, _ = run_v6_lite_oof(proteins, n_folds=n_folds, seed=seed)
+            v6_probs_by_id = aligned_probs_from_oof(proteins, oof_probs)
+            save_v6_probs_cache(v6_probs_by_id, v6_cache_path)
+
+    if use_meta_ensemble and v6_probs_by_id:
+        from colab.meta_ensemble import apply_meta_stacker
+        gpu_by_id = {item["id"]: np.asarray(item["probs"], dtype=np.float32)
+                     for item in aligned}
+        streams = {"gpu": gpu_by_id, "v6": v6_probs_by_id, "physics": physics_by_id}
+        meta_report, fold_results_stacked = apply_meta_stacker(
+            proteins, fold_results, streams, n_folds=n_folds,
+        )
+        if not meta_report.get("skipped"):
+            after = compute_pooled_metrics(fold_results_stacked)
+            report = {
+                "weights": meta_report["fit"]["coefficients"],
+                "weight_search": meta_report["fit"],
+                "before": meta_report["before"],
+                "after": meta_report["after"],
+                "delta_auc_pooled": meta_report["delta_auc_pooled"],
+                "delta_ap_pooled": meta_report["delta_ap_pooled"],
+                "target_sota_auc": 0.895,
+                "gap_to_esmdispred": 0.895 - after["auc"],
+                "method": "meta_ensemble",
+            }
+            return report, fold_results_stacked, v6_probs_by_id
 
     gpu_chunks, v6_chunks, phys_chunks, label_chunks = [], [], [], []
     for item in aligned:
