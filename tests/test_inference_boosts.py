@@ -27,7 +27,7 @@ class TestMCdropoutTTA:
         tokens = torch.randn(2, 3, 4)
         mask = torch.ones(2, 3, dtype=torch.bool)
 
-        def fwd(m, t, a, mk, r):
+        def fwd(m, t, a, mk, r=None, **kw):
             return m(t)
 
         out1 = mc_dropout_forward_logits(model, tokens, None, mask, None, 1, fwd)

@@ -56,27 +56,29 @@ def _predict_proteins(
     out: dict[str, np.ndarray] = {}
     use_mc = use_tta and tta_passes > 1
 
-    def _one_batch(tokens, aa_idx, mask, rich_t):
+    def _one_batch(tokens, aa_idx, mask, rich_t, plddt_t):
         aa = aa_idx if model.use_physico else None
         if use_mc:
             from colab.inference_tta import mc_dropout_predict_probs
             return mc_dropout_predict_probs(
                 model, tokens, aa, mask, rich_t, tta_passes, _forward_logits,
+                plddt_feats=plddt_t,
             )
         with torch.inference_mode():
             return torch.sigmoid(
-                _forward_logits(model, tokens, aa, mask, rich_feats=rich_t),
+                _forward_logits(model, tokens, aa, mask, rich_feats=rich_t, plddt_feats=plddt_t),
             ).float()
 
-    for tokens, labels, mask, aa_idx, _, rich_feats, ids in dl:
+    for tokens, labels, mask, aa_idx, _, rich_feats, plddt_feats, ids in dl:
         tokens = tokens.to(device, non_blocking=True)
         mask = mask.to(device, non_blocking=True)
         aa_idx = aa_idx.to(device, non_blocking=True)
         rich_t = rich_feats.to(device, non_blocking=True) if rich_feats is not None else None
+        plddt_t = plddt_feats.to(device, non_blocking=True) if plddt_feats is not None else None
         with torch.amp.autocast(
             device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda",
         ):
-            probs = _one_batch(tokens, aa_idx, mask, rich_t).cpu().numpy()
+            probs = _one_batch(tokens, aa_idx, mask, rich_t, plddt_t).cpu().numpy()
         mask_np = mask.cpu().numpy()
         for i, pid in enumerate(ids):
             m = mask_np[i]

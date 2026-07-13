@@ -50,6 +50,17 @@ fi
 if [[ "${PREFETCH_AF:-0}" == "1" ]]; then
   EXTRA_ARGS+=(--prefetch-af-plddt)
 fi
+if [[ "${RUN_CAID3:-0}" == "1" ]]; then
+  EXTRA_ARGS+=(--run-caid3-eval)
+fi
+if [[ -n "${SEED_DIRS:-}" ]]; then
+  EXTRA_ARGS+=(--seed-dirs "$SEED_DIRS")
+fi
+if [[ -n "${FASTA_PATH:-}" ]]; then
+  EXTRA_ARGS+=(--fasta "$FASTA_PATH")
+fi
+
+CHECKPOINT_ARG=(--checkpoint-dir "${CHECKPOINT_SUBDIR:-checkpoints}")
 
 python rockfish/run_disordernet.py "$STAGE" \
   --profile "$PROFILE" \
@@ -57,6 +68,7 @@ python rockfish/run_disordernet.py "$STAGE" \
   --seed "$SEED" \
   --num-workers "$NUM_WORKERS" \
   "${WORKDIR_ARG[@]}" \
+  "${CHECKPOINT_ARG[@]}" \
   "${EXTRA_ARGS[@]}"
 
 RUN_TAG="${STAGE}_${PROFILE}_${BACKBONE}_s${SEED}_j${SLURM_JOB_ID:-local}"
@@ -66,7 +78,11 @@ mkdir -p "$DEST"
 for f in checkpoints/cv_progress.json checkpoints/cv_summary.json \
          checkpoints/run_manifest.json checkpoints/sota_postprocess_report.json \
          checkpoints/gpu_v6_ensemble_report.json checkpoints/sota_stack_report.json \
-         checkpoints/quick_screen_*.json; do
+         checkpoints/quick_screen_*.json checkpoints/eval_summary.json \
+         checkpoints/caid3_eval_report.json checkpoints/phase3_integrated_report.json \
+         checkpoints/statistical_validation_report.json checkpoints/af_rescue_report.json \
+         checkpoints/inference_fusion_report.json checkpoints/af_rescue_manifest.json \
+         checkpoints/multi_seed_blend_report.json; do
   [[ -f "$f" ]] && cp -a "$f" "$DEST/"
 done
 

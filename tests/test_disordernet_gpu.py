@@ -158,11 +158,11 @@ class TestDataset:
     def test_collate_padding(self):
         batch = [
             (torch.arange(12), torch.zeros(10), torch.ones(10, dtype=torch.bool),
-             torch.zeros(10, dtype=torch.long), torch.ones(10), None, "a"),
+             torch.zeros(10, dtype=torch.long), torch.ones(10), None, None, "a"),
             (torch.arange(8), torch.ones(6), torch.ones(6, dtype=torch.bool),
-             torch.zeros(6, dtype=torch.long), torch.ones(6), None, "b"),
+             torch.zeros(6, dtype=torch.long), torch.ones(6), None, None, "b"),
         ]
-        tok, lab, msk, aa, wt, rich, ids = disprot_collate(batch)
+        tok, lab, msk, aa, wt, rich, plddt, ids = disprot_collate(batch)
         assert tok.shape == (2, 12)
         assert lab.shape == (2, 10)
         assert msk.shape == (2, 10)
@@ -182,9 +182,10 @@ class TestDataset:
         assert "P1" in cache
         ds2 = DisProtDataset(proteins, mock_batch_converter, cache)
         assert len(ds2) == 2
-        tok, lab, msk, aa, wt, rich, pid = ds2[0]
+        tok, lab, msk, aa, wt, rich, plddt, pid = ds2[0]
         assert pid == "P1"
         assert rich is None
+        assert plddt is None
         assert lab.shape[0] == msk.sum()
         assert aa.shape[0] == lab.shape[0]
 

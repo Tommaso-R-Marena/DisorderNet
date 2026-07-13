@@ -19,7 +19,7 @@ TRAINABLE_KEY_MARKERS = (
     "head.",
     "layer_fusion.",
     "physico.",
-    "rich_encoder.",
+    "plddt_encoder.",
 )
 
 

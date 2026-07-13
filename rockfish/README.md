@@ -9,7 +9,7 @@ Run the full SOTA pipeline on Rockfish instead of Colab: longer wall times (72 h
    ```bash
    git clone https://github.com/Tommaso-R-Marena/DisorderNet.git ~/DisorderNet
    cd ~/DisorderNet
-   git checkout feature/sota-push-v2-c41e   # or master after merge
+   git checkout master
    ```
 3. **One-time env setup**:
    ```bash
@@ -43,6 +43,18 @@ sbatch --account=$DISORDERNET_ACCOUNT \
 sbatch --account=$DISORDERNET_ACCOUNT \
   --export=ALL,DISORDERNET_ACCOUNT \
   rockfish/slurm/train_ultra3b.sbatch
+
+# Recommended: complete pipeline + eval + CAID3 (~24–48 h ultra)
+export RUN_CAID3=1
+sbatch --account=$DISORDERNET_ACCOUNT \
+  --export=ALL,DISORDERNET_ACCOUNT,RUN_CAID3=1 \
+  rockfish/slurm/pipeline_ultra.sbatch
+
+# Multi-seed for +0.005–0.015 AUC (3 parallel jobs)
+export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_ms
+sbatch --account=$DISORDERNET_ACCOUNT \
+  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR \
+  rockfish/slurm/multi_seed.sbatch
 ```
 
 Monitor: `squeue -u $USER` · logs in `logs/dn-*.out` · results mirrored to `~/disordernet_runs/`.
@@ -80,7 +92,22 @@ sbatch --partition=ica100 --export=ALL,... rockfish/slurm/train_ultra3b.sbatch
 | `cv` | 6–7 | 5-fold GPU training |
 | `stack` | 7b–7c | GPU+v6 + meta ensemble |
 | `postprocess` | 7d | Fold soup + calibration |
-| `full` | all | cv → stack → postprocess |
+| `full` | all training | cv → stack → postprocess |
+| `eval` | 8–11 | CAID, AF rescue, structure calibration, Phase 3 |
+| `pipeline` | all + eval | full → eval [→ CAID3 with `RUN_CAID3=1`] |
+| `predict` | deploy | FASTA batch inference + `.caid` export |
+| `multi-seed-blend` | 7e | Average OOF from multiple seed dirs |
+
+## vs ESMDisPred / sequence-only SOTA
+
+| Capability | ESMDisPred | DisorderNet (Rockfish) |
+|------------|------------|------------------------|
+| Sequence-only disorder | ✓ | ✓ (ESM-2 650M–3B + LoRA) |
+| Homology-safe CV | CAID protocol | ✓ `split_method=homology` in ultra |
+| CAID3 benchmark eval | 0.895 ref | ✓ `caid3_eval_report.json` |
+| AF hallucination rescue | ✗ | ✓ unique differentiator |
+| Train-time pLDDT channel | ✗ | ✓ `use_plddt_features` in ultra |
+| Proteome FASTA deploy | limited | ✓ `predict` stage |
 
 Interactive debug (salloc GPU node):
 ```bash

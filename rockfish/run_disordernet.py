@@ -3,11 +3,15 @@
 DisorderNet HPC runner — mirrors Colab Pro pipeline for Slurm clusters.
 
 Stages:
-  screen      — quick paradigm screen (go/no-go)
-  cv          — full N-fold GPU cross-validation
-  stack       — GPU+v6 ensemble + SOTA meta-stack (Cells 7b–7c)
-  postprocess — fold soup + calibration (Cell 7d)
-  full        — cv → stack → postprocess in one job
+  screen           — quick paradigm screen (go/no-go)
+  cv               — full N-fold GPU cross-validation
+  stack            — GPU+v6 ensemble + SOTA meta-stack (Cells 7b–7c)
+  postprocess      — fold soup + calibration (Cell 7d)
+  full             — cv → stack → postprocess
+  eval             — CAID reports, AF rescue, structure calibration, Phase 3 (Cells 8–11)
+  predict          — batch FASTA inference with fold soup
+  multi-seed-blend — average OOF from multiple seed checkpoint dirs
+  pipeline         — full → eval (complete Rockfish production run)
 
 Example (interactive debug on Rockfish):
   python rockfish/run_disordernet.py cv --profile ultra --backbone 650M
@@ -264,6 +268,214 @@ def stage_postprocess(args, cfg, proteins, fold_results, model, converter) -> tu
     return report, fold_results
 
 
+def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
+    """Cells 8–11: CAID, biological utility, AF rescue, structure calibration, Phase 3."""
+    import json
+
+    from colab.af_hallucination import (
+        fetch_and_run_af_rescue_report,
+        print_af_rescue_report,
+        save_af_rescue_report,
+    )
+    from colab.downstream_refresh import refresh_downstream_metrics
+    from colab.inference_fusion import (
+        apply_plddt_fusion_to_cv,
+        print_fusion_report,
+        save_fusion_report,
+    )
+    from colab.novel_use_cases import build_af_rescue_manifest, save_novel_use_case_report
+    from colab.phase3_synthesis import (
+        print_phase3_report,
+        run_phase3_integrated_report,
+        run_structure_calibration_report,
+        save_phase3_report,
+    )
+    from colab.statistical_validation import (
+        print_statistical_validation,
+        run_full_statistical_validation,
+        save_statistical_validation,
+    )
+
+    ckpt = cfg.checkpoint_dir
+    downstream = refresh_downstream_metrics(
+        proteins, fold_results, n_folds=cfg.n_folds, print_reports=True,
+    )
+
+    af_cache = os.path.join(ckpt, cfg.af_plddt_cache_dir)
+    af_report, plddt_by_id = fetch_and_run_af_rescue_report(
+        proteins=proteins,
+        fold_results=fold_results,
+        n_folds=cfg.n_folds,
+        cache_dir=af_cache,
+        sleep_s=0.05,
+    )
+    print_af_rescue_report(af_report)
+    save_af_rescue_report(af_report, os.path.join(ckpt, "af_rescue_report.json"))
+
+    fusion_report, fold_results = apply_plddt_fusion_to_cv(
+        proteins=proteins,
+        fold_results=fold_results,
+        plddt_by_protein=plddt_by_id,
+        n_folds=cfg.n_folds,
+    )
+    print_fusion_report(fusion_report)
+    save_fusion_report(
+        fusion_report, os.path.join(ckpt, "inference_fusion_report.json"),
+    )
+
+    calibration_report = run_structure_calibration_report(
+        proteins=proteins,
+        fold_results=fold_results,
+        plddt_by_protein=plddt_by_id,
+        n_folds=cfg.n_folds,
+    )
+
+    stats_report = run_full_statistical_validation(
+        proteins, fold_results, plddt_by_protein=plddt_by_id, n_folds=cfg.n_folds,
+    )
+    print_statistical_validation(stats_report)
+    save_statistical_validation(
+        stats_report, os.path.join(ckpt, "statistical_validation_report.json"),
+    )
+
+    cv_pooled = {
+        "auc": downstream["our_auc"],
+        "ap": downstream["our_ap"],
+        "f1": downstream["our_f1"],
+        "mcc": downstream["our_mcc"],
+        "opt_threshold": downstream["opt_threshold"],
+    }
+    phase3 = run_phase3_integrated_report(
+        cv_pooled=cv_pooled,
+        bio_report=downstream["bio_report"],
+        af_report=af_report,
+        calibration_report=calibration_report,
+        caid_report=downstream["caid_report"],
+        statistical_validation=stats_report,
+    )
+    print_phase3_report(phase3)
+    save_phase3_report(phase3, os.path.join(ckpt, "phase3_integrated_report.json"))
+
+    from colab.biological_utility import align_fold_predictions
+
+    preds_by_id = {
+        item["id"]: item["probs"]
+        for item in align_fold_predictions(proteins, fold_results, n_folds=cfg.n_folds)
+    }
+    manifest = build_af_rescue_manifest(proteins, preds_by_id, plddt_by_id)
+    save_novel_use_case_report(manifest, os.path.join(ckpt, "af_rescue_manifest.json"))
+
+    eval_summary = {
+        "pooled_auc": cv_pooled["auc"],
+        "pooled_ap": cv_pooled["ap"],
+        "phase3_headline": phase3.get("headline"),
+        "af_rescue_rate": af_report.get("pooled", {}).get("rescue_rate"),
+        "fusion_delta_auc": fusion_report.get("delta_auc_pooled"),
+    }
+    with open(os.path.join(ckpt, "eval_summary.json"), "w") as f:
+        json.dump(eval_summary, f, indent=2)
+    print(f"Eval summary saved: {os.path.join(ckpt, 'eval_summary.json')}")
+    return eval_summary
+
+
+def stage_predict(args, cfg, model, converter) -> dict:
+    from colab.predict_batch import export_predictions, parse_fasta, predict_fasta_batch
+
+    if not args.fasta:
+        raise ValueError("--fasta required for predict stage")
+
+    plddt_by_id = None
+    if args.prefetch_af_plddt:
+        from colab.disordernet_gpu import build_plddt_cache_for_training
+        proteins = parse_fasta(args.fasta)
+        plddt_by_id = build_plddt_cache_for_training(
+            proteins, cache_dir=os.path.join(cfg.checkpoint_dir, cfg.af_plddt_cache_dir),
+        )
+
+    preds = predict_fasta_batch(
+        fasta_path=args.fasta,
+        esm_backbone=model,
+        batch_converter=converter,
+        cfg=cfg,
+        checkpoint_dir=cfg.checkpoint_dir,
+        plddt_by_id=plddt_by_id,
+        use_tta=not args.skip_tta,
+        tta_passes=cfg.mc_dropout_tta_passes,
+        n_folds=cfg.n_folds,
+    )
+    proteins = parse_fasta(args.fasta)
+    out_dir = args.predict_out or os.path.join(cfg.checkpoint_dir, "predictions")
+    manifest = export_predictions(proteins, preds, out_dir, formats=("caid", "tsv"))
+    print(f"Predictions written to {out_dir} ({manifest['n_scored']} proteins)")
+    return manifest
+
+
+def stage_multi_seed_blend(args, cfg, proteins) -> tuple[list, dict]:
+    from colab.multi_seed_blend import (
+        average_fold_results_multi_seed,
+        print_multi_seed_report,
+        save_multi_seed_report,
+    )
+
+    seed_dirs = [s.strip() for s in args.seed_dirs.split(",") if s.strip()]
+    if len(seed_dirs) < 2:
+        raise ValueError("--seed-dirs needs comma-separated checkpoint dirs (≥2)")
+
+    per_seed: dict[int, list] = {}
+    for i, sd in enumerate(seed_dirs):
+        fr, _ = _load_fold_results(sd)
+        per_seed[42 + i] = fr
+
+    blended, report = average_fold_results_multi_seed(
+        proteins, per_seed, n_folds=cfg.n_folds,
+    )
+    print_multi_seed_report(report)
+    save_multi_seed_report(report, os.path.join(cfg.checkpoint_dir, "multi_seed_blend_report.json"))
+    return blended, report
+
+
+def stage_caid3_eval(args, cfg, proteins, fold_results, model, converter) -> dict:
+    """Score fold-soup model on CAID3 Disorder-PDB reference (fair vs ESMDisPred)."""
+    from colab.caid3_eval import (
+        evaluate_caid_predictions,
+        export_caid_predictions_dir,
+        fetch_caid3_reference,
+        parse_caid_reference_fasta,
+        print_caid3_eval_report,
+        save_caid3_eval_report,
+    )
+    from colab.predict_batch import predict_fasta_batch
+
+    ref_path = args.caid3_reference or fetch_caid3_reference(
+        os.path.join(cfg.checkpoint_dir, "caid3_disorder_pdb.fasta"),
+    )
+    ref_proteins = parse_caid_reference_fasta(ref_path)
+
+    # Write temp FASTA for predict_batch
+    tmp_fasta = os.path.join(cfg.checkpoint_dir, "_caid3_query.fasta")
+    with open(tmp_fasta, "w") as f:
+        for p in ref_proteins:
+            f.write(f">{p['id']}\n{p['sequence']}\n")
+
+    preds_by_id = predict_fasta_batch(
+        fasta_path=tmp_fasta,
+        esm_backbone=model,
+        batch_converter=converter,
+        cfg=cfg,
+        checkpoint_dir=cfg.checkpoint_dir,
+        use_tta=not args.skip_tta,
+        n_folds=cfg.n_folds,
+    )
+
+    out_dir = os.path.join(cfg.checkpoint_dir, "caid3_submission")
+    export_caid_predictions_dir(ref_proteins, preds_by_id, out_dir)
+
+    report = evaluate_caid_predictions(ref_proteins, preds_by_id)
+    print_caid3_eval_report(report)
+    save_caid3_eval_report(report, os.path.join(cfg.checkpoint_dir, "caid3_eval_report.json"))
+    return report
+
+
 def run_pipeline(args) -> int:
     t0 = time.time()
     workdir = _resolve_workdir(args.workdir)
@@ -275,7 +487,9 @@ def run_pipeline(args) -> int:
     proteins, disprot_meta = _load_proteins(cfg.data_cache, cfg)
     print(f"Proteins: {len(proteins):,}  residues: {sum(p['length'] for p in proteins):,}")
 
-    needs_esm = args.stage in ("screen", "cv", "postprocess", "full")
+    needs_esm = args.stage in (
+        "screen", "cv", "postprocess", "full", "predict", "pipeline",
+    )
     model = converter = None
     if needs_esm:
         model, _, converter, spec = _load_esm(cfg)
@@ -307,6 +521,32 @@ def run_pipeline(args) -> int:
         fold_results, cv_summary = stage_stack(args, cfg, proteins, fold_results, cv_summary)
         stage_postprocess(args, cfg, proteins, fold_results, model, converter)
 
+    elif args.stage == "eval":
+        fold_results, cv_summary = _load_fold_results(cfg.checkpoint_dir)
+        stage_eval(args, cfg, proteins, fold_results, cv_summary)
+
+    elif args.stage == "predict":
+        stage_predict(args, cfg, model, converter)
+
+    elif args.stage == "multi-seed-blend":
+        fold_results, _ = stage_multi_seed_blend(args, cfg, proteins)
+        with open(os.path.join(cfg.checkpoint_dir, "cv_progress_blended.json"), "w") as f:
+            from colab.disordernet_gpu import _serialize_fold_result
+            json.dump(
+                {"fold_results": [_serialize_fold_result(r) for r in fold_results]},
+                f, indent=2,
+            )
+
+    elif args.stage == "pipeline":
+        fold_results, cv_summary = stage_cv(
+            args, cfg, proteins, model, converter, disprot_meta,
+        )
+        fold_results, cv_summary = stage_stack(args, cfg, proteins, fold_results, cv_summary)
+        stage_postprocess(args, cfg, proteins, fold_results, model, converter)
+        stage_eval(args, cfg, proteins, fold_results, cv_summary)
+        if args.run_caid3_eval:
+            stage_caid3_eval(args, cfg, proteins, fold_results, model, converter)
+
     else:
         raise ValueError(f"Unknown stage: {args.stage}")
 
@@ -322,7 +562,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "stage",
-        choices=["screen", "cv", "stack", "postprocess", "full"],
+        choices=[
+            "screen", "cv", "stack", "postprocess", "full",
+            "eval", "predict", "multi-seed-blend", "pipeline",
+        ],
         help="Pipeline stage to run",
     )
     p.add_argument("--profile", default="ultra", help="TrainConfig profile")
@@ -351,6 +594,22 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["temperature", "isotonic", "temperature_then_isotonic"],
     )
     p.add_argument("--soup-mode", default="held_out", choices=["held_out", "full_soup"])
+
+    # Eval / CAID3
+    p.add_argument("--run-caid3-eval", action="store_true", help="pipeline: also run CAID3 benchmark")
+    p.add_argument("--caid3-reference", default=None, help="Path to CAID3 reference FASTA")
+
+    # Predict
+    p.add_argument("--fasta", default=None, help="Input FASTA for predict stage")
+    p.add_argument("--predict-out", default=None, help="Output directory for predictions")
+    p.add_argument("--skip-tta", action="store_true", help="Disable MC-dropout TTA at inference")
+
+    # Multi-seed
+    p.add_argument(
+        "--seed-dirs",
+        default="",
+        help="Comma-separated checkpoint dirs for multi-seed-blend",
+    )
     return p
 
 

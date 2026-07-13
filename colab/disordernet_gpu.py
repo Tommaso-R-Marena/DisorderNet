@@ -249,6 +249,8 @@ class TrainConfig:
     esm_embed_dim: int = 1280
 
     n_folds: int = 5
+    split_method: str = "protein"  # "protein" | "homology" (CAID-credible)
+    homology_min_identity: float = 0.40
     num_workers: int = 2
     checkpoint_dir: str = "checkpoints"
     data_cache: str = "disprot_raw.json"
@@ -308,6 +310,10 @@ class TrainConfig:
     hallucination_weight: float = 3.0
     high_plddt_threshold: float = 70.0
     af_plddt_cache_dir: str = "af_plddt_cache"
+
+    # Train-time structure channel (novel vs sequence-only SOTA)
+    use_plddt_features: bool = False
+    plddt_feature_dim: int = 16
 
     # Set automatically by setup_environment()
     device: torch.device = field(default_factory=lambda: torch.device("cpu"))
@@ -416,6 +422,8 @@ class TrainConfig:
                 "unfreeze_last_layers": 2,
                 "use_mc_dropout_tta": True,
                 "mc_dropout_tta_passes": 6,
+                "use_plddt_features": True,
+                "split_method": "homology",
             },
             "ultra3b": {
                 "esm_backbone": "3B",
@@ -459,6 +467,8 @@ class TrainConfig:
                 "use_mc_dropout_tta": True,
                 "mc_dropout_tta_passes": 4,
                 "max_seq_len": 1022,
+                "use_plddt_features": True,
+                "split_method": "homology",
             },
             "screen": {
                 "lora_rank": 32,
@@ -1121,9 +1131,11 @@ class DisorderNetGPU(nn.Module):
 
         self.use_rich = cfg.use_rich_features
         self.use_physico = cfg.use_physico_features and not self.use_rich
+        self.use_plddt = cfg.use_plddt_features
         extra_dim = 0
         self.rich_encoder = None
         self.physico = None
+        self.plddt_encoder = None
 
         if self.use_rich:
             from colab.rich_features import RichFeatureEncoder
@@ -1132,6 +1144,11 @@ class DisorderNetGPU(nn.Module):
         elif self.use_physico:
             self.physico = PhysicoFeatureEncoder(cfg.physico_dim)
             extra_dim = cfg.physico_dim
+
+        if self.use_plddt:
+            from colab.structure_encoder import PlddtFeatureEncoder
+            self.plddt_encoder = PlddtFeatureEncoder(out_dim=cfg.plddt_feature_dim)
+            extra_dim += cfg.plddt_feature_dim
 
         head_in = esm_dim + extra_dim
 
@@ -1180,6 +1197,8 @@ class DisorderNetGPU(nn.Module):
             params.extend(self.physico.parameters())
         if self.rich_encoder is not None:
             params.extend(self.rich_encoder.parameters())
+        if self.plddt_encoder is not None:
+            params.extend(self.plddt_encoder.parameters())
         return iter(params)
 
     def get_esm_tail_params(self) -> Iterator[nn.Parameter]:
@@ -1191,6 +1210,7 @@ class DisorderNetGPU(nn.Module):
         aa_idx: Optional[torch.Tensor] = None,
         pad_mask: Optional[torch.Tensor] = None,
         rich_feats: Optional[torch.Tensor] = None,
+        plddt_feats: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         out = self.esm(tokens, repr_layers=self._fusion_layer_ids, return_contacts=False)
         layer_hiddens = [
@@ -1207,6 +1227,11 @@ class DisorderNetGPU(nn.Module):
             if aa_idx is None:
                 raise ValueError("aa_idx required when use_physico_features=True")
             embeddings = torch.cat([embeddings, self.physico(aa_idx)], dim=-1)
+
+        if self.plddt_encoder is not None:
+            if plddt_feats is None:
+                raise ValueError("plddt_feats required when use_plddt_features=True")
+            embeddings = torch.cat([embeddings, self.plddt_encoder(plddt_feats)], dim=-1)
 
         if self.head_type == "sota":
             if pad_mask is None:
@@ -1291,6 +1316,9 @@ class DisProtDataset(Dataset):
                     rich = compute_rich_features(p["sequence"])
                     length = min(len(labels), rich.shape[0])
                     entry["rich_feats"] = torch.tensor(rich[:length], dtype=torch.float32)
+                if self.cfg is not None and self.cfg.use_plddt_features:
+                    from colab.structure_encoder import build_plddt_feature_tensor
+                    entry["plddt_feats"] = build_plddt_feature_tensor(plddt, len(labels))
                 self._cache[p["id"]] = entry
 
     def __len__(self) -> int:
@@ -1302,6 +1330,7 @@ class DisProtDataset(Dataset):
         labels = item["labels"]
         mask = torch.ones(labels.shape[0], dtype=torch.bool)
         rich = item.get("rich_feats")
+        plddt = item.get("plddt_feats")
         return (
             item["tokens"],
             labels,
@@ -1309,12 +1338,13 @@ class DisProtDataset(Dataset):
             item["aa_idx"],
             item["sample_weight"],
             rich,
+            plddt,
             p["id"],
         )
 
 
 def disprot_collate(batch):
-    tokens_list, labels_list, mask_list, aa_list, weight_list, rich_list, ids = zip(*batch)
+    tokens_list, labels_list, mask_list, aa_list, weight_list, rich_list, plddt_list, ids = zip(*batch)
     max_tok = max(t.shape[0] for t in tokens_list)
     max_seq = max_tok - 2
     pad_idx = 1
@@ -1334,6 +1364,15 @@ def disprot_collate(batch):
             lr = rich.shape[0]
             rich_padded[i, :lr] = rich
 
+    plddt_padded = None
+    if any(p is not None for p in plddt_list):
+        plddt_padded = torch.zeros(len(batch), max_seq, 2, dtype=torch.float32)
+        for i, plddt in enumerate(plddt_list):
+            if plddt is None:
+                continue
+            lp = plddt.shape[0]
+            plddt_padded[i, :lp] = plddt
+
     for i, (tok, lab, msk, aa, wt) in enumerate(
         zip(tokens_list, labels_list, mask_list, aa_list, weight_list)
     ):
@@ -1344,7 +1383,7 @@ def disprot_collate(batch):
         aa_padded[i, :ls] = aa
         weight_padded[i, :ls] = wt
 
-    return tokens_padded, labels_padded, mask_padded, aa_padded, weight_padded, rich_padded, list(ids)
+    return tokens_padded, labels_padded, mask_padded, aa_padded, weight_padded, rich_padded, plddt_padded, list(ids)
 
 
 # ---------------------------------------------------------------------------
@@ -1368,12 +1407,16 @@ def _forward_logits(
     aa_idx: Optional[torch.Tensor],
     mask: torch.Tensor,
     rich_feats: Optional[torch.Tensor] = None,
+    plddt_feats: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     use_physico = getattr(model, "use_physico", False)
     aa = aa_idx if use_physico else None
     if getattr(model, "head_type", "cnn") == "sota":
-        return model(tokens, aa_idx=aa, pad_mask=mask, rich_feats=rich_feats)
-    return model(tokens, aa_idx=aa, rich_feats=rich_feats)
+        return model(
+            tokens, aa_idx=aa, pad_mask=mask,
+            rich_feats=rich_feats, plddt_feats=plddt_feats,
+        )
+    return model(tokens, aa_idx=aa, rich_feats=rich_feats, plddt_feats=plddt_feats)
 
 
 def _disorder_loss(
@@ -1438,20 +1481,19 @@ def eval_epoch(
     all_probs, all_labels = [], []
     total_loss, n_batches = 0.0, 0
 
-    for tokens, labels, mask, aa_idx, sample_weight, rich_feats, _ in loader:
+    for tokens, labels, mask, aa_idx, sample_weight, rich_feats, plddt_feats, _ in loader:
         tokens = tokens.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
         mask = mask.to(device, non_blocking=True)
         aa_idx = aa_idx.to(device, non_blocking=True)
         sample_weight = sample_weight.to(device, non_blocking=True)
-        rich_t = None
-        if rich_feats is not None:
-            rich_t = rich_feats.to(device, non_blocking=True)
+        rich_t = rich_feats.to(device, non_blocking=True) if rich_feats is not None else None
+        plddt_t = plddt_feats.to(device, non_blocking=True) if plddt_feats is not None else None
 
         with autocast(device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda"):
             logits = _forward_logits(
                 model, tokens, aa_idx if getattr(model, "use_physico", False) else None, mask,
-                rich_feats=rich_t,
+                rich_feats=rich_t, plddt_feats=plddt_t,
             )
 
         if cfg is not None:
@@ -1618,15 +1660,14 @@ def train_fold(
             leave=False,
         )
 
-        for step, (tokens, labels, mask, aa_idx, sample_weight, rich_feats, batch_ids) in enumerate(pbar):
+        for step, (tokens, labels, mask, aa_idx, sample_weight, rich_feats, plddt_feats, batch_ids) in enumerate(pbar):
             tokens = tokens.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             mask = mask.to(device, non_blocking=True)
             aa_idx = aa_idx.to(device, non_blocking=True)
             sample_weight = sample_weight.to(device, non_blocking=True)
-            rich_t = None
-            if rich_feats is not None:
-                rich_t = rich_feats.to(device, non_blocking=True)
+            rich_t = rich_feats.to(device, non_blocking=True) if rich_feats is not None else None
+            plddt_t = plddt_feats.to(device, non_blocking=True) if plddt_feats is not None else None
             max_seq = mask.shape[1]
             teacher_probs = None
             if use_distill and v6_teacher_by_id is not None:
@@ -1637,8 +1678,8 @@ def train_fold(
             with autocast(device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda"):
                 aa = aa_idx if fold_model.use_physico else None
                 if cfg.use_rdrop:
-                    logits_a = _forward_logits(fold_model, tokens, aa, mask, rich_feats=rich_t)
-                    logits_b = _forward_logits(fold_model, tokens, aa, mask, rich_feats=rich_t)
+                    logits_a = _forward_logits(fold_model, tokens, aa, mask, rich_feats=rich_t, plddt_feats=plddt_t)
+                    logits_b = _forward_logits(fold_model, tokens, aa, mask, rich_feats=rich_t, plddt_feats=plddt_t)
                     loss_a = _disorder_loss(
                         logits_a, labels, pos_weight, sample_weight, cfg, mask=mask,
                     )
@@ -1650,7 +1691,7 @@ def train_fold(
                     loss = 0.5 * (loss_a + loss_b) + cfg.rdrop_weight * cons
                     logits = logits_a
                 else:
-                    logits = _forward_logits(fold_model, tokens, aa, mask, rich_feats=rich_t)
+                    logits = _forward_logits(fold_model, tokens, aa, mask, rich_feats=rich_t, plddt_feats=plddt_t)
                     loss = _disorder_loss(
                         logits, labels, pos_weight, sample_weight, cfg, mask=mask,
                     )
@@ -1963,6 +2004,11 @@ def run_cross_validation(
     Completed folds are loaded from checkpoints/cv_progress.json when resuming.
     prefetch_af_plddt: fetch AF pLDDT cache before training (hallucination weights).
     """
+    if cfg.use_plddt_features and plddt_by_id is None:
+        print("Prefetching AF pLDDT for structure-aware training channel…")
+        plddt_by_id = build_plddt_cache_for_training(proteins, cache_dir=cfg.af_plddt_cache_dir)
+        print(f"  pLDDT for structure channel: {len(plddt_by_id)}/{len(proteins)} proteins")
+
     if plddt_by_id is None and cfg.use_hallucination_weighting and prefetch_af_plddt:
         print("Pre-fetching AF pLDDT for hallucination hard-negative weighting...")
         plddt_by_id = build_plddt_cache_for_training(proteins, cache_dir=cfg.af_plddt_cache_dir)
@@ -1970,7 +2016,11 @@ def run_cross_validation(
         print(f"  pLDDT available for {n_cached}/{len(proteins)} proteins")
 
     token_cache: dict = {}
-    splits = get_cv_splits(proteins, cfg.n_folds)
+    splits = get_cv_splits(
+        proteins, cfg.n_folds,
+        split_method=getattr(cfg, "split_method", "protein"),
+        homology_min_identity=getattr(cfg, "homology_min_identity", 0.40),
+    )
 
     progress_path = os.path.join(cfg.checkpoint_dir, "cv_progress.json")
     disprot_meta = get_disprot_cache_meta(cfg.data_cache)
