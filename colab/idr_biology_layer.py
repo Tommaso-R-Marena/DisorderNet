@@ -34,7 +34,7 @@ IDR_ROLE_GROUPS: tuple[str, ...] = (
     "lipid / small molecule binding",
 )
 
-LAYER_VERSION = "1.1.0"
+LAYER_VERSION = "1.2.0"
 
 # Cheap sequence cues that often co-occur with IDR biology (AF-blind)
 _MOTIF_PATTERNS: tuple[tuple[str, str], ...] = (
@@ -141,12 +141,13 @@ def detect_boundary_transition_regions(
     dis = np.asarray(disorder_probs, dtype=np.float32).ravel()
     n = len(dis)
     hard = (dis >= disorder_threshold).astype(np.int8)
-    # Mark residues within boundary_width of an order↔disorder edge
+    # Vectorized edge find: residue indices where hard label flips
     edge = np.zeros(n, dtype=bool)
-    for i in range(n - 1):
-        if hard[i] != hard[i + 1]:
-            lo = max(0, i - boundary_width + 1)
-            hi = min(n, i + 1 + boundary_width)
+    if n > 1:
+        flips = np.flatnonzero(hard[1:] != hard[:-1])
+        for i in flips:
+            lo = max(0, int(i) - boundary_width + 1)
+            hi = min(n, int(i) + 1 + boundary_width)
             edge[lo:hi] = True
     # Interface band around order↔disorder edges (folding-upon-binding cue)
     interface = edge
@@ -266,8 +267,11 @@ def build_idr_segment_records(
     min_region_len: int = 5,
     role_names: tuple[str, ...] = IDR_ROLE_GROUPS,
     include_sequence_cues: bool = True,
+    partner_sequences: Optional[list[str]] = None,
 ) -> list[dict]:
-    """IDR segments with optional multi-label role calls + sequence cues."""
+    """IDR segments with optional multi-label role calls + sequence/partner cues."""
+    from colab.idr_layer_io import partner_binding_support
+
     dis = np.asarray(disorder_probs, dtype=np.float32).ravel()
     mask = dis >= disorder_threshold
     segs = intervals_from_binary(mask.astype(np.int8), min_len=min_region_len)
@@ -322,6 +326,22 @@ def build_idr_segment_records(
                     support.append("sequence_cue_agrees")
                 if support:
                     role["evidence"] = support
+
+        if partner_sequences and sequence:
+            pb = partner_binding_support(sequence[start:end], partner_sequences)
+            if pb["support"] > 0:
+                rec["partner_context"] = pb
+                for role in roles:
+                    if role["group"] in ("protein binding", "nucleic acid binding"):
+                        ev = list(role.get("evidence") or [])
+                        if pb["support"] >= 0.4:
+                            ev.append("partner_context_supports_binding")
+                        # Conditioned score: raw + support bump, capped (transparent)
+                        role["conditioned_prob"] = round(
+                            min(1.0, float(role["mean_prob"]) + 0.15 * float(pb["support"])),
+                            4,
+                        )
+                        role["evidence"] = ev
         records.append(rec)
     return records
 
@@ -335,6 +355,7 @@ def build_protein_idr_layer(
     function_probs: Optional[np.ndarray] = None,
     boltz_plddt_std: Optional[np.ndarray] = None,
     transition_mask: Optional[np.ndarray] = None,
+    partner_sequences: Optional[list[str]] = None,
     uniprot_acc: str = "",
     disorder_threshold: float = 0.5,
     function_threshold: float = 0.5,
@@ -370,6 +391,7 @@ def build_protein_idr_layer(
         disorder_threshold=disorder_threshold,
         function_threshold=function_threshold,
         include_sequence_cues=include_sequence_cues,
+        partner_sequences=partner_sequences,
     )
 
     halluc = None
@@ -472,7 +494,116 @@ def _recommended_actions(
         or conditional.get("annotated_transition_regions")
     ):
         actions.append("consider_folding_upon_binding_at_boundaries")
+    if any(
+        "partner_context_supports_binding" in (r.get("evidence") or [])
+        for s in segments for r in s.get("predicted_roles", [])
+    ):
+        actions.append("partner_context_supports_binding_roles")
     return actions
+
+
+def _map_term_to_role_group(term_norm: str, role_names: tuple[str, ...] = IDR_ROLE_GROUPS) -> Optional[str]:
+    """Map a DisProt term_norm string onto an IDR role group name."""
+    try:
+        from colab.disordernet_gpu import FUNCTIONAL_TERM_GROUPS
+        groups = FUNCTIONAL_TERM_GROUPS
+    except Exception:
+        groups = {name: frozenset() for name in role_names}
+    t = (term_norm or "").strip().lower()
+    for name in role_names:
+        terms = groups.get(name, frozenset())
+        if t == name or t in terms:
+            return name
+    return None
+
+
+def evaluate_role_calls_against_annotations(
+    records: list[dict],
+    proteins: list[dict],
+    *,
+    min_overlap: int = 3,
+) -> dict:
+    """
+    Segment-level precision/recall of predicted IDR roles vs DisProt functional_regions.
+
+    Accuracy check for the layer — does not change predictions. Requires proteins
+    that still carry ``functional_regions`` (CV / DisProt path).
+    """
+    by_id = {p["id"]: p for p in proteins}
+    tp = fp = fn = 0
+    per_group = {g: {"tp": 0, "fp": 0, "fn": 0} for g in IDR_ROLE_GROUPS}
+    n_with_truth = 0
+
+    for rec in records:
+        p = by_id.get(rec["protein_id"])
+        if not p:
+            continue
+        truth_regs = p.get("functional_regions") or []
+        if not truth_regs:
+            continue
+        n_with_truth += 1
+        # Truth intervals per group (0-based half-open)
+        truth: dict[str, list[tuple[int, int]]] = {g: [] for g in IDR_ROLE_GROUPS}
+        for reg in truth_regs:
+            g = _map_term_to_role_group(reg.get("term_norm") or reg.get("term_name") or "")
+            if not g:
+                continue
+            s0 = max(0, int(reg["start"]) - 1)
+            e0 = int(reg["end"])
+            if e0 > s0:
+                truth[g].append((s0, e0))
+
+        pred_flags: dict[str, list[tuple[int, int]]] = {g: [] for g in IDR_ROLE_GROUPS}
+        for seg in rec.get("idr_segments", []):
+            s0, e0 = int(seg["start"]) - 1, int(seg["end"])
+            for role in seg.get("predicted_roles", []):
+                g = role["group"]
+                if g in pred_flags:
+                    pred_flags[g].append((s0, e0))
+
+        for g in IDR_ROLE_GROUPS:
+            # Precision: each predicted segment that overlaps any truth of g
+            for ps, pe in pred_flags[g]:
+                hit = any(max(0, min(pe, te) - max(ps, ts)) >= min_overlap for ts, te in truth[g])
+                if hit:
+                    tp += 1
+                    per_group[g]["tp"] += 1
+                else:
+                    fp += 1
+                    per_group[g]["fp"] += 1
+            # Recall: each truth region overlapped by a pred of g
+            for ts, te in truth[g]:
+                hit = any(max(0, min(pe, te) - max(ps, ts)) >= min_overlap for ps, pe in pred_flags[g])
+                if hit:
+                    per_group[g]["fn"] += 0  # counted via tp path; track miss below
+                else:
+                    fn += 1
+                    per_group[g]["fn"] += 1
+
+    def _prf(t, f_p, f_n):
+        prec = t / (t + f_p) if (t + f_p) else None
+        rec_ = t / (t + f_n) if (t + f_n) else None
+        if prec is None or rec_ is None or (prec + rec_) == 0:
+            f1 = None
+        else:
+            f1 = 2 * prec * rec_ / (prec + rec_)
+        return {
+            "precision": None if prec is None else round(prec, 4),
+            "recall": None if rec_ is None else round(rec_, 4),
+            "f1": None if f1 is None else round(f1, 4),
+            "tp": t, "fp": f_p, "fn": f_n,
+        }
+
+    return {
+        "enabled": n_with_truth > 0,
+        "n_proteins_with_annotations": n_with_truth,
+        "micro": _prf(tp, fp, fn),
+        "per_group": {g: _prf(v["tp"], v["fp"], v["fn"]) for g, v in per_group.items()},
+        "note": (
+            "Segment overlap vs DisProt functional_regions — evaluates role calls, "
+            "not disorder AUC"
+        ),
+    }
 
 
 def build_idr_layer_package(
@@ -482,12 +613,14 @@ def build_idr_layer_package(
     plddt_by_id: Optional[dict[str, np.ndarray]] = None,
     function_probs_by_id: Optional[dict[str, np.ndarray]] = None,
     boltz_std_by_id: Optional[dict[str, np.ndarray]] = None,
+    partners_by_id: Optional[dict[str, list[str]]] = None,
     disorder_threshold: float = 0.5,
     function_threshold: float = 0.5,
     high_plddt_threshold: float = 70.0,
     structure_source: str = "boltz2",
     max_proteins_in_summary: int = 100,
     include_sequence_cues: bool = True,
+    validate_roles: bool = True,
 ) -> dict:
     """
     Single-pass package: full records + summary report + triage ranking.
@@ -497,6 +630,7 @@ def build_idr_layer_package(
     plddt_by_id = plddt_by_id or {}
     function_probs_by_id = function_probs_by_id or {}
     boltz_std_by_id = boltz_std_by_id or {}
+    partners_by_id = partners_by_id or {}
 
     records: list[dict] = []
     for p in proteins:
@@ -512,6 +646,9 @@ def build_idr_layer_package(
             function_probs=function_probs_by_id.get(pid),
             boltz_plddt_std=boltz_std_by_id.get(pid),
             transition_mask=np.asarray(tmask, dtype=np.float32) if tmask is not None else None,
+            partner_sequences=partners_by_id.get(pid) or partners_by_id.get(
+                p.get("uniprot_acc") or "",
+            ),
             uniprot_acc=p.get("uniprot_acc", ""),
             disorder_threshold=disorder_threshold,
             function_threshold=function_threshold,
@@ -537,12 +674,22 @@ def build_idr_layer_package(
         for role in s.get("predicted_roles", [])
         if "sequence_cue_agrees" in (role.get("evidence") or [])
     )
+    n_partner = sum(
+        1 for r in records
+        for s in r["idr_segments"]
+        if s.get("partner_context")
+    )
+
+    role_validation = (
+        evaluate_role_calls_against_annotations(records, proteins)
+        if validate_roles else {"enabled": False}
+    )
 
     report = {
         "layer_version": LAYER_VERSION,
         "thesis": (
             "Post-structure IDR biology layer: disorder map + functional roles + "
-            "sequence cues + structure-hallucination flags + conditional-disorder "
+            "sequence/partner cues + structure-hallucination flags + conditional-disorder "
             "boundary cues (+ optional Boltz variance proxy)."
         ),
         "non_goals": [
@@ -555,9 +702,11 @@ def build_idr_layer_package(
         "n_proteins_with_condensate_call": n_condensate,
         "n_role_hallucination_intersections": n_intersections,
         "n_roles_with_sequence_cue_support": n_cue_agree,
+        "n_segments_with_partner_context": n_partner,
         "mean_disorder_fraction": (
             float(np.mean([r["disorder_fraction"] for r in records])) if records else 0.0
         ),
+        "role_validation": role_validation,
         "top_priority_proteins": [
             {
                 "protein_id": r["protein_id"],
@@ -585,6 +734,7 @@ def build_proteome_idr_layer(
     plddt_by_id: Optional[dict[str, np.ndarray]] = None,
     function_probs_by_id: Optional[dict[str, np.ndarray]] = None,
     boltz_std_by_id: Optional[dict[str, np.ndarray]] = None,
+    partners_by_id: Optional[dict[str, list[str]]] = None,
     disorder_threshold: float = 0.5,
     function_threshold: float = 0.5,
     high_plddt_threshold: float = 70.0,
@@ -599,6 +749,7 @@ def build_proteome_idr_layer(
         plddt_by_id=plddt_by_id,
         function_probs_by_id=function_probs_by_id,
         boltz_std_by_id=boltz_std_by_id,
+        partners_by_id=partners_by_id,
         disorder_threshold=disorder_threshold,
         function_threshold=function_threshold,
         high_plddt_threshold=high_plddt_threshold,
@@ -615,6 +766,43 @@ def export_idr_layer_jsonl(records: list[dict], path: str) -> str:
     with open(path, "w") as f:
         for rec in records:
             f.write(json.dumps(rec) + "\n")
+    return path
+
+
+def export_idr_disorder_bedgraph(
+    proteins: list[dict],
+    disorder_probs_by_id: dict[str, np.ndarray],
+    path: str,
+    *,
+    track_name: str = "DisorderNet_disorder",
+) -> str:
+    """
+    BedGraph of continuous disorder probabilities (protein_id as chrom).
+
+    Efficient proteome viewer track alongside the discrete IDR BED.
+    """
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
+        f.write(
+            f'track type=bedGraph name="{track_name}" '
+            f'description="DisorderNet disorder probability"\n'
+        )
+        for p in proteins:
+            pid = p["id"]
+            if pid not in disorder_probs_by_id:
+                continue
+            chrom = p.get("uniprot_acc") or pid
+            probs = np.asarray(disorder_probs_by_id[pid], dtype=np.float32).ravel()
+            n = min(len(p["sequence"]), len(probs))
+            # RLE compress flat runs for smaller files (accuracy-identical)
+            i = 0
+            while i < n:
+                j = i + 1
+                v = float(probs[i])
+                while j < n and abs(float(probs[j]) - v) < 1e-4:
+                    j += 1
+                f.write(f"{chrom}\t{i}\t{j}\t{v:.4f}\n")
+                i = j
     return path
 
 
@@ -686,6 +874,15 @@ def print_idr_layer_report(report: dict) -> None:
     print(f"  condensate-role proteins={report.get('n_proteins_with_condensate_call', 0)}")
     print(f"  role∩hallucination={report.get('n_role_hallucination_intersections', 0)}")
     print(f"  roles with sequence-cue support={report.get('n_roles_with_sequence_cue_support', 0)}")
+    print(f"  partner-context segments={report.get('n_segments_with_partner_context', 0)}")
+    rv = report.get("role_validation") or {}
+    if rv.get("enabled"):
+        micro = rv.get("micro") or {}
+        print(
+            f"  role validation (vs DisProt): "
+            f"P={micro.get('precision')}  R={micro.get('recall')}  "
+            f"F1={micro.get('f1')}  n_prot={rv.get('n_proteins_with_annotations')}"
+        )
     top = report.get("top_priority_proteins") or []
     if top:
         print("  top priority:")
