@@ -164,14 +164,29 @@ def merge_plddt_for_training(
     plddt_af2: Optional[dict[str, np.ndarray]] = None,
     plddt_af3: Optional[dict[str, np.ndarray]] = None,
     prefer_af3: bool = True,
+    plddt_boltz: Optional[dict[str, np.ndarray]] = None,
+    prefer: Optional[str] = None,
 ) -> dict[str, np.ndarray]:
-    """Merge AF2/AF3 pLDDT caches for hallucination weighting (AF3 preferred)."""
+    """
+    Merge structure pLDDT caches for hallucination weighting / train channel.
+
+    prefer: 'boltz' | 'af3' | 'af2'. If None, uses 'boltz' when Boltz map is
+    non-empty, else AF3 when prefer_af3, else AF2.
+    """
     from colab.inference_fusion import build_combined_plddt_map
 
+    if prefer is None:
+        if plddt_boltz:
+            prefer = "boltz"
+        elif prefer_af3:
+            prefer = "af3"
+        else:
+            prefer = "af2"
     combined, _ = build_combined_plddt_map(
         plddt_af2 or {},
         plddt_af3,
-        prefer="af3" if prefer_af3 else "af2",
+        prefer=prefer,
+        plddt_boltz=plddt_boltz,
     )
     return combined
 

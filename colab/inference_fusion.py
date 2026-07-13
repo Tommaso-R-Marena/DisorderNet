@@ -23,39 +23,69 @@ def build_combined_plddt_map(
     plddt_af2: dict[str, np.ndarray],
     plddt_af3: Optional[dict[str, np.ndarray]] = None,
     prefer: str = "af3",
+    plddt_boltz: Optional[dict[str, np.ndarray]] = None,
 ) -> tuple[dict[str, np.ndarray], dict]:
     """
-    Merge AF2 and AF3 pLDDT maps.
+    Merge structure-model pLDDT maps.
 
-    prefer='af3': AF3 where available, else AF2.
-    prefer='af2': AF2 where available, else AF3.
+    prefer: 'boltz' | 'af3' | 'af2' — primary source when multiple cover a protein.
+    Fallback order after primary: boltz → af3 → af2 (skipping the primary).
     """
-    af2 = plddt_af2 or {}
-    af3 = plddt_af3 or {}
-    combined: dict[str, np.ndarray] = {}
-    stats = {"from_af2_only": 0, "from_af3_only": 0, "from_af3_preferred": 0, "from_af2_preferred": 0}
+    sources: dict[str, dict[str, np.ndarray]] = {
+        "af2": plddt_af2 or {},
+        "af3": plddt_af3 or {},
+        "boltz": plddt_boltz or {},
+    }
+    if prefer not in sources:
+        prefer = "boltz" if sources["boltz"] else ("af3" if sources["af3"] else "af2")
 
-    all_ids = set(af2) | set(af3)
+    fallback = [s for s in ("boltz", "af3", "af2") if s != prefer]
+    order = [prefer] + fallback
+
+    combined: dict[str, np.ndarray] = {}
+    stats = {
+        "from_af2": 0,
+        "from_af3": 0,
+        "from_boltz": 0,
+        "from_af2_only": 0,
+        "from_af3_only": 0,
+        "from_af3_preferred": 0,
+        "from_af2_preferred": 0,
+        "from_boltz_preferred": 0,
+        "prefer": prefer,
+        "order": order,
+    }
+
+    all_ids: set[str] = set()
+    for m in sources.values():
+        all_ids |= set(m)
+
     for pid in all_ids:
-        has2 = pid in af2
-        has3 = pid in af3
-        if prefer == "af3":
-            if has3:
-                combined[pid] = np.asarray(af3[pid], dtype=np.float32)
-                stats["from_af3_preferred" if has2 else "from_af3_only"] += 1
-            elif has2:
-                combined[pid] = np.asarray(af2[pid], dtype=np.float32)
-                stats["from_af2_only"] += 1
-        else:
-            if has2:
-                combined[pid] = np.asarray(af2[pid], dtype=np.float32)
-                stats["from_af2_preferred" if has3 else "from_af2_only"] += 1
-            elif has3:
-                combined[pid] = np.asarray(af3[pid], dtype=np.float32)
+        present = {s for s in sources if pid in sources[s]}
+        chosen = None
+        for src in order:
+            if pid in sources[src]:
+                combined[pid] = np.asarray(sources[src][pid], dtype=np.float32)
+                stats[f"from_{src}"] += 1
+                chosen = src
+                break
+        if chosen is None:
+            continue
+        others = present - {chosen}
+        if chosen == "af3":
+            if others:
+                stats["from_af3_preferred"] += 1
+            else:
                 stats["from_af3_only"] += 1
+        elif chosen == "af2":
+            if others:
+                stats["from_af2_preferred"] += 1
+            else:
+                stats["from_af2_only"] += 1
+        elif chosen == "boltz" and others:
+            stats["from_boltz_preferred"] += 1
 
     stats["n_proteins"] = len(combined)
-    stats["prefer"] = prefer
     return combined, stats
 
 
@@ -64,14 +94,17 @@ def apply_combined_plddt_fusion_to_cv(
     fold_results: list,
     plddt_af2: dict[str, np.ndarray],
     plddt_af3: Optional[dict[str, np.ndarray]] = None,
-    prefer: str = "af3",
+    prefer: str = "boltz",
     n_folds: int = 5,
     alpha: Optional[float] = None,
+    plddt_boltz: Optional[dict[str, np.ndarray]] = None,
 ) -> tuple[dict, list]:
     """
-    Fuse CV predictions using combined AF2/AF3 pLDDT (AF3 preferred by default).
+    Fuse CV predictions using merged structure pLDDT (Boltz preferred by default).
     """
-    combined, coverage_stats = build_combined_plddt_map(plddt_af2, plddt_af3, prefer=prefer)
+    combined, coverage_stats = build_combined_plddt_map(
+        plddt_af2, plddt_af3, prefer=prefer, plddt_boltz=plddt_boltz,
+    )
     report, fused_folds = apply_plddt_fusion_to_cv(
         proteins=proteins,
         fold_results=fold_results,

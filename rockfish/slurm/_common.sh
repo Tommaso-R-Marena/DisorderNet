@@ -72,6 +72,26 @@ if [[ -n "${AF3_SHARD_INDEX:-}" && -n "${AF3_SHARD_COUNT:-}" ]]; then
   EXTRA_ARGS+=(--af3-shard-index "$AF3_SHARD_INDEX" --af3-shard-count "$AF3_SHARD_COUNT")
 fi
 
+# Boltz-2 (default structure backend). Training jobs default to ingest-only;
+# use BOLTZ_MODE=auto or rockfish/slurm/boltz_batch.sbatch to run predictions
+# (pinned boltz auto-downloads weights on first use).
+: "${BOLTZ_MODE:=ingest}"
+: "${STRUCTURE_BACKEND:=boltz}"
+EXTRA_ARGS+=(--structure-backend "$STRUCTURE_BACKEND")
+EXTRA_ARGS+=(--boltz-mode "$BOLTZ_MODE")
+if [[ -n "${DISORDERNET_BOLTZ_ROOT:-}" ]]; then
+  EXTRA_ARGS+=(--boltz-root "$DISORDERNET_BOLTZ_ROOT")
+fi
+if [[ -n "${BOLTZ_MAX_PROTEINS:-}" ]]; then
+  EXTRA_ARGS+=(--boltz-max-proteins "$BOLTZ_MAX_PROTEINS")
+fi
+if [[ -n "${BOLTZ_SHARD_INDEX:-}" && -n "${BOLTZ_SHARD_COUNT:-}" ]]; then
+  EXTRA_ARGS+=(--boltz-shard-index "$BOLTZ_SHARD_INDEX" --boltz-shard-count "$BOLTZ_SHARD_COUNT")
+fi
+if [[ "${BOLTZ_USE_MSA_SERVER:-0}" == "1" ]]; then
+  EXTRA_ARGS+=(--boltz-use-msa-server)
+fi
+
 CHECKPOINT_ARG=(--checkpoint-dir "${CHECKPOINT_SUBDIR:-checkpoints}")
 
 python rockfish/run_disordernet.py "$STAGE" \
