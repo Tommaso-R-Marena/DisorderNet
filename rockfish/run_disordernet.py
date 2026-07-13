@@ -410,16 +410,30 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
     from colab.biological_utility import align_fold_predictions
     from colab.idr_biology_layer import (
         build_idr_layer_package,
+        export_idr_disorder_bedgraph,
         export_idr_layer_bed,
         export_idr_layer_jsonl,
         export_idr_triage_tsv,
         print_idr_layer_report,
         save_idr_layer_report,
     )
+    from colab.idr_layer_io import load_disorder_preds_from_dir, load_partner_map
 
     ckpt = cfg.checkpoint_dir
     aligned = align_fold_predictions(proteins, fold_results, n_folds=cfg.n_folds)
     disorder_by_id = {item["id"]: item["probs"] for item in aligned}
+
+    # Optional: overlay / replace with predict-dir scores (re-export path)
+    preds_dir = getattr(args, "idr_preds_dir", None)
+    if preds_dir:
+        loaded = load_disorder_preds_from_dir(preds_dir, proteins=proteins)
+        if loaded:
+            disorder_by_id.update(loaded)
+            print(f"  Loaded disorder scores from {preds_dir}: {len(loaded)} proteins")
+
+    partners_by_id = load_partner_map(getattr(args, "idr_partners", None))
+    if partners_by_id:
+        print(f"  Partner-context map: {len(partners_by_id)} proteins")
 
     # Function OOF shares the full-sequence pad-mask stream with disorder (same lengths).
     function_by_id: dict = {}
@@ -493,6 +507,7 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
         plddt_by_id=plddt_by_id,
         function_probs_by_id=function_by_id,
         boltz_std_by_id=boltz_std,
+        partners_by_id=partners_by_id,
         structure_source=structure_source,
         max_proteins_in_summary=getattr(args, "idr_layer_max_proteins", 100),
     )
@@ -502,9 +517,12 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
     export_idr_layer_jsonl(full_records, os.path.join(ckpt, "idr_biology_layer.jsonl"))
     export_idr_triage_tsv(full_records, os.path.join(ckpt, "idr_biology_layer_triage.tsv"))
     export_idr_layer_bed(full_records, os.path.join(ckpt, "idr_biology_layer.bed"))
+    export_idr_disorder_bedgraph(
+        proteins, disorder_by_id, os.path.join(ckpt, "idr_biology_layer_disorder.bedgraph"),
+    )
     print(
         f"IDR layer exports: {len(full_records)} proteins → "
-        f"{ckpt}/idr_biology_layer.{{jsonl,triage.tsv,bed}}"
+        f"{ckpt}/idr_biology_layer.{{jsonl,triage.tsv,bed,disorder.bedgraph}}"
     )
     return report
 
@@ -777,17 +795,22 @@ def stage_predict(args, cfg, model, converter) -> dict:
     if getattr(args, "export_idr_layer", False):
         from colab.idr_biology_layer import (
             build_idr_layer_package,
+            export_idr_disorder_bedgraph,
             export_idr_layer_bed,
             export_idr_layer_jsonl,
             export_idr_triage_tsv,
             print_idr_layer_report,
             save_idr_layer_report,
         )
+        from colab.idr_layer_io import load_partner_map
+
+        partners_by_id = load_partner_map(getattr(args, "idr_partners", None))
         package = build_idr_layer_package(
             proteins, preds,
             plddt_by_id=plddt_by_id or {},
             function_probs_by_id=function_by_id,
             boltz_std_by_id=boltz_std,
+            partners_by_id=partners_by_id,
             structure_source=(
                 "boltz2"
                 if boltz_std or (plddt_by_id and getattr(args, "boltz_mode", "off") != "off")
@@ -800,6 +823,9 @@ def stage_predict(args, cfg, model, converter) -> dict:
         export_idr_layer_jsonl(full, os.path.join(out_dir, "idr_biology_layer.jsonl"))
         export_idr_triage_tsv(full, os.path.join(out_dir, "idr_biology_layer_triage.tsv"))
         export_idr_layer_bed(full, os.path.join(out_dir, "idr_biology_layer.bed"))
+        export_idr_disorder_bedgraph(
+            proteins, preds, os.path.join(out_dir, "idr_biology_layer_disorder.bedgraph"),
+        )
         manifest["idr_layer_proteins"] = len(full)
     return manifest
 
@@ -1070,6 +1096,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--export-idr-layer", action="store_true",
         help="predict stage: also write IDR biology layer JSON/JSONL/BED/triage",
+    )
+    p.add_argument(
+        "--idr-preds-dir", default=None,
+        help="idr-layer: optional predict-dir of .tsv/.caid scores to overlay",
+    )
+    p.add_argument(
+        "--idr-partners", default=None,
+        help="Optional partner map JSON/TSV for conditioned binding cues",
     )
     p.add_argument("--caid3-reference", default=None, help="Path to CAID3 reference FASTA")
 

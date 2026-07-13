@@ -25,10 +25,17 @@ from colab.idr_biology_layer import (  # noqa: E402
     build_proteome_idr_layer,
     compute_idr_sequence_cues,
     detect_boundary_transition_regions,
+    evaluate_role_calls_against_annotations,
+    export_idr_disorder_bedgraph,
     export_idr_layer_bed,
     export_idr_layer_jsonl,
     export_idr_triage_tsv,
     score_protein_triage,
+)
+from colab.idr_layer_io import (  # noqa: E402
+    load_disorder_preds_from_dir,
+    load_partner_map,
+    partner_binding_support,
 )
 from rockfish.run_disordernet import build_parser  # noqa: E402
 
@@ -61,7 +68,7 @@ class TestIdrBiologyLayer:
             boltz_plddt_std=np.linspace(1, 20, 40).astype(np.float32),
         )
         assert rec["layer_version"] == LAYER_VERSION
-        assert LAYER_VERSION.startswith("1.1")
+        assert LAYER_VERSION.startswith("1.2")
         assert rec["n_idr_segments"] >= 1
         roles = {r["group"] for s in rec["idr_segments"] for r in s["predicted_roles"]}
         assert "protein binding" in roles
@@ -186,6 +193,48 @@ class TestIdrBiologyLayer:
         })
         assert high["score"] > low["score"]
 
+    def test_partner_context_and_role_validation(self, tmp_path):
+        # Charged IDR so complementary-charge partner cue clears the ≥0.4 bar
+        proteins = [{
+            "id": "p1",
+            "sequence": ("K" * 10) + ("A" * 10) + ("E" * 10),
+            "length": 30,
+            "uniprot_acc": "U1",
+            "functional_regions": [
+                {"start": 1, "end": 10, "term_norm": "protein binding"},
+            ],
+        }]
+        preds = {"p1": np.array([0.9] * 10 + [0.1] * 20, dtype=np.float32)}
+        fn = np.zeros((30, 5), dtype=np.float32)
+        fn[:10, 0] = 0.9
+        package = build_idr_layer_package(
+            proteins, preds,
+            function_probs_by_id={"p1": fn},
+            partners_by_id={"p1": ["D" * 12 + "I" * 8]},
+        )
+        rec = package["records"][0]
+        assert any(s.get("partner_context") for s in rec["idr_segments"])
+        roles = rec["idr_segments"][0]["predicted_roles"]
+        assert roles[0].get("conditioned_prob") is not None
+        assert "partner_context_supports_binding" in (roles[0].get("evidence") or [])
+        val = package["report"]["role_validation"]
+        assert val["enabled"] is True
+        assert val["micro"]["f1"] == 1.0
+        bg = export_idr_disorder_bedgraph(proteins, preds, str(tmp_path / "dis.bedgraph"))
+        assert "U1" in Path(bg).read_text()
+
+    def test_load_preds_and_partners(self, tmp_path):
+        proteins = [{"id": "DP1", "sequence": "ACDE", "uniprot_acc": "P1", "length": 4}]
+        (tmp_path / "DP1.tsv").write_text(
+            "position\tresidue\tscore\n1\tA\t0.1\n2\tC\t0.9\n3\tD\t0.8\n4\tE\t0.2\n"
+        )
+        loaded = load_disorder_preds_from_dir(str(tmp_path), proteins=proteins)
+        assert "DP1" in loaded and abs(float(loaded["DP1"][1]) - 0.9) < 1e-5
+        partner_json = tmp_path / "partners.json"
+        partner_json.write_text(json.dumps({"DP1": ["KKKKEEEE"]}))
+        assert load_partner_map(str(partner_json))["DP1"] == ["KKKKEEEE"]
+        assert partner_binding_support("DDDDAAAA", ["KKKKIIII"])["support"] > 0
+
 
 class TestBoltzVariance:
     def test_sample_stack_and_std(self, tmp_path):
@@ -268,6 +317,10 @@ class TestIdrLayerCLI:
             "predict", "--fasta", "q.fa",
             "--export-idr-layer",
             "--boltz-diffusion-samples", "7",
+            "--idr-partners", "partners.json",
+            "--idr-preds-dir", "preds",
         ])
         assert args.export_idr_layer is True
         assert args.boltz_diffusion_samples == 7
+        assert args.idr_partners == "partners.json"
+        assert args.idr_preds_dir == "preds"
