@@ -34,7 +34,7 @@ IDR_ROLE_GROUPS: tuple[str, ...] = (
     "lipid / small molecule binding",
 )
 
-LAYER_VERSION = "1.3.0"
+LAYER_VERSION = "1.4.0"
 
 # Cheap sequence cues that often co-occur with IDR biology (AF-blind)
 _MOTIF_PATTERNS: tuple[tuple[str, str], ...] = (
@@ -681,13 +681,22 @@ def build_idr_layer_package(
     include_sequence_cues: bool = True,
     validate_roles: bool = True,
     max_workers: int = 1,
+    cache_dir: Optional[str] = None,
 ) -> dict:
     """
     Single-pass package: full records + summary report + triage ranking.
 
     ``max_workers>1`` threads protein builds (I/O-light; accuracy-identical).
+    Optional ``cache_dir`` stores per-protein records keyed by content hash.
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from colab.idr_layer_ops import (
+        layer_record_cache_key,
+        load_cached_layer_record,
+        proteome_landscape_summary,
+        save_cached_layer_record,
+    )
 
     plddt_by_id = plddt_by_id or {}
     function_probs_by_id = function_probs_by_id or {}
@@ -696,11 +705,33 @@ def build_idr_layer_package(
     ligands_by_id = ligands_by_id or {}
 
     work = [p for p in proteins if p["id"] in disorder_probs_by_id]
+    cache_hits = 0
 
-    def _one(p: dict) -> dict:
+    def _one(p: dict) -> tuple[dict, bool]:
         pid = p["id"]
+        partners = partners_by_id.get(pid) or partners_by_id.get(p.get("uniprot_acc") or "")
+        ligands = ligands_by_id.get(pid) or ligands_by_id.get(p.get("uniprot_acc") or "")
+        key = None
+        if cache_dir:
+            key = layer_record_cache_key(
+                protein_id=pid,
+                sequence=p["sequence"],
+                layer_version=LAYER_VERSION,
+                disorder_threshold=disorder_threshold,
+                function_threshold=function_threshold,
+                high_plddt_threshold=high_plddt_threshold,
+                has_function=pid in function_probs_by_id,
+                has_plddt=pid in plddt_by_id,
+                has_variance=pid in boltz_std_by_id,
+                has_partners=bool(partners),
+                has_ligands=bool(ligands),
+            )
+            cached = load_cached_layer_record(cache_dir, key)
+            if cached is not None:
+                return cached, True
+
         tmask = p.get("transition_mask")
-        return build_protein_idr_layer(
+        rec = build_protein_idr_layer(
             protein_id=pid,
             sequence=p["sequence"],
             disorder_probs=disorder_probs_by_id[pid],
@@ -708,12 +739,8 @@ def build_idr_layer_package(
             function_probs=function_probs_by_id.get(pid),
             boltz_plddt_std=boltz_std_by_id.get(pid),
             transition_mask=np.asarray(tmask, dtype=np.float32) if tmask is not None else None,
-            partner_sequences=partners_by_id.get(pid) or partners_by_id.get(
-                p.get("uniprot_acc") or "",
-            ),
-            ligands=ligands_by_id.get(pid) or ligands_by_id.get(
-                p.get("uniprot_acc") or "",
-            ),
+            partner_sequences=partners,
+            ligands=ligands,
             uniprot_acc=p.get("uniprot_acc", ""),
             disorder_threshold=disorder_threshold,
             function_threshold=function_threshold,
@@ -721,19 +748,27 @@ def build_idr_layer_package(
             structure_source=structure_source,
             include_sequence_cues=include_sequence_cues,
         )
+        if cache_dir and key:
+            save_cached_layer_record(cache_dir, key, rec)
+        return rec, False
 
     records: list[dict] = []
     workers = max(1, min(int(max_workers), len(work) or 1))
     if workers == 1:
-        records = [_one(p) for p in work]
+        for p in work:
+            rec, hit = _one(p)
+            records.append(rec)
+            if hit:
+                cache_hits += 1
     else:
         with ThreadPoolExecutor(max_workers=workers) as ex:
             futs = {ex.submit(_one, p): p["id"] for p in work}
             by_id = {}
             for fut in as_completed(futs):
-                rec = fut.result()
+                rec, hit = fut.result()
                 by_id[rec["protein_id"]] = rec
-            # Stable triage-ready list in input order first, then sort
+                if hit:
+                    cache_hits += 1
             records = [by_id[p["id"]] for p in work if p["id"] in by_id]
 
     records.sort(key=lambda r: -float((r.get("triage") or {}).get("score", 0.0)))
@@ -769,6 +804,7 @@ def build_idr_layer_package(
         if validate_roles else {"enabled": False}
     )
     structure_distrust = summarize_structure_distrust(records)
+    landscape = proteome_landscape_summary(records)
 
     report = {
         "layer_version": LAYER_VERSION,
@@ -794,6 +830,13 @@ def build_idr_layer_package(
         ),
         "role_validation": role_validation,
         "structure_distrust": structure_distrust,
+        "landscape": landscape,
+        "cache": {
+            "enabled": bool(cache_dir),
+            "dir": cache_dir,
+            "hits": cache_hits,
+            "n_proteins": len(records),
+        },
         "thresholds": {
             "disorder_threshold": disorder_threshold,
             "function_threshold": function_threshold,
@@ -835,6 +878,7 @@ def build_proteome_idr_layer(
     max_proteins_in_summary: int = 100,
     include_sequence_cues: bool = True,
     max_workers: int = 1,
+    cache_dir: Optional[str] = None,
 ) -> dict:
     """Proteome-scale IDR biology layer + summary stats (builds records once)."""
     package = build_idr_layer_package(
@@ -852,6 +896,7 @@ def build_proteome_idr_layer(
         max_proteins_in_summary=max_proteins_in_summary,
         include_sequence_cues=include_sequence_cues,
         max_workers=max_workers,
+        cache_dir=cache_dir,
     )
     return package["report"]
 
@@ -1007,12 +1052,21 @@ def export_idr_layer_bundle(
     proteins: list[dict],
     disorder_probs_by_id: dict[str, np.ndarray],
     gzip_jsonl: bool = False,
+    export_caid: bool = True,
 ) -> dict[str, str]:
     """Write the standard IDR layer artifact set; returns path map."""
+    from colab.idr_layer_ops import (
+        export_disorder_caid_bundle,
+        write_idr_layer_markdown,
+    )
+
     os.makedirs(out_dir, exist_ok=True)
     paths = {
         "report": save_idr_layer_report(
             report, os.path.join(out_dir, "idr_biology_layer_report.json"),
+        ),
+        "markdown": write_idr_layer_markdown(
+            report, os.path.join(out_dir, "idr_biology_layer_report.md"),
         ),
         "jsonl": export_idr_layer_jsonl(
             records, os.path.join(out_dir, "idr_biology_layer.jsonl"), gzip=gzip_jsonl,
@@ -1031,6 +1085,14 @@ def export_idr_layer_bundle(
             records, os.path.join(out_dir, "idr_biology_layer_roles.tsv"),
         ),
     }
+    if export_caid:
+        caid_dir = os.path.join(out_dir, "idr_biology_layer_caid")
+        caid_paths = export_disorder_caid_bundle(
+            proteins, disorder_probs_by_id, caid_dir,
+            threshold=float((report.get("thresholds") or {}).get("disorder_threshold", 0.5)),
+        )
+        paths["caid_dir"] = caid_dir
+        paths["caid_n_files"] = str(len(caid_paths))
     return paths
 
 
@@ -1047,12 +1109,27 @@ def print_idr_layer_report(report: dict) -> None:
     print(f"  roles with sequence-cue support={report.get('n_roles_with_sequence_cue_support', 0)}")
     print(f"  partner-context segments={report.get('n_segments_with_partner_context', 0)}")
     print(f"  ligand-context segments={report.get('n_segments_with_ligand_context', 0)}")
+    land = report.get("landscape") or {}
+    if land and not land.get("insufficient_data"):
+        print(
+            f"  landscape: idr_rich={land.get('disorder_fraction_bins', {}).get('idr_rich_0.4_0.7', 0)}  "
+            f"mostly_disordered={land.get('disorder_fraction_bins', {}).get('mostly_disordered_>=0.7', 0)}"
+        )
     sd = report.get("structure_distrust") or {}
     if sd:
         print(
             f"  structure distrust: halluc_prot={sd.get('n_proteins_with_hallucination', 0)}  "
             f"rescue_rate={sd.get('overall_rescue_rate', 0)}"
         )
+    tune = report.get("function_threshold_tuning") or {}
+    if tune.get("enabled"):
+        print(
+            f"  OOF-tuned function threshold={tune.get('threshold')}  "
+            f"score={tune.get('best_score')}"
+        )
+    cache = report.get("cache") or {}
+    if cache.get("enabled"):
+        print(f"  cache hits={cache.get('hits')} / {cache.get('n_proteins')}")
     rv = report.get("role_validation") or {}
     if rv.get("enabled"):
         micro = rv.get("micro") or {}

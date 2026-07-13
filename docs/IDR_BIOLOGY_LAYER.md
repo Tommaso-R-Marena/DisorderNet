@@ -25,27 +25,22 @@ This is the path toward becoming a **default post-structure biology layer** — 
 | Piece | Location |
 |-------|----------|
 | Layer compose + proteome export | `colab/idr_biology_layer.py` |
-| Pred reload + partner / ligand I/O | `colab/idr_layer_io.py` |
+| Pred / partner / ligand I/O | `colab/idr_layer_io.py` |
+| Cache, landscape, markdown, compare | `colab/idr_layer_ops.py` |
 | Disorder → function head / labels | `colab/function_predict.py` + `ultra_fun` |
 | Boltz pLDDT + multi-sample variance | `colab/boltz_plddt.py` |
-| Hallucination screening | `colab/novel_use_cases.py` / `af_hallucination.py` |
 | Rockfish stage | `python rockfish/run_disordernet.py idr-layer` |
 
 ## Phased roadmap
 
-### Phase A–B (shipped)
-- Unified JSON / JSONL / BED / bedGraph / triage / role-track exports
-- Boltz variance proxy + cached / overlapped loads
-- Full-sequence function OOF + DisProt role validation
-- Structure-distrust aggregate in the layer report
-- Function OOF metrics embedded when available
-
-### Phase C (in progress) — conditional IDR state (still not MD)
-- Sequence cues; partner cues; **ligand cues** (`--idr-ligands`)
-- Role ∩ hallucination intersections; triage ranking
-- Boundary / folding-upon-binding cues
-- Threshold + worker CLI knobs; optional gzip JSONL
-- Multi-condition score stacking (partner + ligand) with transparent `conditioned_prob`
+### Phase A–C (shipped through v1.4)
+- Unified export bundle: JSON, Markdown, JSONL[.gz], triage, BED, bedGraph, roles TSV, CAID dir
+- Partner / ligand / sequence cues with transparent `conditioned_prob`
+- Role validation vs DisProt; structure-distrust aggregate; proteome landscape
+- OOF-tuned function threshold (`--idr-auto-threshold`)
+- Per-protein record cache (`--idr-cache` / `--idr-cache-dir`)
+- JSONL compare (`--idr-compare`) for before/after QA
+- Threaded proteome builds + threshold / worker CLI knobs
 
 ### Phase D — optional biophysics collaborations
 - Small-system MD / SAXS / NMR benchmarks validating variance proxy
@@ -56,13 +51,15 @@ This is the path toward becoming a **default post-structure biology layer** — 
 python rockfish/run_disordernet.py idr-layer \
   --structure-backend boltz --boltz-mode ingest \
   --idr-partners partners.json --idr-ligands ligands.json \
-  --idr-workers 8
+  --idr-auto-threshold --idr-cache --idr-workers 8
 
-python rockfish/run_disordernet.py predict --fasta query.fa --export-idr-layer \
-  --idr-gzip
+# Diff against a previous export:
+python rockfish/run_disordernet.py idr-layer \
+  --idr-compare checkpoints_prev/idr_biology_layer.jsonl.gz
 ```
 
 Outputs:
-- `idr_biology_layer_report.json` — summary, triage, role validation, structure distrust
-- `idr_biology_layer.jsonl[.gz]` — full per-protein records
-- `idr_biology_layer_triage.tsv` / `.bed` / `_disorder.bedgraph` / `_roles.tsv`
+- `idr_biology_layer_report.json` / `.md`
+- `idr_biology_layer.jsonl[.gz]`, `_triage.tsv`, `.bed`, `_disorder.bedgraph`, `_roles.tsv`
+- `idr_biology_layer_caid/` — CAID-format disorder predictions
+- `idr_biology_layer_compare.json` — when `--idr-compare` is set

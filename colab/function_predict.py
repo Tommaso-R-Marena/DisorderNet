@@ -341,6 +341,53 @@ def compute_function_metrics(
     }
 
 
+def tune_function_threshold(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    *,
+    candidates: tuple[float, ...] = (0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7),
+    metric: str = "micro_f1",
+) -> dict:
+    """
+    Sweep decision thresholds on OOF function labels/probs; pick best micro-F1.
+
+    Accuracy-preserving: uses held-out labels only; does not alter trained weights.
+    """
+    y_true = np.asarray(y_true, dtype=np.float32)
+    y_prob = np.asarray(y_prob, dtype=np.float32)
+    if len(y_true) == 0 or y_true.sum() < 5:
+        return {
+            "enabled": False,
+            "threshold": 0.5,
+            "reason": "insufficient OOF function positives",
+        }
+
+    rows: list[dict] = []
+    best_t = 0.5
+    best_score = -1.0
+    for t in candidates:
+        m = compute_function_metrics(y_true, y_prob, threshold=float(t))
+        if metric == "micro_f1":
+            score = float(m["micro"].get("f1") or 0.0)
+        elif metric == "macro_f1":
+            score = float(m.get("macro_f1") or 0.0)
+        else:
+            score = float(m["micro"].get("f1") or 0.0)
+        rows.append({"threshold": float(t), "micro_f1": m["micro"].get("f1"), "score": score})
+        if score > best_score:
+            best_score = score
+            best_t = float(t)
+
+    return {
+        "enabled": True,
+        "threshold": best_t,
+        "best_score": round(best_score, 4),
+        "metric": metric,
+        "sweep": rows,
+        "note": "OOF-tuned decision threshold for IDR role calls (logits unchanged)",
+    }
+
+
 def align_function_oof(
     proteins: list,
     fold_results: list,
