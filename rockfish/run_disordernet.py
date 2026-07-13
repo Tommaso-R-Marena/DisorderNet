@@ -409,9 +409,10 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
     """
     from colab.biological_utility import align_fold_predictions
     from colab.idr_biology_layer import (
-        build_protein_idr_layer,
-        build_proteome_idr_layer,
+        build_idr_layer_package,
+        export_idr_layer_bed,
         export_idr_layer_jsonl,
+        export_idr_triage_tsv,
         print_idr_layer_report,
         save_idr_layer_report,
     )
@@ -429,7 +430,6 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
         )
         total_L = sum(len(item["probs"]) for item in aligned)
         if len(y_prob) == total_L and total_L > 0:
-            # Prefer align order (matches disorder OOF concatenation).
             offset = 0
             for item in aligned:
                 L = len(item["probs"])
@@ -487,7 +487,7 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
         except Exception as exc:
             print(f"  AF2 pLDDT fallback skipped: {exc}")
 
-    report = build_proteome_idr_layer(
+    package = build_idr_layer_package(
         proteins,
         disorder_by_id,
         plddt_by_id=plddt_by_id,
@@ -496,26 +496,16 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
         structure_source=structure_source,
         max_proteins_in_summary=getattr(args, "idr_layer_max_proteins", 100),
     )
+    report, full_records = package["report"], package["records"]
     print_idr_layer_report(report)
     save_idr_layer_report(report, os.path.join(ckpt, "idr_biology_layer_report.json"))
-
-    full_records = []
-    for p in proteins:
-        pid = p["id"]
-        if pid not in disorder_by_id:
-            continue
-        full_records.append(build_protein_idr_layer(
-            protein_id=pid,
-            sequence=p["sequence"],
-            disorder_probs=disorder_by_id[pid],
-            plddt=plddt_by_id.get(pid),
-            function_probs=function_by_id.get(pid),
-            boltz_plddt_std=boltz_std.get(pid),
-            uniprot_acc=p.get("uniprot_acc", ""),
-            structure_source=structure_source,
-        ))
     export_idr_layer_jsonl(full_records, os.path.join(ckpt, "idr_biology_layer.jsonl"))
-    print(f"IDR layer JSONL: {len(full_records)} proteins → {ckpt}/idr_biology_layer.jsonl")
+    export_idr_triage_tsv(full_records, os.path.join(ckpt, "idr_biology_layer_triage.tsv"))
+    export_idr_layer_bed(full_records, os.path.join(ckpt, "idr_biology_layer.bed"))
+    print(
+        f"IDR layer exports: {len(full_records)} proteins → "
+        f"{ckpt}/idr_biology_layer.{{jsonl,triage.tsv,bed}}"
+    )
     return report
 
 
@@ -786,34 +776,30 @@ def stage_predict(args, cfg, model, converter) -> dict:
 
     if getattr(args, "export_idr_layer", False):
         from colab.idr_biology_layer import (
-            build_proteome_idr_layer,
+            build_idr_layer_package,
+            export_idr_layer_bed,
             export_idr_layer_jsonl,
-            build_protein_idr_layer,
+            export_idr_triage_tsv,
             print_idr_layer_report,
             save_idr_layer_report,
         )
-        report = build_proteome_idr_layer(
+        package = build_idr_layer_package(
             proteins, preds,
             plddt_by_id=plddt_by_id or {},
             function_probs_by_id=function_by_id,
             boltz_std_by_id=boltz_std,
-            structure_source="boltz2" if boltz_std or (plddt_by_id and getattr(args, "boltz_mode", "off") != "off") else "af2",
+            structure_source=(
+                "boltz2"
+                if boltz_std or (plddt_by_id and getattr(args, "boltz_mode", "off") != "off")
+                else "af2"
+            ),
         )
+        report, full = package["report"], package["records"]
         print_idr_layer_report(report)
         save_idr_layer_report(report, os.path.join(out_dir, "idr_biology_layer_report.json"))
-        full = [
-            build_protein_idr_layer(
-                protein_id=p["id"],
-                sequence=p["sequence"],
-                disorder_probs=preds[p["id"]],
-                plddt=(plddt_by_id or {}).get(p["id"]),
-                function_probs=function_by_id.get(p["id"]),
-                boltz_plddt_std=boltz_std.get(p["id"]),
-                uniprot_acc=p.get("uniprot_acc", ""),
-            )
-            for p in proteins if p["id"] in preds
-        ]
         export_idr_layer_jsonl(full, os.path.join(out_dir, "idr_biology_layer.jsonl"))
+        export_idr_triage_tsv(full, os.path.join(out_dir, "idr_biology_layer_triage.tsv"))
+        export_idr_layer_bed(full, os.path.join(out_dir, "idr_biology_layer.bed"))
         manifest["idr_layer_proteins"] = len(full)
     return manifest
 
@@ -1001,7 +987,8 @@ def run_pipeline(args) -> int:
         fold_results, cv_summary = stage_stack(args, cfg, proteins, fold_results, cv_summary)
         stage_postprocess(args, cfg, proteins, fold_results, model, converter)
         stage_eval(args, cfg, proteins, fold_results, cv_summary)
-        if getattr(args, "run_idr_layer", False):
+        # Default product export: IDR biology layer (disable with --no-idr-layer)
+        if getattr(args, "run_idr_layer", True) and not getattr(args, "no_idr_layer", False):
             stage_idr_layer(args, cfg, proteins, fold_results)
         if args.run_caid3_eval:
             stage_caid3_eval(args, cfg, proteins, fold_results, model, converter)
@@ -1069,8 +1056,12 @@ def build_parser() -> argparse.ArgumentParser:
     # Eval / CAID3
     p.add_argument("--run-caid3-eval", action="store_true", help="pipeline: also run CAID3 benchmark")
     p.add_argument(
-        "--run-idr-layer", action="store_true",
-        help="pipeline: also export IDR biology layer (post-structure product)",
+        "--run-idr-layer", action="store_true", default=True,
+        help="pipeline: export IDR biology layer (default on)",
+    )
+    p.add_argument(
+        "--no-idr-layer", action="store_true",
+        help="pipeline: skip IDR biology layer export",
     )
     p.add_argument(
         "--idr-layer-max-proteins", type=int, default=100,
@@ -1078,7 +1069,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--export-idr-layer", action="store_true",
-        help="predict stage: also write IDR biology layer JSON/JSONL",
+        help="predict stage: also write IDR biology layer JSON/JSONL/BED/triage",
     )
     p.add_argument("--caid3-reference", default=None, help="Path to CAID3 reference FASTA")
 
