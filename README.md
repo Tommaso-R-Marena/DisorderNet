@@ -63,6 +63,21 @@ AlphaFold 3's diffusion architecture hallucinates structure in genuinely disorde
 | v5 | 0.823 | 214 | + ESM-2 8M embeddings (PCA-32) |
 | v6 | 0.831 | 406 | + PCA-48, ESM variance/context features |
 | GPU (Colab) | 0.817 (0.831 AF-fusion subset) | 1280+phys | ESM-2 650M + LoRA + segment-aware ES + v6 ensemble |
+| GPU SOTA track (`sota` profile) | target ≥0.88–0.90 | — | Transformer head, Dice+EMA, 3-way stack, compact ckpt |
+
+### SOTA track (`QUALITY_PROFILE = "sota"`)
+
+Designed to close the gap to ESMDisPred (0.895 CAID3 reference):
+
+| Component | Detail |
+|-----------|--------|
+| LoRA | rank 64, last 16 layers, 8-layer ESM fusion |
+| Head | Multi-scale CNN + 2-layer Transformer encoder |
+| Loss | Focal + soft Dice (region-aware) + label smoothing |
+| Training | EMA weights for eval/checkpoint selection |
+| Checkpoints | **Compact** (~50–150 MB) — trainable weights only |
+| Post-CV | Cell 7c: GPU + v6 + physics prior 3-way stack |
+
 
 ## Architecture
 
@@ -181,7 +196,10 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/DisorderNet_Colab_Pro.ipynb` | Full GPU notebook (ESM-2 650M + LoRA) |
 | `colab/disordernet_gpu.py` | Colab training module (data, model, CV loop) |
 | `colab/cv_splits.py` | Shared deterministic GroupKFold splits + fingerprints |
-| `colab/run_manifest.py` | Reproducibility manifest + Drive report mirroring |
+| `colab/sota_heads.py` | SOTA CNN+Transformer prediction head |
+| `colab/sota_losses.py` | Focal + Dice composite training loss |
+| `colab/sota_ensemble.py` | Three-way OOF stack (GPU + v6 + physics prior) |
+| `colab/compact_checkpoint.py` | ~150 MB fold checkpoints (LoRA+head only) |
 | `colab/colab_figures.py` | Publication figure generator for GPU runs |
 | `colab/biological_utility.py` | Phase 1 biological utility (segments, functional enrichment) |
 | `colab/af_plddt.py` | AlphaFold DB pLDDT fetch + alignment |
