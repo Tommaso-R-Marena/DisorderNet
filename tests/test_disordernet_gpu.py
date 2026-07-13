@@ -153,6 +153,20 @@ class TestDisorderNetGPU:
         assert model.training
         assert not model.esm.training
 
+    def test_function_head_multitask(self, mock_esm):
+        cfg = TrainConfig(
+            lora_layers=2, lora_rank=4, use_physico_features=False, use_function_head=True,
+        )
+        model = DisorderNetGPU(mock_esm, cfg, verbose=False)
+        assert model.function_head is not None
+        tokens = torch.randint(0, 20, (2, 32))
+        mask = torch.ones(2, 30, dtype=torch.bool)
+        out = model(tokens, pad_mask=mask, return_function=True)
+        assert isinstance(out, tuple)
+        dis, fn = out
+        assert dis.shape == (2, 30)
+        assert fn.shape == (2, 30, 5)
+
 
 class TestDataset:
     def test_collate_padding(self):

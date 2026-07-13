@@ -54,6 +54,14 @@ class TestRockfishCLI:
         wd = _resolve_workdir(None)
         assert os.path.isdir(wd)
 
+    def test_parser_function_head(self):
+        args = build_parser().parse_args(
+            ["cv", "--profile", "ultra_fun", "--function-head"],
+        )
+        assert args.profile == "ultra_fun"
+        assert args.function_head is True
+        assert args.no_function_head is False
+
     def test_pipeline_stage(self):
         args = build_parser().parse_args(["pipeline", "--run-caid3-eval"])
         assert args.stage == "pipeline"

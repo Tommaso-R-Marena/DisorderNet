@@ -4,6 +4,7 @@ Novel DisorderNet use cases — differentiation vs sequence-only SOTA.
 1. AF hallucination screening (structure overconfidence in IDRs)
 2. Proteome disorder landscape summaries
 3. AF pipeline rescue manifest (which regions to trust / re-predict)
+4. Disorder → function: annotate IDR functional roles (binding, PTM, condensate)
 """
 
 from __future__ import annotations
@@ -150,6 +151,47 @@ def build_af_rescue_manifest(
         "use_case": "AlphaFold hallucination rescue — unique vs ESMDisPred",
     }
 
+
+
+
+def annotate_idr_functions(
+    proteins: list[dict],
+    disorder_probs_by_id: dict[str, np.ndarray],
+    function_probs_by_id: dict[str, np.ndarray],
+    disorder_threshold: float = 0.5,
+    function_threshold: float = 0.5,
+) -> dict:
+    """
+    Proteome-scale Disorder → function annotation (novel vs Metapredict / ESMDisPred).
+
+    For each protein, report predicted functional roles of IDR segments.
+    """
+    from colab.function_predict import predict_protein_functions
+
+    rows: list[dict] = []
+    n_roles = 0
+    for p in proteins:
+        pid = p["id"]
+        if pid not in disorder_probs_by_id or pid not in function_probs_by_id:
+            continue
+        ann = predict_protein_functions(
+            disorder_probs_by_id[pid],
+            function_probs_by_id[pid],
+            p["sequence"],
+            protein_id=pid,
+            disorder_threshold=disorder_threshold,
+            function_threshold=function_threshold,
+        )
+        n_roles += sum(len(r["predicted_roles"]) for r in ann["idr_function_regions"])
+        rows.append(ann)
+
+    return {
+        "use_case": "Disorder → function annotation of predicted IDRs",
+        "n_proteins": len(rows),
+        "n_role_assignments": n_roles,
+        "proteins": rows[:50],  # cap for JSON size; full export via per-protein files
+        "note": "Requires checkpoints trained with use_function_head / ultra_fun",
+    }
 
 def save_novel_use_case_report(report: dict, path: str) -> str:
     with open(path, "w") as f:
