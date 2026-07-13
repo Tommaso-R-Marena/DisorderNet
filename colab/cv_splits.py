@@ -54,6 +54,10 @@ _FINGERPRINT_KEYS = (
     "dice_loss_weight",
     "use_ema",
     "compact_checkpoints",
+    "use_rdrop",
+    "use_tversky_loss",
+    "use_swa",
+    "use_v6_distill",
 )
 
 

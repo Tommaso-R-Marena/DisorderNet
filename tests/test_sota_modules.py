@@ -48,3 +48,7 @@ class TestSOTAProfile:
         assert cfg.head_type == "sota"
         assert cfg.use_dice_loss is True
         assert cfg.compact_checkpoints is True
+        assert cfg.use_rdrop is True
+        assert cfg.use_tversky_loss is True
+        assert cfg.use_swa is True
+        assert cfg.use_v6_distill is True
