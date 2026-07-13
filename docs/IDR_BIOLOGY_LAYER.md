@@ -5,7 +5,7 @@
 After Boltz / AlphaFold produce a structure, **DisorderNet is the layer that answers what those models cannot by design**:
 
 1. **Where is the chain disordered?** (CAID-credible residue map)
-2. **What might those IDRs do?** (binding / PTM / condensate / lipid roles + sequence/partner cues)
+2. **What might those IDRs do?** (roles + sequence / partner / ligand cues)
 3. **Where is the structure model overconfident?** (hallucination rescue)
 4. **Optional cheap ensemble proxy:** Boltz multi-sample pLDDT variance on IDRs
 5. **Conditional-disorder cues:** order↔disorder boundaries / folding-upon-binding *flags* (not MD)
@@ -25,7 +25,7 @@ This is the path toward becoming a **default post-structure biology layer** — 
 | Piece | Location |
 |-------|----------|
 | Layer compose + proteome export | `colab/idr_biology_layer.py` |
-| Pred reload + partner I/O | `colab/idr_layer_io.py` |
+| Pred reload + partner / ligand I/O | `colab/idr_layer_io.py` |
 | Disorder → function head / labels | `colab/function_predict.py` + `ultra_fun` |
 | Boltz pLDDT + multi-sample variance | `colab/boltz_plddt.py` |
 | Hallucination screening | `colab/novel_use_cases.py` / `af_hallucination.py` |
@@ -33,58 +33,36 @@ This is the path toward becoming a **default post-structure biology layer** — 
 
 ## Phased roadmap
 
-### Phase A (shipped) — shipping layer
-- Unified per-protein / proteome JSON + JSONL export
-- Boltz variance as optional ensemble *proxy*
-- Compose disorder + optional function probs + structure confidence
-- Full-sequence function OOF aligned to disorder maps
-- Disk-cached / threaded Boltz pLDDT ‖ variance loads
-
-### Phase B — make the layer trusted
-- Train `ultra_fun` on Rockfish; publish OOF function metrics
-- **Segment-level role validation vs DisProt `functional_regions` (shipped in layer report)**
-- CAID3 + homology-safe disorder numbers
-- Boltz-default rescue rates on DisProt
+### Phase A–B (shipped)
+- Unified JSON / JSONL / BED / bedGraph / triage / role-track exports
+- Boltz variance proxy + cached / overlapped loads
+- Full-sequence function OOF + DisProt role validation
+- Structure-distrust aggregate in the layer report
+- Function OOF metrics embedded when available
 
 ### Phase C (in progress) — conditional IDR state (still not MD)
-- Sequence cues (composition + short motifs) corroborating role calls
-- Optional **partner-context** binding cues (`--idr-partners`) with transparent `conditioned_prob`
-- Role ∩ hallucination intersections (critical structure distrust)
-- Proteome triage ranking (investigate-first table)
-- Folding-upon-binding / boundary transition cues (vectorized)
-- BED + bedGraph + triage TSV exports
-- Reload disorder from predict dir (`--idr-preds-dir`)
-- Ligand / multi-partner conditioned scores (next)
+- Sequence cues; partner cues; **ligand cues** (`--idr-ligands`)
+- Role ∩ hallucination intersections; triage ranking
+- Boundary / folding-upon-binding cues
+- Threshold + worker CLI knobs; optional gzip JSONL
+- Multi-condition score stacking (partner + ligand) with transparent `conditioned_prob`
 
 ### Phase D — optional biophysics collaborations
 - Small-system MD / SAXS / NMR benchmarks validating variance proxy
-- Not required for the core product
 
 ## Rockfish usage
 
 ```bash
-# After CV (or with fold results on disk):
 python rockfish/run_disordernet.py idr-layer \
-  --structure-backend boltz --boltz-mode ingest
+  --structure-backend boltz --boltz-mode ingest \
+  --idr-partners partners.json --idr-ligands ligands.json \
+  --idr-workers 8
 
-# Overlay scores from a prior predict run + optional partners:
-python rockfish/run_disordernet.py idr-layer \
-  --idr-preds-dir checkpoints/predictions \
-  --idr-partners partners.json
-
-# Full pipeline exports the layer by default (skip with --no-idr-layer):
-python rockfish/run_disordernet.py pipeline --profile ultra_fun
-
-# Predict + layer in one shot:
-python rockfish/run_disordernet.py predict --fasta query.fa --export-idr-layer
-
-# Training with function head (feeds role calls into the layer):
-python rockfish/run_disordernet.py cv --profile ultra_fun
+python rockfish/run_disordernet.py predict --fasta query.fa --export-idr-layer \
+  --idr-gzip
 ```
 
-Outputs (under checkpoint / predict dir):
-- `idr_biology_layer_report.json` — summary, triage, optional role validation
-- `idr_biology_layer.jsonl` — full per-protein records
-- `idr_biology_layer_triage.tsv` — ranked proteome table
-- `idr_biology_layer.bed` — IDR segments for IGV-style viewers
-- `idr_biology_layer_disorder.bedgraph` — continuous disorder track (RLE-compressed)
+Outputs:
+- `idr_biology_layer_report.json` — summary, triage, role validation, structure distrust
+- `idr_biology_layer.jsonl[.gz]` — full per-protein records
+- `idr_biology_layer_triage.tsv` / `.bed` / `_disorder.bedgraph` / `_roles.tsv`
