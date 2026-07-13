@@ -68,6 +68,9 @@ fi
 if [[ -n "${AF3_MAX_PROTEINS:-}" ]]; then
   EXTRA_ARGS+=(--af3-max-proteins "$AF3_MAX_PROTEINS")
 fi
+if [[ -n "${AF3_SHARD_INDEX:-}" && -n "${AF3_SHARD_COUNT:-}" ]]; then
+  EXTRA_ARGS+=(--af3-shard-index "$AF3_SHARD_INDEX" --af3-shard-count "$AF3_SHARD_COUNT")
+fi
 
 CHECKPOINT_ARG=(--checkpoint-dir "${CHECKPOINT_SUBDIR:-checkpoints}")
 
@@ -81,23 +84,14 @@ python rockfish/run_disordernet.py "$STAGE" \
   "${EXTRA_ARGS[@]}"
 
 RUN_TAG="${STAGE}_${PROFILE}_${BACKBONE}_s${SEED}_j${SLURM_JOB_ID:-local}"
+if [[ -n "${SLURM_ARRAY_TASK_ID:-}" ]]; then
+  RUN_TAG="${RUN_TAG}_a${SLURM_ARRAY_TASK_ID}"
+fi
 DEST="$DISORDERNET_RESULTS/$RUN_TAG"
 mkdir -p "$DEST"
 
-for f in checkpoints/cv_progress.json checkpoints/cv_summary.json \
-         checkpoints/run_manifest.json checkpoints/sota_postprocess_report.json \
-         checkpoints/gpu_v6_ensemble_report.json checkpoints/sota_stack_report.json \
-         checkpoints/quick_screen_*.json checkpoints/eval_summary.json \
-         checkpoints/caid3_eval_report.json checkpoints/phase3_integrated_report.json \
-         checkpoints/statistical_validation_report.json checkpoints/af_rescue_report.json \
-         checkpoints/inference_fusion_report.json checkpoints/af_rescue_manifest.json \
-         checkpoints/multi_seed_blend_report.json; do
-  [[ -f "$f" ]] && cp -a "$f" "$DEST/"
-done
-
-if [[ -d checkpoints ]]; then
-  find checkpoints -maxdepth 1 -name 'fold_*_compact.pt' -exec cp -a {} "$DEST/" \; 2>/dev/null || true
-fi
+# Parallel mirror (threads) — faster than serial cp for many reports
+python rockfish/mirror_results.py --dest "$DEST" --workers "${MIRROR_WORKERS:-8}" --cwd .
 
 echo "Results mirrored to $DEST"
 date

@@ -134,14 +134,16 @@ def stage_cv(args, cfg, proteins, model, converter, disprot_meta) -> tuple[list,
         plddt_af3 = af3_batch.get("plddt_by_id") or {}
         if plddt_af3:
             from colab.disordernet_gpu import merge_plddt_for_training
-            af2 = {}
-            if args.prefetch_af_plddt or cfg.use_plddt_features or cfg.use_hallucination_weighting:
+            af2 = getattr(args, "_prefetched_plddt", None) or {}
+            if not af2 and (args.prefetch_af_plddt or cfg.use_plddt_features or cfg.use_hallucination_weighting):
                 from colab.disordernet_gpu import build_plddt_cache_for_training
                 af2 = build_plddt_cache_for_training(
                     proteins, cache_dir=os.path.join(cfg.checkpoint_dir, cfg.af_plddt_cache_dir),
                 )
             plddt_override = merge_plddt_for_training(af2, plddt_af3, prefer_af3=True)
             print(f"  Merged pLDDT for training: {len(plddt_override)} proteins (AF3 preferred)")
+    elif getattr(args, "_prefetched_plddt", None):
+        plddt_override = args._prefetched_plddt
 
     progress_path = os.path.join(cfg.checkpoint_dir, "cv_progress.json")
     resume = args.resume_fold
@@ -302,6 +304,8 @@ def stage_af3(args, cfg, proteins) -> dict:
         msa_free=not args.af3_use_msa,
         timeout_s=args.af3_timeout,
         prefer_docker=args.af3_docker,
+        shard_index=getattr(args, "af3_shard_index", None),
+        shard_count=getattr(args, "af3_shard_count", None),
     )
     if batch.get("skipped"):
         return batch
@@ -588,13 +592,45 @@ def run_pipeline(args) -> int:
         "screen", "cv", "postprocess", "full", "predict", "pipeline",
     )
     model = converter = None
+    prefetched_plddt = None
+
     if needs_esm:
-        model, _, converter, spec = _load_esm(cfg)
-        print(f"ESM backbone: {spec.key}  dim={spec.embed_dim}")
+        want_prefetch = (
+            args.prefetch_af_plddt
+            or cfg.use_plddt_features
+            or cfg.use_hallucination_weighting
+        ) and args.stage in ("cv", "full", "pipeline", "screen")
+
+        def _load():
+            return _load_esm(cfg)
+
+        def _prefetch():
+            from colab.disordernet_gpu import build_plddt_cache_for_training
+            return build_plddt_cache_for_training(
+                proteins,
+                cache_dir=os.path.join(cfg.checkpoint_dir, cfg.af_plddt_cache_dir),
+            )
+
+        if want_prefetch and not getattr(args, "no_overlap_prefetch", False):
+            from colab.async_io import run_overlapped
+            (model, _, converter, spec), prefetched_plddt = run_overlapped(
+                _load, _prefetch,
+                primary_name="ESM load",
+                background_name="AF2 pLDDT prefetch",
+            )
+            print(f"ESM backbone: {spec.key}  dim={spec.embed_dim}")
+            print(f"  Overlapped pLDDT prefetch: {len(prefetched_plddt)} proteins")
+        else:
+            model, _, converter, spec = _load_esm(cfg)
+            print(f"ESM backbone: {spec.key}  dim={spec.embed_dim}")
+
         from colab.hpc_efficiency import disable_gradient_checkpointing_for_inference
         if args.stage in ("predict", "postprocess"):
             if disable_gradient_checkpointing_for_inference(model):
                 print("  Inference: gradient checkpointing OFF (same logits, faster)")
+
+    # stash for stage_cv when AF3 not providing override
+    args._prefetched_plddt = prefetched_plddt  # type: ignore[attr-defined]
 
     fold_results: list = []
     cv_summary: dict = {}
@@ -726,6 +762,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--af3-timeout", type=int, default=7200)
     p.add_argument("--af3-use-msa", action="store_true", help="Require public_databases MSA (slow)")
     p.add_argument("--af3-docker", action="store_true", help="Prefer Docker over native AF3")
+    p.add_argument(
+        "--af3-shard-index", type=int, default=None,
+        help="AF3 Slurm array shard index (0-based)",
+    )
+    p.add_argument(
+        "--af3-shard-count", type=int, default=None,
+        help="AF3 Slurm array shard count",
+    )
+    p.add_argument(
+        "--no-overlap-prefetch", action="store_true",
+        help="Disable ESM‖pLDDT overlap (debug)",
+    )
     return p
 
 
