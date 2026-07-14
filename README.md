@@ -12,6 +12,148 @@ Compared to **literature reference points** (different protocols — not head-to
 
 AlphaFold 3's diffusion architecture hallucinates structure in genuinely disordered regions — [22% of residues are hallucinations](https://arxiv.org/abs/2510.15939). AF3-pLDDT [ranks 13th on CAID3](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/), *worse* than AF2 (rank 11th). DisorderNet exploits this fundamental weakness.
 
+## From scratch (start here)
+
+Pick **one** path. Each sequence below assumes a clean machine / empty checkout — clone, install, run, inspect outputs.
+
+| Path | When to use | Hardware | ~Time to first result |
+|------|-------------|----------|------------------------|
+| **A. CPU v6** | Smoke-test the repo / no GPU | Laptop / desktop CPU | ~15–30 min (embeddings longer first time) |
+| **B. Colab GPU** | Interactive ultra CV on Google Colab | Colab A100 (or L4) | Quick screen 2–3 h → full ultra 18–24 h |
+| **C. Rockfish (recommended for publish)** | Production / paper numbers + `publish_package/` | JHU Rockfish A100 Slurm | Days (chained 72 h jobs) |
+| **Tests only** | Verify the checkout | Any CPU | ~1–2 min |
+
+Canonical HPC detail (env vars, packaging flags, go/no-go): **[rockfish/README.md](rockfish/README.md)**.  
+Preprint checklist after a publish run: **[docs/METHODS_CHECKLIST.md](docs/METHODS_CHECKLIST.md)**.
+
+---
+
+### Path A — CPU pipeline (no GPU)
+
+```bash
+git clone https://github.com/Tommaso-R-Marena/DisorderNet.git
+cd DisorderNet
+git checkout master
+
+python3 -m venv .venv && source .venv/bin/activate
+pip install -U pip
+pip install numpy scikit-learn lightgbm xgboost fair-esm torch requests
+
+# Optional but recommended: create the hard-coded CPU data dirs the scripts expect
+mkdir -p /home/user/workspace/disorder_model/data/embeddings \
+         /home/user/workspace/disorder_model/results_v6
+# If those paths do not exist on your machine, edit the path constants in
+# fetch_disprot.py / extract_esm_embeddings.py / run_v6_mem.py, or symlink them.
+
+python fetch_disprot.py             # DisProt JSON download (needs network)
+python extract_esm_embeddings.py    # ESM-2 8M embeddings (first run downloads weights)
+python run_v6_mem.py                # 5-fold CV → metrics (~0.83 AUC target)
+python generate_figures_v6.py       # ROC/PR + figures
+```
+
+**Success:** `results_v6/metrics.json` with pooled AUC ≈ 0.83, plus figures under `results_v6/`.
+
+---
+
+### Path B — Google Colab GPU (from zero)
+
+1. Open the **Quick Screen** notebook (do this before a full ultra run):  
+   [![Open Quick Screen](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_QuickScreen.ipynb)
+2. **Runtime → Change runtime type → GPU (A100 preferred; L4 OK for 650M) + High RAM**.
+3. Set `SCREEN_MODE = "standard"` (or `"flash"` / `"paradigm"`), run all cells.
+4. Read `quick_screen_report.json` — proceed only on **HIGH / MODERATE** (not STOP).
+5. Open the **full GPU** notebook:  
+   [![Open Full GPU CV](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb)
+6. Set `QUALITY_PROFILE = "ultra"` (or `"ultra3b"` + `ESM_BACKBONE = "3B"` on A100 40GB).  
+   Set `MOUNT_DRIVE = True` so checkpoints / DisProt / pLDDT caches persist.
+7. Run all cells (~18–24 h for 650M ultra). Optional later cells cover AF rescue, CAID, IDR layer, Phase 3 synthesis.
+
+**Success:** `run_manifest.json`, CV / postprocess reports, and (with Drive mounted) mirrored files under `MyDrive/DisorderNet/results/`.  
+For 3B: **A100 40GB + High RAM**; do **not** use T4. `!pip install -q lightgbm xgboost` if prompted.
+
+---
+
+### Path C — Rockfish from scratch → publish package (paper path)
+
+Do this on a Rockfish **login node** (not a compute node). Full flags and layouts: [rockfish/README.md — Publish path](rockfish/README.md#publish-path-exact-usage).
+
+**1. Clone + env (once)**
+
+```bash
+git clone https://github.com/Tommaso-R-Marena/DisorderNet.git ~/DisorderNet
+cd ~/DisorderNet
+git checkout master
+
+bash rockfish/setup_env.sh
+source ~/venvs/disordernet/bin/activate
+mkdir -p logs
+
+export DISORDERNET_ACCOUNT=sfried3          # your Rockfish account
+export DISORDERNET_BOLTZ_ROOT=$HOME/boltz   # recommended
+export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
+```
+
+**2. Optional — Boltz structure warm-up** (if you do not already have Boltz outputs)
+
+```bash
+sbatch --account=$DISORDERNET_ACCOUNT \
+  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_BOLTZ_ROOT,BOLTZ_MODE=auto \
+  rockfish/slurm/boltz_batch.sbatch
+```
+
+**3. Submit publish bundle(s)** — each chains GPU jobs then a strict CPU package job
+
+```bash
+# Script 1 — ESM-2 650M ultra + contamination-clean companion + publish_package/
+bash rockfish/slurm/submit_publish_650m.sh
+
+# Script 2 — ESM-2 3B (optional; use --partition ica100 if OOM on 40GB A100)
+bash rockfish/slurm/submit_publish_3b.sh
+# e.g. bash rockfish/slurm/submit_publish_3b.sh --partition ica100
+```
+
+CLI equivalents: `python rockfish/publish_submit.py submit-650m|submit-3b --account "$DISORDERNET_ACCOUNT"`.  
+Dry-run first if you want: `bash rockfish/slurm/submit_publish_650m.sh --dry-run`.
+
+**4. Monitor**
+
+```bash
+squeue -u $USER
+# Job ids + paths are also in ~/disordernet_runs/publish_*_*/submit_summary.json
+```
+
+**5. After jobs finish — inspect package + decide go/no-go**
+
+```bash
+less ~/disordernet_runs/publish_650m_*/publish_package/PACKAGE_README.md
+ls ~/disordernet_runs/publish_650m_*/publish_package/
+# Fill docs/METHODS_CHECKLIST.md from MANIFEST.json / comparison.json / per-run reports
+```
+
+Re-package without re-training (strict by default):
+
+```bash
+python rockfish/publish_submit.py package \
+  --root-workdir ~/disordernet_runs/publish_650m_<stamp> \
+  --kind 650m --strict
+```
+
+**Success:** `publish_package/` with `PACKAGE_README.md`, `MANIFEST.json`, `comparison.json`, and per-run report folders; required go/no-go files include `sota_postprocess_report.json` and `structure_distrust_benchmark.json`. Packaging fails loudly if they are missing (`PACKAGE_STRICT=1`).
+
+---
+
+### Tests only (any machine)
+
+```bash
+git clone https://github.com/Tommaso-R-Marena/DisorderNet.git
+cd DisorderNet && git checkout master
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest tests/ -v
+```
+
+---
+
 ## Results
 
 ### Comprehensive Benchmark
@@ -125,7 +267,8 @@ Ultra on Rockfish uses **homology-safe CV**, optional **train-time pLDDT** (disa
 
 ## Documentation
 
-All project documentation lives under `docs/` and `rockfish/README.md`. Start here:
+All project documentation lives under `docs/` and `rockfish/README.md`.  
+**Operators:** start at **[From scratch](#from-scratch-start-here)**. Then:
 
 | Document | What it covers |
 |----------|----------------|
@@ -243,6 +386,8 @@ Designed to close the gap to ESMDisPred (0.895 CAID3 reference):
 ```
 
 ## Quick Start
+
+The numbered **[From scratch](#from-scratch-start-here)** section above is the canonical zero-to-result guide (CPU / Colab / Rockfish). Short links below.
 
 ### Option 1a: Quick paradigm screen (~2–3 hours, recommended first)
 

@@ -16,6 +16,47 @@ Run the full SOTA pipeline on Rockfish instead of Colab: longer wall times (72 h
 | [Root `README.md`](../README.md) | Project overview, Colab paths, full documentation index |
 | [`AGENTS.md`](../AGENTS.md) | Contributor / agent notes (pytest, CPU pipeline, Rockfish conventions) |
 
+## From scratch on Rockfish (start here)
+
+End-to-end on a **login node**, with nothing set up yet:
+
+```bash
+# 1) Clone
+git clone https://github.com/Tommaso-R-Marena/DisorderNet.git ~/DisorderNet
+cd ~/DisorderNet
+git checkout master
+
+# 2) One-time Python env + logs
+bash rockfish/setup_env.sh
+source ~/venvs/disordernet/bin/activate
+mkdir -p logs
+
+# 3) Account + optional Boltz roots
+export DISORDERNET_ACCOUNT=sfried3
+export DISORDERNET_BOLTZ_ROOT=$HOME/boltz
+export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
+
+# 4) (Optional) warm Boltz structures once
+sbatch --account=$DISORDERNET_ACCOUNT \
+  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_BOLTZ_ROOT,BOLTZ_MODE=auto \
+  rockfish/slurm/boltz_batch.sbatch
+
+# 5) Submit publish bundles (GPU chain → strict package)
+bash rockfish/slurm/submit_publish_650m.sh
+# and/or:
+bash rockfish/slurm/submit_publish_3b.sh          # add --partition ica100 if OOM
+
+# 6) Monitor
+squeue -u $USER
+
+# 7) When done: package README + checklist + go/no-go
+less ~/disordernet_runs/publish_650m_*/publish_package/PACKAGE_README.md
+# Tick docs/METHODS_CHECKLIST.md from the package artifacts
+```
+
+Project-wide paths (CPU / Colab / Rockfish): **[root README — From scratch](../README.md#from-scratch-start-here)**.  
+Exact publish flags and layouts: **[Publish path (exact usage)](#publish-path-exact-usage)** below.
+
 ## Slurm script convention
 
 All `rockfish/slurm/*.sbatch` files follow the lab Rockfish style:
