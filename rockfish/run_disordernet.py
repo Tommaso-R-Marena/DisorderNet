@@ -1689,9 +1689,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.stage in ("publish-650m", "publish-3b", "package-publish"):
         try:
             return _run_publish_stage(args)
-        except Exception as exc:
+        except ValueError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
-            raise
+            return 2
+        except (RuntimeError, OSError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
     try:
         return run_pipeline(args)
     except Exception as exc:
