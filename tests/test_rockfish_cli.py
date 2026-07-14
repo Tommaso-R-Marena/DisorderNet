@@ -37,8 +37,11 @@ class TestRockfishCLI:
         for stage in (
             "screen", "cv", "stack", "postprocess", "full",
             "eval", "idr-layer", "predict", "multi-seed-blend", "pipeline", "boltz", "af3",
+            "publish-650m", "publish-3b", "package-publish",
         ):
             extra = ["--fasta", "q.fasta"] if stage == "predict" else []
+            if stage == "package-publish":
+                extra = ["--publish-root", "/tmp/x"]
             args = build_parser().parse_args([stage, *extra])
             assert args.stage == stage
 
