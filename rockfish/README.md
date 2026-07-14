@@ -2,6 +2,36 @@
 
 Run the full SOTA pipeline on Rockfish instead of Colab: longer wall times (72 h), more RAM, scratch storage, and no Drive quota issues.
 
+## Slurm script convention
+
+All `rockfish/slurm/*.sbatch` files follow the lab Rockfish style:
+
+```bash
+#!/bin/bash -ue
+#SBATCH --job-name="dn-…"
+#SBATCH --partition=a100          # or shared for CPU jobs
+#SBATCH --qos=qos_gpu             # GPU jobs
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=…
+#SBATCH --gres=gpu:1              # GPU jobs only
+#SBATCH --mem=…
+#SBATCH --time=DD-HH:MM:SS        # e.g. 03-00:00:00 = 72 h
+#SBATCH --account=CHANGE_ME_gpu
+#SBATCH --export=ALL
+#SBATCH --output=logs/…_%j.out
+#SBATCH --error=logs/…_%j.err
+##SBATCH --mail-user=you@jh.edu
+##SBATCH --mail-type=END,FAIL,INVALID_DEPEND,TIME_LIMIT
+
+PROJECT_DIR="${DISORDERNET_REPO:-${HOME}/DisorderNet}"
+ENV_DIR="${DISORDERNET_VENV:-${HOME}/venvs/disordernet}"
+RESULTS_DIR="${DISORDERNET_RESULTS:-${HOME}/disordernet_runs}"
+WK_DIR="${DISORDERNET_WORKDIR:-}"
+```
+
+Shared runtime logic lives in `rockfish/slurm/_common.sh` (`ml` modules + venv activate + run + mirror). Uncomment the `mail-*` lines and set your JH address when you want email on completion/failure.
+
 ## Prerequisites
 
 1. **GPU allocation** — your PI must have a Rockfish `_gpu` account (e.g. `jsmith123_gpu`) and `qos_gpu`. Request via [ARCH support](https://docs.arch.jhu.edu/) if needed.

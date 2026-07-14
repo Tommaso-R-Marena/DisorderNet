@@ -1,48 +1,38 @@
-#!/bin/bash -l
-#SBATCH --job-name=dn-stack
+#!/bin/bash -ue
+#SBATCH --job-name="dn-stack"
 #SBATCH --partition=shared
-#SBATCH --account=CHANGE_ME
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
-#SBATCH --time=08:00:00
+#SBATCH --time=00-08:00:00
+#SBATCH --account=CHANGE_ME
+#SBATCH --export=ALL
 #SBATCH --output=logs/dn-stack_%j.out
 #SBATCH --error=logs/dn-stack_%j.err
-
-# Post-CV ensemble + postprocess on CPU (no GPU needed).
-# Run after train_ultra.sbatch if you split stages for fault tolerance.
+##SBATCH --mail-user=you@jh.edu
+##SBATCH --mail-type=END,FAIL,INVALID_DEPEND,TIME_LIMIT
+# Post-CV ensemble on CPU (STAGE=stack). Postprocess/fold-soup still needs GPU.
 #
-# Prerequisite: checkpoints/cv_progress.json from a completed CV job.
-# Copy checkpoints into $DISORDERNET_REPO/checkpoints/ or set DISORDERNET_WORKDIR.
-#
-# Submit:
 #   sbatch --export=ALL,DISORDERNET_ACCOUNT,STAGE=stack rockfish/slurm/postprocess_cpu.sbatch
-#   sbatch --export=ALL,DISORDERNET_ACCOUNT,STAGE=postprocess rockfish/slurm/postprocess_cpu.sbatch
-
-set -euo pipefail
 
 : "${STAGE:=stack}"
 : "${PROFILE:=ultra}"
 : "${BACKBONE:=650M}"
-
 export STAGE PROFILE BACKBONE
 
+# ── Paths (override via env before sbatch) ───────────────────────────────────
+PROJECT_DIR="${DISORDERNET_REPO:-${HOME}/DisorderNet}"
+ENV_DIR="${DISORDERNET_VENV:-${HOME}/venvs/disordernet}"
+RESULTS_DIR="${DISORDERNET_RESULTS:-${HOME}/disordernet_runs}"
+WK_DIR="${DISORDERNET_WORKDIR:-}"
+export DISORDERNET_REPO="${PROJECT_DIR}"
+export DISORDERNET_VENV="${ENV_DIR}"
+export DISORDERNET_RESULTS="${RESULTS_DIR}"
+[[ -n "${WK_DIR}" ]] && export DISORDERNET_WORKDIR="${WK_DIR}"
+mkdir -p "${PROJECT_DIR}/logs"
+
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-module purge
-# shellcheck disable=SC1091
-source "${DISORDERNET_VENV:-$HOME/venvs/disordernet}/bin/activate"
-cd "${DISORDERNET_REPO:-$HOME/DisorderNet}"
-
-export PYTHONUNBUFFERED=1
-export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-16}
-
-# stack/postprocess need ESM loaded for soup — use a GPU node if stack fails on CPU-only
-# For stack-only (v6 OOF, no ESM forward): could run on shared, but postprocess needs GPU.
-echo "WARNING: postprocess stage needs GPU for fold soup. Use train_*.sbatch for full pipeline."
-echo "This job is intended for STAGE=stack (v6 ensemble) only."
-
-python rockfish/run_disordernet.py "$STAGE" \
-  --profile "$PROFILE" \
-  --backbone "$BACKBONE" \
-  --seed "${SEED:-42}" \
-  --num-workers 8
+# shellcheck source=_common.sh
+source "${SCRIPT_DIR}/_common.sh"
