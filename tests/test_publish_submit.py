@@ -49,11 +49,34 @@ class TestUtils:
         assert keys.startswith("ALL,")
         assert "PROFILE" in keys
         assert "BUNDLE_KIND" in keys
+        assert "PACKAGE_STRICT" in keys
 
     def test_default_publish_root(self, monkeypatch, tmp_path):
         monkeypatch.setenv("DISORDERNET_RESULTS", str(tmp_path))
         root = default_publish_root("650m", stamp="X")
         assert root == tmp_path / "publish_650m_X"
+
+    def test_mirror_glob_parity_checkpoints_star(self):
+        from rockfish.utils import ARTIFACT_FILES, mirror_glob_patterns
+
+        patterns = mirror_glob_patterns()
+        for name in (
+            "structure_distrust_benchmark.json",
+            "sota_postprocess_report.json",
+            "function_prediction_report.json",
+        ):
+            assert f"checkpoints/{name}" in patterns
+            assert f"checkpoints_*/{name}" in patterns
+        assert "checkpoints/distrust_figures/**" in patterns
+        assert "checkpoints_*/distrust_figures/**" in patterns
+        assert "checkpoints/fold_*_compact.pt" in patterns
+        assert len(patterns) >= 2 * len(ARTIFACT_FILES)
+
+    def test_git_revision_returns_str_or_none(self):
+        from rockfish.utils import git_revision
+
+        rev = git_revision()
+        assert rev is None or (isinstance(rev, str) and len(rev) >= 4)
 
 
 class TestPublishCLI:
@@ -70,6 +93,7 @@ class TestPublishCLI:
         )
         assert c.command == "package"
         assert c.kind == "3b"
+        assert c.strict is True
 
     def test_dry_run_650m(self, tmp_path, monkeypatch):
         monkeypatch.setenv("DISORDERNET_RESULTS", str(tmp_path / "results"))
@@ -89,6 +113,8 @@ class TestPublishCLI:
         assert "ultra_clean_650M" in summary["job_ids"]
         assert "package" in summary["job_ids"]
         assert summary["dry_run"] is True
+        assert summary["strict_package"] is True
+        assert "git_revision" in summary
 
     def test_dry_run_3b_no_clean(self, tmp_path):
         rc = publish_main(
@@ -105,7 +131,6 @@ class TestPublishCLI:
         assert list(summary["job_ids"]) == ["ultra3b", "package"]
 
     def test_package_kind_650m(self, tmp_path):
-        from rockfish.package_publish_results import assemble_publish_package
         from rockfish.utils import run_specs_650m
 
         root = tmp_path / "bundle"
@@ -127,13 +152,66 @@ class TestPublishCLI:
         assert (pkg / "MANIFEST.json").is_file()
         assert (pkg / "ultra_650M" / "sota_postprocess_report.json").is_file()
 
+    def test_package_strict_exit_code(self, tmp_path):
+        root = tmp_path / "bundle"
+        ckpt = root / "ultra_650M" / "checkpoints"
+        ckpt.mkdir(parents=True)
+        (ckpt / "sota_postprocess_report.json").write_text('{"pooled_auc": 0.9}')
+        rc = publish_main(
+            [
+                "package",
+                "--root-workdir", str(root),
+                "--kind", "650m",
+                "--no-clean",
+                "--package-dir", str(tmp_path / "out"),
+                "--strict",
+            ]
+        )
+        assert rc == 1
+
     def test_rockfish_runner_publish_stages(self):
         p = rockfish_parser()
         a = p.parse_args(["publish-650m", "--account", "x", "--dry-run"])
         assert a.stage == "publish-650m"
         assert a.dry_run is True
+        assert a.no_strict_package is False
         b = p.parse_args(
             ["package-publish", "--publish-root", "/tmp/x", "--bundle-kind", "3b"],
         )
         assert b.stage == "package-publish"
         assert b.bundle_kind == "3b"
+
+    def test_run_publish_stage_forwards_strict(self, tmp_path, monkeypatch):
+        from rockfish.run_disordernet import _run_publish_stage
+
+        captured: list[list[str]] = []
+
+        def fake_main(argv):
+            captured.append(list(argv))
+            return 0
+
+        monkeypatch.setattr("rockfish.publish_submit.main", fake_main)
+
+        args = rockfish_parser().parse_args(
+            [
+                "package-publish",
+                "--publish-root", str(tmp_path),
+                "--bundle-kind", "650m",
+            ]
+        )
+        assert _run_publish_stage(args) == 0
+        assert captured[0][0] == "package"
+        assert "--strict" in captured[0]
+        assert "--kind" in captured[0]
+
+        args2 = rockfish_parser().parse_args(
+            [
+                "publish-650m",
+                "--account", "x",
+                "--dry-run",
+                "--no-strict-package",
+                "--publish-root", str(tmp_path),
+            ]
+        )
+        assert _run_publish_stage(args2) == 0
+        assert "--no-strict-package" in captured[-1]

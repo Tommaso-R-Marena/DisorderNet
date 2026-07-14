@@ -18,6 +18,13 @@ python rockfish/publish_submit.py submit-3b  --account "$DISORDERNET_ACCOUNT"
 Related: [`METHODS_CHECKLIST.md`](METHODS_CHECKLIST.md),
 [`STRUCTURE_DISTRUST_ATLAS.md`](STRUCTURE_DISTRUST_ATLAS.md).
 
+```bash
+# Re-package (strict by default)
+python rockfish/publish_submit.py package \
+  --root-workdir ~/disordernet_runs/publish_650m_<stamp> \
+  --kind 650m --strict
+```
+
 ```text
 setup → submit_publish_650m.sh and/or submit_publish_3b.sh
   → open publish_package/ → METHODS_CHECKLIST → go/no-go on numbers

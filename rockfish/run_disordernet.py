@@ -1638,6 +1638,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="publish-*: skip contamination-clean companion",
     )
     p.add_argument(
+        "--no-strict-package",
+        action="store_true",
+        help="publish-* / package-publish: allow incomplete packages "
+             "(default is fail-loud / PACKAGE_STRICT)",
+    )
+    p.add_argument(
         "--dry-run",
         action="store_true",
         help="publish-*: print sbatch commands without submitting",
@@ -1666,6 +1672,10 @@ def _run_publish_stage(args) -> int:
             "--root-workdir", args.publish_root,
             "--kind", args.bundle_kind,
         ]
+        if getattr(args, "no_strict_package", False):
+            argv.append("--no-strict")
+        else:
+            argv.append("--strict")
     else:
         raise ValueError(f"Not a publish stage: {args.stage}")
 
@@ -1677,6 +1687,8 @@ def _run_publish_stage(args) -> int:
         argv.extend(["--package-dir", args.package_dir])
     if getattr(args, "no_clean", False):
         argv.append("--no-clean")
+    if getattr(args, "no_strict_package", False) and args.stage != "package-publish":
+        argv.append("--no-strict-package")
     if getattr(args, "dry_run", False) and args.stage != "package-publish":
         argv.append("--dry-run")
     if getattr(args, "partition", None) and args.stage != "package-publish":
@@ -1689,9 +1701,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.stage in ("publish-650m", "publish-3b", "package-publish"):
         try:
             return _run_publish_stage(args)
-        except Exception as exc:
+        except ValueError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
-            raise
+            return 2
+        except (RuntimeError, OSError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
     try:
         return run_pipeline(args)
     except Exception as exc:
