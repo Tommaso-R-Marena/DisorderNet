@@ -5,20 +5,31 @@
 # Provides:
 #   disordernet_slurm_setup   — modules + venv + cd repo
 #   disordernet_slurm_run     — run rockfish/run_disordernet.py with env flags
-#   disordernet_slurm_mirror  — mirror reports to $DISORDERNET_RESULTS/<tag>
+#   disordernet_slurm_mirror  — mirror reports to $RESULTS_DIR/<tag>
 #
-# Existing sbatch files keep working: sourcing this file autoruns setup+run+mirror
-# unless DISORDERNET_COMMON_AUTORUN=0.
+# Sbatch entrypoints use: #!/bin/bash -ue  and  #SBATCH --export=ALL
+# Parent scripts should set PROJECT_DIR / ENV_DIR / WK_DIR before sourcing,
+# or rely on the defaults below.
+#
+# Autorun on source unless DISORDERNET_COMMON_AUTORUN=0.
 
-set -euo pipefail
+set -ue
 
-# ── User overrides (export before sbatch) ─────────────────────────────────────
+# ── Paths (lab convention; override via env or parent script) ─────────────────
+PROJECT_DIR="${DISORDERNET_REPO:-${PROJECT_DIR:-${HOME}/DisorderNet}}"
+ENV_DIR="${DISORDERNET_VENV:-${ENV_DIR:-${HOME}/venvs/disordernet}}"
+RESULTS_DIR="${DISORDERNET_RESULTS:-${RESULTS_DIR:-${HOME}/disordernet_runs}}"
+WK_DIR="${DISORDERNET_WORKDIR:-${WK_DIR:-}}"
+
+# Keep env aliases in sync for CLI / Python
+export DISORDERNET_REPO="${PROJECT_DIR}"
+export DISORDERNET_VENV="${ENV_DIR}"
+export DISORDERNET_RESULTS="${RESULTS_DIR}"
+[[ -n "${WK_DIR}" ]] && export DISORDERNET_WORKDIR="${WK_DIR}"
+
 : "${DISORDERNET_ACCOUNT:=CHANGE_ME_gpu}"
 : "${DISORDERNET_PARTITION:=a100}"
 : "${DISORDERNET_QOS:=qos_gpu}"
-: "${DISORDERNET_VENV:=$HOME/venvs/disordernet}"
-: "${DISORDERNET_REPO:=$HOME/DisorderNet}"
-: "${DISORDERNET_WORKDIR:=}"
 
 : "${PROFILE:=ultra}"
 : "${BACKBONE:=650M}"
@@ -29,34 +40,45 @@ set -euo pipefail
 
 disordernet_slurm_setup() {
   echo "Job ${SLURM_JOB_ID:-local} on $(hostname)"
-  echo "Stage=$STAGE  profile=$PROFILE  backbone=$BACKBONE  seed=$SEED"
+  echo "Stage=${STAGE}  profile=${PROFILE}  backbone=${BACKBONE}  seed=${SEED}"
+  echo "PROJECT_DIR=${PROJECT_DIR}"
+  echo "WK_DIR=${WK_DIR:-"(repo cwd / default scratch)"}"
+  echo "ENV_DIR=${ENV_DIR}"
   date
 
-  module purge 2>/dev/null || true
-  if command -v module &>/dev/null; then
+  # Prefer Rockfish `ml` shorthand; fall back to `module`
+  if command -v ml &>/dev/null; then
+    ml purge 2>/dev/null || true
+    ml gcc/11.4.0 2>/dev/null || true
+    ml cuda/11.8.0 2>/dev/null || true
+  elif command -v module &>/dev/null; then
+    module purge 2>/dev/null || true
     if module is-avail gcc/11.4.0 2>/dev/null; then module load gcc/11.4.0; fi
     if module is-avail cuda/11.8.0 2>/dev/null; then module load cuda/11.8.0; fi
   fi
 
   # shellcheck disable=SC1091
-  source "$DISORDERNET_VENV/bin/activate"
-  cd "$DISORDERNET_REPO"
+  source "${ENV_DIR}/bin/activate"
+  cd "${PROJECT_DIR}" || exit 1
+  mkdir -p "${PROJECT_DIR}/logs" "${RESULTS_DIR}"
+  if [[ -n "${WK_DIR}" ]]; then
+    mkdir -p "${WK_DIR}" || exit 1
+  fi
 
   export PYTHONUNBUFFERED=1
-  export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
-
-  : "${DISORDERNET_RESULTS:=$HOME/disordernet_runs}"
+  export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
+  export TMPDIR="${TMPDIR:-/tmp}"
 }
 
 disordernet_slurm_run() {
   local WORKDIR_ARG=()
   if [[ -n "${DISORDERNET_WORKDIR:-}" ]]; then
-    WORKDIR_ARG=(--workdir "$DISORDERNET_WORKDIR")
+    WORKDIR_ARG=(--workdir "${DISORDERNET_WORKDIR}")
   fi
 
   local EXTRA_ARGS=()
-  if [[ "$STAGE" == "screen" ]]; then
-    EXTRA_ARGS+=(--screen-mode "$SCREEN_MODE")
+  if [[ "${STAGE}" == "screen" ]]; then
+    EXTRA_ARGS+=(--screen-mode "${SCREEN_MODE}")
   fi
   if [[ "${PREFETCH_AF:-0}" == "1" ]]; then
     EXTRA_ARGS+=(--prefetch-af-plddt)
@@ -71,39 +93,36 @@ disordernet_slurm_run() {
     EXTRA_ARGS+=(--no-plddt-features)
   fi
   if [[ -n "${SEED_DIRS:-}" ]]; then
-    EXTRA_ARGS+=(--seed-dirs "$SEED_DIRS")
+    EXTRA_ARGS+=(--seed-dirs "${SEED_DIRS}")
   fi
   if [[ -n "${FASTA_PATH:-}" ]]; then
-    EXTRA_ARGS+=(--fasta "$FASTA_PATH")
+    EXTRA_ARGS+=(--fasta "${FASTA_PATH}")
   fi
   if [[ "${AF3_MODE:-off}" != "off" ]]; then
-    EXTRA_ARGS+=(--af3-mode "$AF3_MODE")
+    EXTRA_ARGS+=(--af3-mode "${AF3_MODE}")
   fi
   if [[ -n "${DISORDERNET_AF3_ROOT:-}" ]]; then
-    EXTRA_ARGS+=(--af3-root "$DISORDERNET_AF3_ROOT")
+    EXTRA_ARGS+=(--af3-root "${DISORDERNET_AF3_ROOT}")
   fi
   if [[ -n "${AF3_MAX_PROTEINS:-}" ]]; then
-    EXTRA_ARGS+=(--af3-max-proteins "$AF3_MAX_PROTEINS")
+    EXTRA_ARGS+=(--af3-max-proteins "${AF3_MAX_PROTEINS}")
   fi
   if [[ -n "${AF3_SHARD_INDEX:-}" && -n "${AF3_SHARD_COUNT:-}" ]]; then
-    EXTRA_ARGS+=(--af3-shard-index "$AF3_SHARD_INDEX" --af3-shard-count "$AF3_SHARD_COUNT")
+    EXTRA_ARGS+=(--af3-shard-index "${AF3_SHARD_INDEX}" --af3-shard-count "${AF3_SHARD_COUNT}")
   fi
 
-  # Boltz-2 (default structure backend). Training jobs default to ingest-only;
-  # use BOLTZ_MODE=auto or rockfish/slurm/boltz_batch.sbatch to run predictions
-  # (pinned boltz auto-downloads weights on first use).
   : "${BOLTZ_MODE:=ingest}"
   : "${STRUCTURE_BACKEND:=boltz}"
-  EXTRA_ARGS+=(--structure-backend "$STRUCTURE_BACKEND")
-  EXTRA_ARGS+=(--boltz-mode "$BOLTZ_MODE")
+  EXTRA_ARGS+=(--structure-backend "${STRUCTURE_BACKEND}")
+  EXTRA_ARGS+=(--boltz-mode "${BOLTZ_MODE}")
   if [[ -n "${DISORDERNET_BOLTZ_ROOT:-}" ]]; then
-    EXTRA_ARGS+=(--boltz-root "$DISORDERNET_BOLTZ_ROOT")
+    EXTRA_ARGS+=(--boltz-root "${DISORDERNET_BOLTZ_ROOT}")
   fi
   if [[ -n "${BOLTZ_MAX_PROTEINS:-}" ]]; then
-    EXTRA_ARGS+=(--boltz-max-proteins "$BOLTZ_MAX_PROTEINS")
+    EXTRA_ARGS+=(--boltz-max-proteins "${BOLTZ_MAX_PROTEINS}")
   fi
   if [[ -n "${BOLTZ_SHARD_INDEX:-}" && -n "${BOLTZ_SHARD_COUNT:-}" ]]; then
-    EXTRA_ARGS+=(--boltz-shard-index "$BOLTZ_SHARD_INDEX" --boltz-shard-count "$BOLTZ_SHARD_COUNT")
+    EXTRA_ARGS+=(--boltz-shard-index "${BOLTZ_SHARD_INDEX}" --boltz-shard-count "${BOLTZ_SHARD_COUNT}")
   fi
   if [[ "${BOLTZ_USE_MSA_SERVER:-0}" == "1" ]]; then
     EXTRA_ARGS+=(--boltz-use-msa-server)
@@ -111,12 +130,12 @@ disordernet_slurm_run() {
 
   local CHECKPOINT_ARG=(--checkpoint-dir "${CHECKPOINT_SUBDIR:-checkpoints}")
 
-  echo "▶ Running: stage=$STAGE profile=$PROFILE backbone=$BACKBONE ckpt=${CHECKPOINT_SUBDIR:-checkpoints}"
-  python rockfish/run_disordernet.py "$STAGE" \
-    --profile "$PROFILE" \
-    --backbone "$BACKBONE" \
-    --seed "$SEED" \
-    --num-workers "$NUM_WORKERS" \
+  echo "▶ Running: stage=${STAGE} profile=${PROFILE} backbone=${BACKBONE} ckpt=${CHECKPOINT_SUBDIR:-checkpoints}"
+  python rockfish/run_disordernet.py "${STAGE}" \
+    --profile "${PROFILE}" \
+    --backbone "${BACKBONE}" \
+    --seed "${SEED}" \
+    --num-workers "${NUM_WORKERS}" \
     "${WORKDIR_ARG[@]}" \
     "${CHECKPOINT_ARG[@]}" \
     "${EXTRA_ARGS[@]}"
@@ -130,24 +149,21 @@ disordernet_slurm_mirror() {
   if [[ -n "${MIRROR_TAG_SUFFIX:-}" ]]; then
     RUN_TAG="${RUN_TAG}_${MIRROR_TAG_SUFFIX}"
   fi
-  local DEST="${DISORDERNET_RESULTS:-$HOME/disordernet_runs}/$RUN_TAG"
-  mkdir -p "$DEST"
+  local DEST="${RESULTS_DIR}/${RUN_TAG}"
+  mkdir -p "${DEST}"
 
   local CWD="."
   if [[ -n "${DISORDERNET_WORKDIR:-}" ]]; then
-    CWD="$DISORDERNET_WORKDIR"
+    CWD="${DISORDERNET_WORKDIR}"
   fi
 
-  # Parallel mirror (threads) — faster than serial cp for many reports
-  python rockfish/mirror_results.py --dest "$DEST" --workers "${MIRROR_WORKERS:-8}" --cwd "$CWD"
+  python rockfish/mirror_results.py --dest "${DEST}" --workers "${MIRROR_WORKERS:-8}" --cwd "${CWD}"
 
-  echo "Results mirrored to $DEST"
-  # Stash last mirror dest for packaging wrappers
-  export DISORDERNET_LAST_MIRROR_DEST="$DEST"
+  echo "Results mirrored to ${DEST}"
+  export DISORDERNET_LAST_MIRROR_DEST="${DEST}"
   date
 }
 
-# Default: behave like the historical _common.sh (autorun on source)
 if [[ "${DISORDERNET_COMMON_AUTORUN:-1}" == "1" ]]; then
   disordernet_slurm_setup
   disordernet_slurm_run
