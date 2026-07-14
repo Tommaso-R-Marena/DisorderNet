@@ -7,7 +7,7 @@
 #   source ~/venvs/disordernet/bin/activate
 #
 # Then submit jobs from repo root:
-#   export DISORDERNET_ACCOUNT=your_pi_gpu
+#   export DISORDERNET_ACCOUNT=sfried3
 #   sbatch rockfish/slurm/quick_screen.sbatch
 
 set -euo pipefail
@@ -53,7 +53,7 @@ echo "Setup complete. Activate with:"
 echo "  source $VENV_DIR/bin/activate"
 echo ""
 echo "Set your Slurm GPU account (PI allocation ending in _gpu):"
-echo "  export DISORDERNET_ACCOUNT=your_pi_gpu"
+echo "  export DISORDERNET_ACCOUNT=sfried3"
 echo ""
 echo "Submit quick screen:"
 echo "  cd $REPO_ROOT && sbatch rockfish/slurm/quick_screen.sbatch"

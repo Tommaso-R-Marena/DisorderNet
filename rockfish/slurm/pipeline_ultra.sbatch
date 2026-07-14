@@ -8,7 +8,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=192G
 #SBATCH --time=03-00:00:00
-#SBATCH --account=CHANGE_ME_gpu
+#SBATCH --account=sfried3
 #SBATCH --export=ALL
 #SBATCH --output=logs/dn-pipeline_%j.out
 #SBATCH --error=logs/dn-pipeline_%j.err
@@ -17,7 +17,7 @@
 # Complete production run: CV → stack → postprocess → eval → CAID3 (~24–48 h ultra).
 #
 # Submit:
-#   export DISORDERNET_ACCOUNT=your_pi_gpu
+#   export DISORDERNET_ACCOUNT=sfried3
 #   sbatch --account="${DISORDERNET_ACCOUNT}" rockfish/slurm/pipeline_ultra.sbatch
 
 : "${PROFILE:=ultra}"

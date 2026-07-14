@@ -8,7 +8,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=192G
 #SBATCH --time=03-00:00:00
-#SBATCH --account=CHANGE_ME_gpu
+#SBATCH --account=sfried3
 #SBATCH --export=ALL
 #SBATCH --output=logs/dn-pipeline-clean_%j.out
 #SBATCH --error=logs/dn-pipeline-clean_%j.err
@@ -17,7 +17,7 @@
 # Contamination-clean companion (ultra capacity, structure-training flags off).
 #
 # Submit:
-#   export DISORDERNET_ACCOUNT=your_pi_gpu
+#   export DISORDERNET_ACCOUNT=sfried3
 #   export DISORDERNET_WORKDIR="${HOME}/disordernet_runs/ultra_clean"
 #   sbatch --account="${DISORDERNET_ACCOUNT}" rockfish/slurm/pipeline_ultra_clean.sbatch
 

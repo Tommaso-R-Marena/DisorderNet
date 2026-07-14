@@ -35,12 +35,14 @@ class TestUtils:
 
     def test_require_account(self, monkeypatch):
         monkeypatch.delenv("DISORDERNET_ACCOUNT", raising=False)
+        assert require_account(None) == "sfried3"
+        assert require_account("sfried3") == "sfried3"
+        assert require_account("my_gpu") == "my_gpu"
         try:
-            require_account(None)
+            require_account("CHANGE_ME_gpu")
             assert False, "expected ValueError"
         except ValueError:
             pass
-        assert require_account("my_gpu") == "my_gpu"
 
     def test_export_keys_include_all(self):
         keys = sbatch_export_keys()

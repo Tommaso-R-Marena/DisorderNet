@@ -5,7 +5,7 @@
 #   cd ~/DisorderNet && git checkout master
 #   source ~/venvs/disordernet/bin/activate
 #   mkdir -p logs
-#   export DISORDERNET_ACCOUNT=your_pi_gpu
+#   export DISORDERNET_ACCOUNT=sfried3
 #   bash rockfish/slurm/submit_publish_3b.sh
 #
 # If OOM on 40GB A100:
