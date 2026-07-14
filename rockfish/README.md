@@ -5,15 +5,12 @@ Run the full SOTA pipeline on Rockfish instead of Colab: longer wall times (72 h
 ## Prerequisites
 
 1. **GPU allocation** — your PI must have a Rockfish `_gpu` account (e.g. `jsmith123_gpu`) and `qos_gpu`. Request via [ARCH support](https://docs.arch.jhu.edu/) if needed.
-2. **Clone the repo** on Rockfish login node (**use the publish PR branch** until
-   `feature/idr-biology-layer-c41e` is merged to `master`):
+2. **Clone the repo** on Rockfish login node:
    ```bash
    git clone https://github.com/Tommaso-R-Marena/DisorderNet.git ~/DisorderNet
    cd ~/DisorderNet
-   git fetch origin feature/idr-biology-layer-c41e
-   git checkout feature/idr-biology-layer-c41e
+   git checkout master
    ```
-   After merge, `git checkout master` is fine.
 3. **One-time env setup**:
    ```bash
    bash rockfish/setup_env.sh
@@ -31,7 +28,7 @@ remaining work is **judge numbers → go/no-go** — not more feature code.
 Checklist boxes: [`docs/METHODS_CHECKLIST.md`](../docs/METHODS_CHECKLIST.md).
 
 ```text
-checkout PR branch → setup_env → sbatch pipeline_ultra → sbatch pipeline_ultra_clean
+checkout master → setup_env → sbatch pipeline_ultra → sbatch pipeline_ultra_clean
   → verify mirrored artifacts → METHODS_CHECKLIST → go/no-go on numbers
 ```
 

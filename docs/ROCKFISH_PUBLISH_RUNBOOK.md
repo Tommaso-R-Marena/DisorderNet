@@ -10,6 +10,6 @@ Related checklists / claim docs:
 - [`PAPER_OUTLINE_STRUCTURE_DISTRUST.md`](PAPER_OUTLINE_STRUCTURE_DISTRUST.md)
 
 ```text
-checkout PR branch → setup_env → sbatch pipeline_ultra → sbatch pipeline_ultra_clean
+checkout master → setup_env → sbatch pipeline_ultra → sbatch pipeline_ultra_clean
   → verify mirrored artifacts → METHODS_CHECKLIST → go/no-go on numbers
 ```

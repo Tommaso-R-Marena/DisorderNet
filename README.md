@@ -101,12 +101,10 @@ Breaking **0.90+ consistently** on DisProt likely needs **ESM-2 3B** (`ultra3b`)
 
 If you have access to JHU Rockfish (or any Slurm cluster with A100s), use the HPC pipeline instead of Colab for 3B runs and multi-day jobs. **Full usage instructions** (setup, publish path, artifacts, go/no-go, env vars, Boltz/AF3) live in **[rockfish/README.md](rockfish/README.md)**.
 
-Until `feature/idr-biology-layer-c41e` is merged, checkout that branch on Rockfish:
-
 ```bash
 git clone https://github.com/Tommaso-R-Marena/DisorderNet.git ~/DisorderNet
 cd ~/DisorderNet
-git fetch origin feature/idr-biology-layer-c41e && git checkout feature/idr-biology-layer-c41e
+git checkout master
 bash rockfish/setup_env.sh && source ~/venvs/disordernet/bin/activate
 mkdir -p logs
 export DISORDERNET_ACCOUNT=your_pi_gpu
@@ -127,7 +125,7 @@ sbatch --account=$DISORDERNET_ACCOUNT \
   rockfish/slurm/pipeline_ultra_clean.sbatch
 ```
 
-Operator path: checkout → setup → `pipeline_ultra` → `pipeline_ultra_clean` → verify mirrored artifacts → [`docs/METHODS_CHECKLIST.md`](docs/METHODS_CHECKLIST.md) → publish go/no-go (criteria in [rockfish/README.md](rockfish/README.md#5-publish-go--no-go)).
+Operator path: checkout `master` → setup → `pipeline_ultra` → `pipeline_ultra_clean` → verify mirrored artifacts → [`docs/METHODS_CHECKLIST.md`](docs/METHODS_CHECKLIST.md) → publish go/no-go (criteria in [rockfish/README.md](rockfish/README.md#5-publish-go--no-go)).
 
 Ultra on Rockfish uses **homology-safe CV**, optional **train-time pLDDT** (disabled in `ultra_clean`), and **CAID3** scoring for fair comparison vs ESMDisPred (0.895).
 
