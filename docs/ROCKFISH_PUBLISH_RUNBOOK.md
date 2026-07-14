@@ -1,5 +1,9 @@
 # Rockfish publish runbook
 
+**From scratch (clone → env → submit → package → checklist):**  
+see **[root README — From scratch](../README.md#from-scratch-start-here)** (Path C) and  
+**[rockfish/README.md — From scratch on Rockfish](../rockfish/README.md#from-scratch-on-rockfish-start-here)**.
+
 Canonical usage (two scripts + CLI) is in
 **[rockfish/README.md — Publish path (exact usage)](../rockfish/README.md#publish-path-exact-usage)**.
 
@@ -26,6 +30,6 @@ python rockfish/publish_submit.py package \
 ```
 
 ```text
-setup → submit_publish_650m.sh and/or submit_publish_3b.sh
-  → open publish_package/ → METHODS_CHECKLIST → go/no-go on numbers
+clone → setup_env → export account → submit_publish_650m.sh and/or submit_publish_3b.sh
+  → squeue → open publish_package/ → METHODS_CHECKLIST → go/no-go on numbers
 ```
