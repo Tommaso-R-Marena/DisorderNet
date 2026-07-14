@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=00-02:00:00
-#SBATCH --account=CHANGE_ME
+#SBATCH --account=sfried3
 #SBATCH --export=ALL
 #SBATCH --output=logs/dn-blend_%j.out
 #SBATCH --error=logs/dn-blend_%j.err

@@ -36,10 +36,11 @@ def default_publish_root(kind: str, stamp: Optional[str] = None) -> Path:
 
 
 def require_account(account: Optional[str] = None) -> str:
-    acc = account or os.environ.get("DISORDERNET_ACCOUNT", "CHANGE_ME_gpu")
-    if not acc or acc == "CHANGE_ME_gpu":
+    acc = account or os.environ.get("DISORDERNET_ACCOUNT", "sfried3")
+    if not acc or acc in ("CHANGE_ME_gpu", "CHANGE_ME"):
         raise ValueError(
-            "Set DISORDERNET_ACCOUNT (or pass --account) to your Rockfish _gpu account"
+            "Set DISORDERNET_ACCOUNT (or pass --account) to your Rockfish account "
+            "(default: sfried3)"
         )
     return acc
 
@@ -56,7 +57,7 @@ def env_defaults() -> dict[str, str]:
         "DISORDERNET_PARTITION": os.environ.get("DISORDERNET_PARTITION", "a100"),
         "DISORDERNET_CPU_ACCOUNT": os.environ.get(
             "DISORDERNET_CPU_ACCOUNT",
-            os.environ.get("DISORDERNET_ACCOUNT", "CHANGE_ME_gpu"),
+            os.environ.get("DISORDERNET_ACCOUNT", "sfried3"),
         ),
         "STAGE": "pipeline",
         "RUN_CAID3": os.environ.get("RUN_CAID3", "1"),
