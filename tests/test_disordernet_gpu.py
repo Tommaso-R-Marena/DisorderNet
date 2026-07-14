@@ -27,6 +27,7 @@ from colab.disordernet_gpu import (
     eval_epoch,
     fetch_disprot,
     process_disprot,
+    unwrap_lora_from_esm,
 )
 from tests.conftest import MockESM
 
@@ -132,6 +133,42 @@ class TestDisorderNetGPU:
         tokens = torch.randint(0, 20, (2, 32))
         logits = model(tokens)
         assert logits.shape == (2, 30)  # strip BOS/EOS
+
+    def test_lora_reinjected_across_folds_on_shared_esm(self, mock_esm):
+        """Regression: second fold must not report 0 LoRA projections on shared ESM."""
+        cfg = TrainConfig(
+            lora_layers=2, lora_rank=4, lora_on_k=True, use_physico_features=False,
+        )
+        fold1 = DisorderNetGPU(mock_esm, cfg, verbose=False)
+        n1 = len(fold1._lora_modules)
+        assert n1 == 6
+        # Mutate fold-1 LoRA so a stale wrap would be detectable
+        with torch.no_grad():
+            fold1._lora_modules[0].lora_A.fill_(1.0)
+
+        # Simulate train_fold discarding the Python wrapper but leaving LoRA on ESM
+        del fold1
+        assert isinstance(mock_esm.layers[-1].self_attn.q_proj, LoRALinear)
+
+        fold2 = DisorderNetGPU(mock_esm, cfg, verbose=False)
+        n2 = len(fold2._lora_modules)
+        assert n2 == n1
+        # Fresh adapters (not the filled-ones from fold 1)
+        assert float(fold2._lora_modules[0].lora_A.detach().abs().max()) < 10.0
+        assert not torch.allclose(
+            fold2._lora_modules[0].lora_A.detach(),
+            torch.ones_like(fold2._lora_modules[0].lora_A),
+        )
+        tokens = torch.randint(0, 20, (1, 16))
+        assert fold2(tokens).shape == (1, 14)
+
+    def test_unwrap_lora_from_esm(self, mock_esm):
+        cfg = TrainConfig(lora_layers=2, lora_rank=4, lora_on_k=True, use_physico_features=False)
+        DisorderNetGPU(mock_esm, cfg, verbose=False)
+        assert isinstance(mock_esm.layers[-1].self_attn.q_proj, LoRALinear)
+        n = unwrap_lora_from_esm(mock_esm)
+        assert n == 6
+        assert isinstance(mock_esm.layers[-1].self_attn.q_proj, nn.Linear)
 
     def test_lora_injection_without_k(self, mock_esm):
         cfg = TrainConfig(lora_layers=2, lora_rank=4, lora_on_k=False, use_physico_features=False)
