@@ -3,6 +3,9 @@ Fast paradigm screen — estimate breakthrough potential before full 18–24h CV
 
 Runs a stratified protein subset with reduced folds/epochs, GPU + v6 ensemble,
 and returns a go/no-go verdict for the current ESM-2 650M + LoRA paradigm.
+
+Important: ``standard`` uses the ``screen_plus`` (mini-ultra) training profile so
+the go/no-go reflects the ultra stack, not a toy CNN recipe.
 """
 
 from __future__ import annotations
@@ -25,27 +28,44 @@ ESMDISPRED_REFERENCE = 0.895
 VERIFIED_GPU_BASELINE = 0.817
 VERIFIED_V6_BASELINE = 0.831
 
-# screen_mode → runtime / rigor trade-off (A100 rough guides)
+# Expected uplift from this screen recipe → full ultra + 7b–7d meta-stack.
+# Weak recipes (flash) can jump more; mini-ultra (standard) and paradigm less.
+_MODE_ULTRA_UPLIFT: dict[str, tuple[float, float]] = {
+    "flash": (0.05, 0.12),
+    "standard": (0.02, 0.06),
+    "paradigm": (0.01, 0.04),
+}
+
+# screen_mode → runtime / rigor trade-off
+# Timing: ~2–3 h is an A100-40GB guide; A100-80GB often finishes much faster.
 SCREEN_MODES: dict[str, dict[str, Any]] = {
     "flash": {
         "n_proteins": 120,
         "n_folds": 2,
         "train_profile": "screen",
-        "description": "~45–90 min A100 — coarse go/no-go",
+        "description": (
+            "~45–90 min A100-40GB / ~20–40 min A100-80GB — coarse go/no-go "
+            "(toy CNN recipe; not ultra-faithful)"
+        ),
     },
     "standard": {
         "n_proteins": 250,
         "n_folds": 3,
-        "train_profile": "screen",
-        "description": "~2–3 h A100 — recommended screen",
+        "train_profile": "screen_plus",
+        "description": (
+            "~2–3 h A100-40GB / ~40–90 min A100-80GB — recommended mini-ultra screen "
+            "(SOTA head + rich features; judges ultra paradigm)"
+        ),
     },
     "paradigm": {
         "n_proteins": 350,
         "n_folds": 3,
         "train_profile": "screen_plus",
         "train_profile_3b": "ultra3b",
-        "description": "~4–6 h A100 — mini-ultra paradigm fidelity",
-        "description_3b": "~8–12 h A100 40GB — ESM-2 3B paradigm screen",
+        "description": (
+            "~4–6 h A100-40GB — larger mini-ultra subset (highest 650M fidelity before full CV)"
+        ),
+        "description_3b": "~8–12 h A100 40GB+ — ESM-2 3B paradigm screen",
     },
 }
 
@@ -58,6 +78,11 @@ class BreakthroughVerdict:
     projected_full_auc_low: float
     projected_full_auc_high: float
     proceed_full_ultra: bool
+
+
+def expected_ultra_uplift(mode: str) -> tuple[float, float]:
+    """Return (lo, hi) expected AUC uplift from screen → full ultra stack."""
+    return _MODE_ULTRA_UPLIFT.get(mode, (0.02, 0.06))
 
 
 def subsample_proteins_stratified(
@@ -132,75 +157,97 @@ def assess_breakthrough_potential(
     mode: str = "standard",
 ) -> BreakthroughVerdict:
     """
-    Map quick-screen metrics to a breakthrough verdict for the current paradigm.
+    Map quick-screen metrics to a breakthrough verdict for the ultra paradigm.
 
-    Uses conservative projection: full ultra + meta-stack typically adds 0.01–0.04
-    over a screen run, rarely more unless screen already ≥0.87.
+    Projection is **mode-aware**: flash (toy recipe) allows more uplift to full
+    ultra than standard/paradigm (mini-ultra). Tiers use the projected full-CV
+    band, with a stacked-AUC floor so a very weak screen cannot auto-approve.
     """
     uplift = stacked_pooled_auc - gpu_pooled_auc
     fold_ci = _bootstrap_mean_ci(np.asarray(fold_aucs or [stacked_pooled_auc]))
+    up_lo, up_hi = expected_ultra_uplift(mode)
 
-    # Conservative projection band for full DisProt 5-fold ultra pipeline
+    # If the screen itself is already ultra-strong, keep uplift modest.
     if stacked_pooled_auc >= 0.87:
-        proj_lo = stacked_pooled_auc + 0.01
-        proj_hi = min(0.92, stacked_pooled_auc + 0.04)
+        up_lo, up_hi = min(up_lo, 0.01), min(up_hi, 0.04)
     elif stacked_pooled_auc >= 0.84:
-        proj_lo = stacked_pooled_auc
-        proj_hi = stacked_pooled_auc + 0.03
-    else:
-        proj_lo = max(0.0, stacked_pooled_auc - 0.01)
-        proj_hi = stacked_pooled_auc + 0.02
+        up_lo, up_hi = min(up_lo, 0.02), min(up_hi, 0.05)
+
+    proj_lo = float(np.clip(stacked_pooled_auc + up_lo, 0.0, 0.95))
+    proj_hi = float(np.clip(stacked_pooled_auc + up_hi, 0.0, 0.96))
+    if proj_hi < proj_lo:
+        proj_hi = proj_lo
 
     v6_ceiling_note = ""
-    if v6_pooled_auc is not None and v6_pooled_auc < 0.84:
-        proj_hi = min(proj_hi, v6_pooled_auc + 0.06)
-        v6_ceiling_note = " v6 subset ceiling limits ensemble headroom."
+    # Only apply a soft v6 ceiling on coarse flash screens (subset v6 is noisy).
+    if mode == "flash" and v6_pooled_auc is not None and v6_pooled_auc < 0.80:
+        capped = min(proj_hi, v6_pooled_auc + 0.08)
+        if capped < proj_hi:
+            proj_hi = capped
+            v6_ceiling_note = " Coarse v6 subset caps ensemble headroom."
 
-    if stacked_pooled_auc >= 0.88 and uplift >= 0.02:
+    # Tier by projected full-CV band + stacked floor (anti false-approve).
+    if proj_hi >= 0.90 and stacked_pooled_auc >= 0.84 and uplift >= 0.01:
         tier = "HIGH"
         headline = (
             f"Screen stacked AUC {stacked_pooled_auc:.3f} — paradigm can likely reach "
-            f"0.88–0.92 full CV"
+            f"0.88–0.92 full CV (projected {proj_lo:.3f}–{proj_hi:.3f})"
         )
         rec = "Proceed with full QUALITY_PROFILE='ultra' 5-fold CV + 7b–7d stack."
         proceed = True
-    elif stacked_pooled_auc >= 0.85 or (
-        stacked_pooled_auc >= 0.83 and uplift >= 0.025
-    ):
+    elif proj_hi >= 0.88 and stacked_pooled_auc >= 0.80:
         tier = "MODERATE"
         headline = (
             f"Screen stacked AUC {stacked_pooled_auc:.3f} — breakthrough possible "
             f"but not assured (projected {proj_lo:.3f}–{proj_hi:.3f})"
         )
         rec = (
-            "Full ultra run is reasonable if you have GPU budget; otherwise tune "
-            "ensemble/ultra first." + v6_ceiling_note
+            "Full ultra run is reasonable if you have GPU budget; otherwise run "
+            "SCREEN_MODE='paradigm' or SCREEN_BACKBONE='3B' first."
+            + v6_ceiling_note
         )
-        proceed = proj_hi >= 0.88
-    elif stacked_pooled_auc >= 0.82:
+        proceed = proj_hi >= 0.88 and stacked_pooled_auc >= 0.82
+    elif proj_hi >= 0.85 and stacked_pooled_auc >= 0.78:
         tier = "LOW"
         headline = (
             f"Screen stacked AUC {stacked_pooled_auc:.3f} — unlikely to hit "
-            f"{BREAKTHROUGH_TARGET:.2f} without changes"
+            f"{BREAKTHROUGH_TARGET:.2f} without changes "
+            f"(projected {proj_lo:.3f}–{proj_hi:.3f})"
         )
         rec = (
-            "Current paradigm probably caps ~0.85–0.87 full CV. Consider backbone "
-            "upgrade or CAID3-targeted training before 24h run." + v6_ceiling_note
+            "Current 650M screen projects below breakthrough. Try paradigm mode, "
+            "ESM-2 3B, or architecture changes before a 24h ultra run."
+            + v6_ceiling_note
         )
         proceed = False
     else:
         tier = "STOP"
         headline = (
             f"Screen stacked AUC {stacked_pooled_auc:.3f} — paradigm not competitive "
-            f"(baseline GPU {VERIFIED_GPU_BASELINE:.3f})"
+            f"(baseline GPU {VERIFIED_GPU_BASELINE:.3f}; "
+            f"projected {proj_lo:.3f}–{proj_hi:.3f})"
         )
-        rec = "Do not commit to full ultra CV; fix data, profile, or architecture first."
+        rec = (
+            "Do not commit to full ultra CV yet. Confirm you used standard/paradigm "
+            "(mini-ultra), then fix data/profile/backbone."
+        )
         proceed = False
 
-    if fold_ci.get("ci_low") is not None and fold_ci["ci_low"] < 0.80 and tier == "HIGH":
+    if fold_ci.get("ci_low") is not None and fold_ci["ci_low"] < 0.78 and tier == "HIGH":
         tier = "MODERATE"
         headline += " (wide fold CI — treat as moderate)"
         proceed = False
+
+    if mode == "flash" and proceed:
+        # Flash is too coarse to green-light a 24h run by itself.
+        proceed = False
+        rec = (
+            "Flash looks promising, but re-run SCREEN_MODE='standard' "
+            "(mini-ultra) before committing to full ultra."
+        )
+        if tier == "HIGH":
+            tier = "MODERATE"
+            headline += " (flash only — confirm with standard)"
 
     return BreakthroughVerdict(
         tier=tier,
@@ -274,8 +321,9 @@ def run_paradigm_quick_screen(
     screen_cfg.data_cache = cfg.data_cache
 
     print(
-        f"\n  GPU CV: {screen_cfg.n_folds} folds  profile={spec['train_profile']}  "
-        f"epochs={screen_cfg.num_epochs}  LoRA r={screen_cfg.lora_rank}",
+        f"\n  GPU CV: {screen_cfg.n_folds} folds  profile={train_profile}  "
+        f"epochs={screen_cfg.num_epochs}  LoRA r={screen_cfg.lora_rank}  "
+        f"head={screen_cfg.head_type}",
         flush=True,
     )
 
@@ -343,6 +391,7 @@ def run_paradigm_quick_screen(
     )
 
     elapsed_h = (time.time() - screen_t0) / 3600
+    up_lo, up_hi = expected_ultra_uplift(mode)
     report = {
         "mode": mode,
         "mode_spec": spec,
@@ -350,6 +399,7 @@ def run_paradigm_quick_screen(
         "backbone": backbone,
         "v6_pro_ensemble": use_v6_pro,
         "screen_profile": train_profile,
+        "expected_ultra_uplift": {"lo": up_lo, "hi": up_hi},
         "gpu": {
             "pooled_auc": float(gpu_auc),
             "pooled_ap": float(gpu_metrics["ap"]),
@@ -389,6 +439,7 @@ def print_quick_screen_report(report: dict) -> None:
     print(" QUICK SCREEN RESULTS")
     print(f"{'═' * 64}")
     print(f"  Mode          : {report['mode']} ({report['mode_spec']['description']})")
+    print(f"  Profile       : {report.get('screen_profile', '?')}")
     print(f"  Sample        : {report['sample']['n_sampled']} proteins")
     print(f"  GPU AUC       : {report['gpu']['pooled_auc']:.4f}")
     if report.get("v6_screen_auc") is not None:

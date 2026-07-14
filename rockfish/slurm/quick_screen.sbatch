@@ -14,11 +14,13 @@
 #SBATCH --error=logs/dn-screen_%j.err
 ##SBATCH --mail-user=you@jh.edu
 ##SBATCH --mail-type=END,FAIL,INVALID_DEPEND,TIME_LIMIT
-# Quick paradigm screen (~2–3 h on A100).
+# Quick paradigm screen (~2–3 h on A100-40GB; often faster on 80GB).
+# SCREEN_MODE=standard|paradigm → train_profile=screen_plus (mini-ultra).
+# SCREEN_MODE=flash → train_profile=screen (toy; not alone for go/no-go).
 #
 #   sbatch --account="${DISORDERNET_ACCOUNT}" rockfish/slurm/quick_screen.sbatch
 
-: "${PROFILE:=screen}"
+: "${PROFILE:=screen_plus}"
 : "${BACKBONE:=650M}"
 : "${STAGE:=screen}"
 : "${SCREEN_MODE:=standard}"
