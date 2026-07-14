@@ -123,6 +123,62 @@ CLI: `python rockfish/publish_submit.py submit-650m|submit-3b --account $DISORDE
 
 Ultra on Rockfish uses **homology-safe CV**, optional **train-time pLDDT** (disabled in clean companions), and **CAID3** scoring for fair comparison vs ESMDisPred (0.895).
 
+## Documentation
+
+All project documentation lives under `docs/` and `rockfish/README.md`. Start here:
+
+| Document | What it covers |
+|----------|----------------|
+| **[rockfish/README.md](rockfish/README.md)** | Canonical Rockfish/Slurm usage: setup, publish path (`submit_publish_650m` / `submit_publish_3b`), packaging (`--kind` / `--strict`), artifacts, go/no-go, env vars, Boltz/AF3 |
+| **[docs/ROCKFISH_PUBLISH_RUNBOOK.md](docs/ROCKFISH_PUBLISH_RUNBOOK.md)** | Short operator pointer to the publish path + re-package CLI |
+| **[docs/METHODS_CHECKLIST.md](docs/METHODS_CHECKLIST.md)** | Preprint freeze checklist (credibility floor, labeled distrust, contamination, atlas, non-claims) |
+| **[docs/STRUCTURE_DISTRUST_ATLAS.md](docs/STRUCTURE_DISTRUST_ATLAS.md)** | Structure-distrust product thesis: labeled rescue vs proxy flags, module map, Rockfish eval artifacts |
+| **[docs/IDR_BIOLOGY_LAYER.md](docs/IDR_BIOLOGY_LAYER.md)** | Post-structure IDR biology layer claim, non-goals, module map, phased roadmap |
+| **[docs/PAPER_OUTLINE_STRUCTURE_DISTRUST.md](docs/PAPER_OUTLINE_STRUCTURE_DISTRUST.md)** | Paper outline: core claim, evidence stack, figure list, methods red lines |
+| **[docs/HOMOLOGY_HOLDOUT.md](docs/HOMOLOGY_HOLDOUT.md)** | Homology-aware CV wording (what the code does / does not claim vs official CAID filters) |
+| **[AGENTS.md](AGENTS.md)** | Contributor / agent notes (venv, pytest, CPU pipeline paths, Rockfish publish conventions) |
+
+### Structure distrust (paper claim)
+
+After Boltz / AlphaFold produce a fold, DisorderNet is the **default post-structure distrust layer**: it flags where structure confidence should not be trusted on IDRs and prefers an independent disorder map (+ optional roles).
+
+Do **not** conflate:
+
+| Definition | Inputs | Publish as rescue? |
+|------------|--------|--------------------|
+| **Labeled hallucination / rescue** | Independent DisProt labels ∩ high pLDDT; DN predicts disorder | **Yes** |
+| **Proxy distrust flags** | DN disorder call ∩ high pLDDT | **No** (tautological) |
+
+Load-bearing evidence order (see [`docs/PAPER_OUTLINE_STRUCTURE_DISTRUST.md`](docs/PAPER_OUTLINE_STRUCTURE_DISTRUST.md)):
+
+1. CAID3 / DisProt credibility floor  
+2. Labeled hallucination rescue  
+3. Matched inverse-pLDDT baseline (`delta_auc_dn_minus_plddt` + per-fold stats)  
+4. Downstream mask utility  
+5. Proteome atlas resource  
+6. Contamination audit + clean ablations when risk ≠ low  
+
+Freeze checklist: [`docs/METHODS_CHECKLIST.md`](docs/METHODS_CHECKLIST.md).  
+Rockfish eval artifacts: `structure_distrust_benchmark.json`, `structure_distrust_atlas.jsonl` / `.tsv` (see [`docs/STRUCTURE_DISTRUST_ATLAS.md`](docs/STRUCTURE_DISTRUST_ATLAS.md)).
+
+### IDR biology layer
+
+Post-structure layer that answers what AF/Boltz cannot by design: where the chain is disordered, what IDRs might do, where structure is overconfident, optional Boltz variance proxy, and conditional-disorder boundary flags — **not** an AF replacement and **not** MD ensembles. Details: [`docs/IDR_BIOLOGY_LAYER.md`](docs/IDR_BIOLOGY_LAYER.md). Stage: `python rockfish/run_disordernet.py idr-layer`.
+
+### Homology / holdout language
+
+Ultra defaults to homology-aware grouping (`split_method="homology"`, ~40% identity within length bins via `SequenceMatcher`). This is **not** MMseqs2 and **not** official CAID homology filters — use the careful wording in [`docs/HOMOLOGY_HOLDOUT.md`](docs/HOMOLOGY_HOLDOUT.md).
+
+### Publish path (Rockfish)
+
+```bash
+bash rockfish/slurm/submit_publish_650m.sh   # and/or submit_publish_3b.sh
+# then open publish_package/ → METHODS_CHECKLIST → go/no-go on numbers
+python rockfish/publish_submit.py package --root-workdir … --kind 650m --strict
+```
+
+Full exact usage: **[rockfish/README.md — Publish path](rockfish/README.md#publish-path-exact-usage)**.
+
 ### SOTA track (`QUALITY_PROFILE = "sota"`)
 
 Designed to close the gap to ESMDisPred (0.895 CAID3 reference):
@@ -261,13 +317,28 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 
 ## Files
 
+### Documentation
+
+| File | Description |
+|------|-------------|
+| [`rockfish/README.md`](rockfish/README.md) | **Canonical Rockfish usage** (publish path, artifacts, go/no-go, env vars) |
+| [`docs/ROCKFISH_PUBLISH_RUNBOOK.md`](docs/ROCKFISH_PUBLISH_RUNBOOK.md) | Short pointer to rockfish README publish path + re-package CLI |
+| [`docs/METHODS_CHECKLIST.md`](docs/METHODS_CHECKLIST.md) | Preprint freeze checklist (credibility, distrust, contamination, atlas) |
+| [`docs/STRUCTURE_DISTRUST_ATLAS.md`](docs/STRUCTURE_DISTRUST_ATLAS.md) | Structure-distrust thesis, labeled vs proxy, module map, eval artifacts |
+| [`docs/IDR_BIOLOGY_LAYER.md`](docs/IDR_BIOLOGY_LAYER.md) | IDR biology layer claim, non-goals, modules, roadmap |
+| [`docs/PAPER_OUTLINE_STRUCTURE_DISTRUST.md`](docs/PAPER_OUTLINE_STRUCTURE_DISTRUST.md) | Paper outline: claim, evidence stack, figures, methods red lines |
+| [`docs/HOMOLOGY_HOLDOUT.md`](docs/HOMOLOGY_HOLDOUT.md) | Homology CV protocol and publishable wording |
+| [`AGENTS.md`](AGENTS.md) | Agent/contributor environment, pytest, Rockfish conventions |
+
+### Notebooks & HPC
+
 | File | Description |
 |------|-------------|
 | `colab/DisorderNet_Colab_QuickScreen.ipynb` | **Quick breakthrough screen** (~2–3h go/no-go before full CV) — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_QuickScreen.ipynb) |
 | `colab/DisorderNet_Colab_Pro.ipynb` | Full GPU notebook (ESM-2 650M + LoRA) — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb) |
 | `colab/quick_screen.py` | Quick screen logic (stratified subsample, verdict tiers) |
 | `colab/esm_backbone.py` | ESM-2 backbone registry (650M → 3B) + VRAM batch presets |
-| `rockfish/run_disordernet.py` | HPC CLI: screen / cv / stack / postprocess / full / pipeline / eval / atlas |
+| `rockfish/run_disordernet.py` | HPC CLI: screen / cv / stack / postprocess / full / pipeline / eval / atlas / idr-layer |
 | `rockfish/slurm/pipeline_ultra.sbatch` | Full production + eval + CAID3 |
 | `rockfish/slurm/pipeline_ultra_clean.sbatch` | Contamination-clean companion (separate workdir) |
 | `rockfish/slurm/submit_publish_650m.sh` | **Script 1:** 650M ultra + clean → `publish_package/` |
@@ -275,20 +346,28 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `rockfish/publish_submit.py` | **Preferred CLI:** `submit-650m` / `submit-3b` / `package --kind --strict` |
 | `rockfish/utils.py` | Shared artifact catalog, RunSpec, sbatch helpers, git provenance |
 | `rockfish/package_publish_results.py` | Package library (prefer `publish_submit.py package --kind`) |
+| `rockfish/mirror_results.py` | Parallel mirror of checkpoint/report artifacts |
 | `rockfish/slurm/multi_seed.sbatch` | Slurm array for seeds 42/43/44 |
-| `rockfish/README.md` | **Canonical Rockfish usage** (publish path, artifacts, go/no-go) |
-| `docs/ROCKFISH_PUBLISH_RUNBOOK.md` | Short pointer to rockfish README publish path |
-| `docs/METHODS_CHECKLIST.md` | Preprint freeze checklist |
+| `rockfish/slurm/_common.sh` | Shared Slurm setup / run / mirror / package helpers |
+
+### Core library modules
+
+| File | Description |
+|------|-------------|
 | `colab/homology_splits.py` | CAID-credible homology-clustered CV |
 | `colab/caid3_eval.py` | CAID3 Disorder-PDB benchmark harness |
 | `colab/structure_encoder.py` | Train-time pLDDT feature channel |
 | `colab/predict_batch.py` | FASTA proteome inference + `.caid` export |
 | `colab/novel_use_cases.py` | AF hallucination screening, rescue manifest, IDR function annotation |
 | `colab/function_predict.py` | Disorder→function multi-label head, labels, OOF metrics |
+| `colab/idr_biology_layer.py` | Compose IDR biology layer + proteome export |
+| `colab/structure_distrust_atlas.py` | Proteome structure-distrust atlas + mask utility |
+| `colab/hallucination_benchmark.py` | Labeled hallucination / rescue benchmarks |
 | `colab/inference_tta.py` | MC-dropout test-time augmentation (ultra Cell 7d) |
 | `colab/multi_seed_blend.py` | Optional multi-seed OOF average (Cell 7e) |
 | `colab/disordernet_gpu.py` | Colab training module (data, model, CV loop) |
 | `colab/cv_splits.py` | Shared deterministic GroupKFold splits + fingerprints |
+| `colab/run_manifest.py` | Reproducibility manifest + Drive mirror helpers |
 | `colab/sota_heads.py` | SOTA CNN+Transformer prediction head |
 | `colab/sota_losses.py` | Focal + Dice composite training loss |
 | `colab/sota_ensemble.py` | Three-way OOF stack (GPU + v6 + physics prior) |
@@ -305,6 +384,14 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/statistical_validation.py` | Per-fold paired sign/Wilcoxon tests + bootstrap CIs |
 | `colab/inference_fusion.py` | Post-CV AF pLDDT fusion (α-blend; AF2+AF3 combined map) |
 | `colab/downstream_refresh.py` | Refresh CAID/bio/benchmark after fusion updates |
+| `run_v6_mem.py` | CPU version with ESM-2 8M + GBDT ensemble |
+| `run_v5_esm.py` | v5 with PCA-32 ESM features |
+| `extract_esm_embeddings.py` | ESM-2 embedding extraction |
+| `fetch_disprot.py` | DisProt database downloader |
+| `generate_figures_v6.py` | Publication figure generator |
+| `results_v6/` | v6 metrics, predictions, figures |
+
+## Pipeline phases (Colab / Rockfish)
 
 ### Running tests
 
@@ -329,14 +416,14 @@ Train with `--profile ultra_fun` (or `--function-head`) to add a multi-label hea
 
 - protein binding · nucleic acid binding · PTM regulation · condensate/assembly · lipid/small-molecule binding
 
-OOF metrics land in `function_prediction_report.json`. Proteome exports use `annotate_idr_functions` / `predict_protein_functions`.
+OOF metrics land in `function_prediction_report.json`. Proteome exports use `annotate_idr_functions` / `predict_protein_functions`. Full layer thesis: [`docs/IDR_BIOLOGY_LAYER.md`](docs/IDR_BIOLOGY_LAYER.md).
 
 ### AlphaFold hallucination rescue (Phase 2)
 
 After CV, the notebook fetches **AlphaFold DB pLDDT** (AF2 models) for DisProt UniProt accessions and reports:
 
 - **Hallucination rate** — disordered residues where AF assigns high pLDDT (≥70)
-- **Rescue rate** — fraction of hallucinations DisorderNet correctly flags
+- **Rescue rate** — fraction of hallucinations DisorderNet correctly flags (**labeled** definition only; see [`docs/STRUCTURE_DISTRUST_ATLAS.md`](docs/STRUCTURE_DISTRUST_ATLAS.md))
 - **Δ AUC** — DisorderNet vs inverse-pLDDT baseline on AF-covered residues
 
 Outputs: `af_rescue_report.json`, `fig6_af_rescue.png`, cached pLDDT in `af_plddt_cache/`.
@@ -375,12 +462,7 @@ The Colab notebook reports:
 
 Outputs: `caid_evaluation_report.json`, `statistical_validation_report.json`.
 
-| `run_v6_mem.py` | CPU version with ESM-2 8M + GBDT ensemble |
-| `run_v5_esm.py` | v5 with PCA-32 ESM features |
-| `extract_esm_embeddings.py` | ESM-2 embedding extraction |
-| `fetch_disprot.py` | DisProt database downloader |
-| `generate_figures_v6.py` | Publication figure generator |
-| `results_v6/` | v6 metrics, predictions, figures |
+Before preprint freeze, tick [`docs/METHODS_CHECKLIST.md`](docs/METHODS_CHECKLIST.md).
 
 ## Citation
 
