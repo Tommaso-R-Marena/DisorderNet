@@ -19,6 +19,8 @@ from colab.colab_figures import (  # noqa: E402
 from colab.hallucination_benchmark import (  # noqa: E402
     attach_caid3_credibility_floor,
     compare_distrust_baselines,
+    finalize_distrust_benchmark_with_caid3,
+    save_distrust_benchmark,
 )
 from colab.novel_use_cases import build_af_rescue_manifest, screen_af_hallucinations  # noqa: E402
 from colab.structure_distrust_atlas import (  # noqa: E402
@@ -208,3 +210,84 @@ class TestStructureDistrustAtlas:
         assert args.stage == "structure-distrust-atlas"
         assert args.atlas_preds_dir == "preds"
         assert args.no_distrust_figures is True
+
+
+class TestPublishReadyFixes:
+    def test_finalize_distrust_benchmark_with_caid3(self, tmp_path):
+        bench = {
+            "matched_baselines": {"delta_auc_dn_minus_plddt": 0.1},
+            "non_claims": ["proxy_DN_threshold_intersection_is_not_rescue"],
+        }
+        save_distrust_benchmark(bench, str(tmp_path / "structure_distrust_benchmark.json"))
+        (tmp_path / "caid3_eval_report.json").write_text(json.dumps({
+            "pooled": {"auc": 0.87, "ap": 0.71},
+            "n_scored": 1234,
+        }))
+        out = finalize_distrust_benchmark_with_caid3(
+            str(tmp_path), regenerate_figure=False,
+        )
+        assert out is not None
+        assert out["caid3_credibility_floor"]["available"] is True
+        assert out["caid3_credibility_floor"]["auc"] == 0.87
+        reloaded = json.loads(
+            (tmp_path / "structure_distrust_benchmark.json").read_text()
+        )
+        assert reloaded["caid3_credibility_floor"]["available"] is True
+
+    def test_finalize_returns_none_without_benchmark(self, tmp_path):
+        (tmp_path / "caid3_eval_report.json").write_text("{}")
+        assert finalize_distrust_benchmark_with_caid3(str(tmp_path)) is None
+
+    def test_ultra_clean_profile_forces_flags_off(self):
+        from colab.disordernet_gpu import TrainConfig
+
+        clean = TrainConfig.from_profile("ultra_clean")
+        ultra = TrainConfig.from_profile("ultra")
+        assert clean.use_hallucination_weighting is False
+        assert clean.use_plddt_features is False
+        assert ultra.use_plddt_features is True
+        # capacity still matches ultra
+        assert clean.lora_rank == ultra.lora_rank
+        assert clean.num_epochs == ultra.num_epochs
+
+    def test_cli_accepts_contamination_clean_flags(self):
+        args = build_parser().parse_args([
+            "pipeline",
+            "--no-hallucination-weighting",
+            "--no-plddt-features",
+            "--profile", "ultra_clean",
+        ])
+        assert args.no_hallucination_weighting is True
+        assert args.no_plddt_features is True
+        assert args.profile == "ultra_clean"
+
+    def test_mirror_globs_include_distrust_paths(self):
+        from rockfish.mirror_results import DEFAULT_GLOBS
+
+        needed = [
+            "checkpoints/structure_distrust_benchmark.json",
+            "checkpoints/structure_distrust_atlas_report.json",
+            "checkpoints/structure_distrust_atlas.jsonl",
+            "checkpoints/structure_distrust_atlas.tsv",
+            "checkpoints/distrust_figures/**",
+            "checkpoints/idr_biology_layer_*",
+            "checkpoints/function_prediction_report.json",
+        ]
+        for g in needed:
+            assert g in DEFAULT_GLOBS, f"missing mirror glob: {g}"
+
+    def test_pipeline_finalize_after_mocked_caid_save(self, tmp_path):
+        """Unit-level: after CAID JSON lands + finalize, benchmark has floor."""
+        save_distrust_benchmark(
+            {"claim": "distrust", "caid3_credibility_floor": {"available": False}},
+            str(tmp_path / "structure_distrust_benchmark.json"),
+        )
+        (tmp_path / "caid3_eval_report.json").write_text(json.dumps({
+            "pooled": {"auc": 0.9},
+            "n_proteins": 50,
+        }))
+        patched = finalize_distrust_benchmark_with_caid3(
+            str(tmp_path), regenerate_figure=False,
+        )
+        assert patched["caid3_credibility_floor"]["available"] is True
+        assert patched["caid3_credibility_floor"]["auc"] == 0.9

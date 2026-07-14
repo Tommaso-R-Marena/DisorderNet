@@ -356,6 +356,7 @@ class TrainConfig:
         sota     — SOTA push: rank 64, Transformer head, Dice+EMA, compact ckpt
         ultra    — maximum push: rich features, attn fusion, FFN LoRA, v6-pro stack
         ultra3b  — ultra on ESM-2 3B (A100 40GB+); primary backbone upgrade
+        ultra_clean — ultra without structure-training contamination signals
         ultra_fun — ultra + disorder→function multi-label head
         screen   — fast paradigm check (~2h): 8 epochs, CNN head, 10 LoRA layers
         screen_plus — paradigm fidelity (~4h): mini-ultra on subset
@@ -536,6 +537,13 @@ class TrainConfig:
                 "use_hallucination_weighting": False,
             },
         }
+        # ultra_clean = ultra capacity without structure-training contamination
+        if profile == "ultra_clean":
+            presets["ultra_clean"] = {
+                **presets["ultra"],
+                "use_hallucination_weighting": False,
+                "use_plddt_features": False,
+            }
         # ultra_fun = ultra + multi-label function head (Disorder → function)
         if profile == "ultra_fun":
             presets["ultra_fun"] = {

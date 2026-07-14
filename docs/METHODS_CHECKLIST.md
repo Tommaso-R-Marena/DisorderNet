@@ -33,3 +33,7 @@ Tick before freezing a preprint. Each item points at a concrete artifact.
 - [ ] Not an AF replacement
 - [ ] Not MD / ensemble prediction
 - [ ] Proxy flags ≠ independent rescue
+
+## Operator runbook
+- [ ] Follow [`ROCKFISH_PUBLISH_RUNBOOK.md`](ROCKFISH_PUBLISH_RUNBOOK.md) for main + clean companion
+- [ ] Publish go/no-go decided from runbook §6 thresholds framing (not calendar)
