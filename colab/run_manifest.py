@@ -18,15 +18,49 @@ from colab.cv_splits import config_fingerprint, proteins_fingerprint
 
 
 def get_git_revision(repo_path: str = ".") -> Optional[str]:
-    """Return short git commit hash if available."""
+    """Return short git commit hash if available (shared with rockfish.utils)."""
     try:
-        return subprocess.check_output(
-            ["git", "-C", repo_path, "rev-parse", "--short", "HEAD"],
-            text=True,
-            stderr=subprocess.DEVNULL,
-        ).strip()
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
-        return None
+        from rockfish.utils import git_revision
+
+        return git_revision(repo_path)
+    except ImportError:
+        try:
+            return subprocess.check_output(
+                ["git", "-C", repo_path, "rev-parse", "--short", "HEAD"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+            return None
+
+
+def colab_drive_mirror_basenames() -> list[str]:
+    """
+    High-value Colab result filenames to mirror to Drive.
+
+    Prefer rockfish.utils.ARTIFACT_FILES when available so Colab and Rockfish
+    stay aligned; fall back to a minimal Colab set otherwise.
+    """
+    try:
+        from rockfish.utils import ARTIFACT_FILES
+
+        return list(ARTIFACT_FILES)
+    except ImportError:
+        return [
+            "run_manifest.json",
+            "cv_results.json",
+            "cv_summary.json",
+            "sota_postprocess_report.json",
+            "caid_evaluation_report.json",
+            "caid3_eval_report.json",
+            "biological_utility_report.json",
+            "statistical_validation_report.json",
+            "phase3_integrated_report.json",
+            "structure_distrust_benchmark.json",
+            "structure_distrust_atlas_report.json",
+            "function_prediction_report.json",
+            "idr_biology_layer_report.json",
+        ]
 
 
 def build_run_manifest(

@@ -3,7 +3,7 @@
 # Sourced by individual .sbatch scripts — do not submit this file directly.
 #
 # Provides:
-#   disordernet_slurm_setup   — modules + venv + cd repo
+#   disordernet_slurm_setup   — modules + venv + cd repo (fail-loud if missing)
 #   disordernet_slurm_run     — run rockfish/run_disordernet.py with env flags
 #   disordernet_slurm_mirror  — mirror reports to $RESULTS_DIR/<tag>
 #
@@ -12,8 +12,12 @@
 # or rely on the defaults below.
 #
 # Autorun on source unless DISORDERNET_COMMON_AUTORUN=0.
+#
+# Shell contract: callers use `bash -ue`. We re-assert pipefail so pipelines
+# fail on any command status, not only the last.
+# shellcheck shell=bash
 
-set -ue
+set -euo pipefail
 
 # ── Paths (lab convention; override via env or parent script) ─────────────────
 PROJECT_DIR="${DISORDERNET_REPO:-${PROJECT_DIR:-${HOME}/DisorderNet}}"
@@ -39,12 +43,16 @@ export DISORDERNET_RESULTS="${RESULTS_DIR}"
 : "${NUM_WORKERS:=4}"
 
 disordernet_slurm_setup() {
+  echo "============================================================"
+  echo "DisorderNet Rockfish"
   echo "Job ${SLURM_JOB_ID:-local} on $(hostname)"
   echo "Stage=${STAGE}  profile=${PROFILE}  backbone=${BACKBONE}  seed=${SEED}"
   echo "PROJECT_DIR=${PROJECT_DIR}"
   echo "WK_DIR=${WK_DIR:-"(repo cwd / default scratch)"}"
   echo "ENV_DIR=${ENV_DIR}"
-  date
+  echo "RESULTS_DIR=${RESULTS_DIR}"
+  date -Is
+  echo "============================================================"
 
   # Prefer Rockfish `ml` shorthand; fall back to `module`
   if command -v ml &>/dev/null; then
@@ -57,8 +65,19 @@ disordernet_slurm_setup() {
     if module is-avail cuda/11.8.0 2>/dev/null; then module load cuda/11.8.0; fi
   fi
 
+  if [[ ! -f "${ENV_DIR}/bin/activate" ]]; then
+    echo "ERROR: Python venv missing: ${ENV_DIR}/bin/activate" >&2
+    echo "Run: bash rockfish/setup_env.sh" >&2
+    exit 1
+  fi
   # shellcheck disable=SC1091
   source "${ENV_DIR}/bin/activate"
+
+  if [[ ! -f "${PROJECT_DIR}/rockfish/run_disordernet.py" ]]; then
+    echo "ERROR: Cannot find rockfish/run_disordernet.py under PROJECT_DIR=${PROJECT_DIR}" >&2
+    exit 1
+  fi
+
   cd "${PROJECT_DIR}" || exit 1
   mkdir -p "${PROJECT_DIR}/logs" "${RESULTS_DIR}"
   if [[ -n "${WK_DIR}" ]]; then
@@ -66,8 +85,14 @@ disordernet_slurm_setup() {
   fi
 
   export PYTHONUNBUFFERED=1
-  export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
+  export PYTHONPATH="${PROJECT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
+  export OMP_NUM_THREADS="${OMP_NUM_THREADS:-${SLURM_CPUS_PER_TASK:-8}}"
+  export MKL_NUM_THREADS="${MKL_NUM_THREADS:-${OMP_NUM_THREADS}}"
+  export TOKENIZERS_PARALLELISM=false
   export TMPDIR="${TMPDIR:-/tmp}"
+  export HF_HOME="${HF_HOME:-${PROJECT_DIR}/.cache/huggingface}"
+  export TORCH_HOME="${TORCH_HOME:-${PROJECT_DIR}/.cache/torch}"
+  mkdir -p "${HF_HOME}" "${TORCH_HOME}"
 }
 
 disordernet_slurm_run() {
@@ -130,7 +155,7 @@ disordernet_slurm_run() {
 
   local CHECKPOINT_ARG=(--checkpoint-dir "${CHECKPOINT_SUBDIR:-checkpoints}")
 
-  echo "▶ Running: stage=${STAGE} profile=${PROFILE} backbone=${BACKBONE} ckpt=${CHECKPOINT_SUBDIR:-checkpoints}"
+  echo "Running: stage=${STAGE} profile=${PROFILE} backbone=${BACKBONE} ckpt=${CHECKPOINT_SUBDIR:-checkpoints}"
   python rockfish/run_disordernet.py "${STAGE}" \
     --profile "${PROFILE}" \
     --backbone "${BACKBONE}" \
@@ -157,17 +182,72 @@ disordernet_slurm_mirror() {
     CWD="${DISORDERNET_WORKDIR}"
   fi
 
-  python rockfish/mirror_results.py --dest "${DEST}" --workers "${MIRROR_WORKERS:-8}" --cwd "${CWD}"
+  # Fail loud on empty mirrors when MIRROR_REQUIRE_MIN_FILES is set (default 1
+  # for GPU pipeline jobs — an empty mirror after training is almost always a bug).
+  local min_files="${MIRROR_REQUIRE_MIN_FILES:-1}"
+  python rockfish/mirror_results.py \
+    --dest "${DEST}" \
+    --workers "${MIRROR_WORKERS:-8}" \
+    --cwd "${CWD}" \
+    --require-min-files "${min_files}"
 
   echo "Results mirrored to ${DEST}"
   export DISORDERNET_LAST_MIRROR_DEST="${DEST}"
-  date
+  date -Is
+}
+
+# Package a kind-aware publish bundle (CPU). Env:
+#   DISORDERNET_PUBLISH_ROOT  — bundle parent
+#   DISORDERNET_PACKAGE_DIR   — output (default: $PUBLISH_ROOT/publish_package)
+#   BUNDLE_KIND               — 650m | 3b (default: 650m)
+#   PACKAGE_STRICT            — 1 (default) | 0
+#   INCLUDE_CLEAN             — 1 (default) | 0
+#   PACKAGE_ID                — optional
+disordernet_slurm_package() {
+  local publish_root="${DISORDERNET_PUBLISH_ROOT:-${RESULTS_DIR}/publish_bundle}"
+  local package_dir="${DISORDERNET_PACKAGE_DIR:-${publish_root}/publish_package}"
+  local kind="${BUNDLE_KIND:-650m}"
+  : "${PACKAGE_STRICT:=1}"
+
+  if [[ ! -f "${PROJECT_DIR}/rockfish/publish_submit.py" ]]; then
+    echo "ERROR: Cannot find rockfish/publish_submit.py under PROJECT_DIR=${PROJECT_DIR}" >&2
+    exit 1
+  fi
+
+  echo "Packaging publish results (${kind}) from ${publish_root} → ${package_dir}"
+  echo "PACKAGE_STRICT=${PACKAGE_STRICT}"
+  date -Is
+
+  local PKG_ARGS=(
+    package
+    --root-workdir "${publish_root}"
+    --kind "${kind}"
+    --package-dir "${package_dir}"
+  )
+  if [[ "${INCLUDE_CLEAN:-1}" != "1" ]]; then
+    PKG_ARGS+=(--no-clean)
+  fi
+  if [[ -n "${PACKAGE_ID:-}" ]]; then
+    PKG_ARGS+=(--package-id "${PACKAGE_ID}")
+  fi
+  case "${PACKAGE_STRICT}" in
+    0|false|FALSE|no|NO) PKG_ARGS+=(--no-strict) ;;
+    *) PKG_ARGS+=(--strict) ;;
+  esac
+
+  python rockfish/publish_submit.py "${PKG_ARGS[@]}"
+  echo "Done. Open ${package_dir}/PACKAGE_README.md"
+  date -Is
 }
 
 if [[ "${DISORDERNET_COMMON_AUTORUN:-1}" == "1" ]]; then
   disordernet_slurm_setup
-  disordernet_slurm_run
-  if [[ "${SKIP_MIRROR:-0}" != "1" ]]; then
-    disordernet_slurm_mirror
+  if [[ "${DISORDERNET_COMMON_PACKAGE_ONLY:-0}" == "1" ]]; then
+    disordernet_slurm_package
+  else
+    disordernet_slurm_run
+    if [[ "${SKIP_MIRROR:-0}" != "1" ]]; then
+      disordernet_slurm_mirror
+    fi
   fi
 fi
