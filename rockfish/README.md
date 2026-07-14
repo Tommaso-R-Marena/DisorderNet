@@ -198,6 +198,25 @@ less ~/disordernet_runs/publish_650m_*/publish_package/PACKAGE_README.md
 less ~/disordernet_runs/publish_3b_*/publish_package/PACKAGE_README.md
 ```
 
+**Re-package an existing bundle** (strict by default — fails if go/no-go artifacts are missing):
+
+```bash
+python rockfish/publish_submit.py package \
+  --root-workdir ~/disordernet_runs/publish_650m_<stamp> \
+  --kind 650m \
+  --strict
+
+# Allow incomplete packages only when debugging:
+python rockfish/publish_submit.py package \
+  --root-workdir ~/disordernet_runs/publish_650m_<stamp> \
+  --kind 650m \
+  --no-strict
+```
+
+Prefer `publish_submit.py package --kind …` over the legacy combined layout in
+`package_publish_results.py` (no `--kind`). Package jobs set `PACKAGE_STRICT=1`
+by default; `submit_summary.json` records `git_revision` for provenance.
+
 Re-package without re-training (if GPU jobs already finished):
 ```bash
 python rockfish/publish_submit.py package \

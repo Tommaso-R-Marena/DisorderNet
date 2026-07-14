@@ -272,6 +272,14 @@ class TestPublishReadyFixes:
             "checkpoints/distrust_figures/**",
             "checkpoints/idr_biology_layer_*",
             "checkpoints/function_prediction_report.json",
+            # Clean companion / alternate checkpoint roots (full parity)
+            "checkpoints_*/structure_distrust_benchmark.json",
+            "checkpoints_*/structure_distrust_atlas_report.json",
+            "checkpoints_*/structure_distrust_atlas.jsonl",
+            "checkpoints_*/structure_distrust_atlas.tsv",
+            "checkpoints_*/distrust_figures/**",
+            "checkpoints_*/idr_biology_layer_*",
+            "checkpoints_*/function_prediction_report.json",
         ]
         for g in needed:
             assert g in DEFAULT_GLOBS, f"missing mirror glob: {g}"
