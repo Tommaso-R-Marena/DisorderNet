@@ -961,6 +961,41 @@ class LoRALinear(nn.Module):
         return self.original(x) + (self.lora_dropout(x) @ self.lora_A @ self.lora_B) * self.scaling
 
 
+def unwrap_lora_from_esm(esm_model: nn.Module) -> int:
+    """
+    Restore nn.Linear modules previously replaced by LoRALinear on a shared ESM.
+
+    CV reuses one ESM backbone across folds. Without unwrapping, fold ≥2 sees
+    LoRALinear where nn.Linear is expected and attaches 0 new adapters
+    ("0 projections"), leaving stale fold-1 LoRA weights in the graph.
+    Returns the number of LoRA wrappers peeled off.
+    """
+    if not hasattr(esm_model, "layers"):
+        return 0
+
+    restored = 0
+
+    def _unwrap_attr(owner: nn.Module, name: str) -> None:
+        nonlocal restored
+        mod = getattr(owner, name, None)
+        if not isinstance(mod, LoRALinear):
+            return
+        while isinstance(mod, LoRALinear):
+            mod = mod.original
+            restored += 1
+        setattr(owner, name, mod)
+
+    for layer in esm_model.layers:
+        attn = getattr(layer, "self_attn", None)
+        if attn is not None:
+            for proj_name in ("q_proj", "k_proj", "v_proj", "out_proj"):
+                _unwrap_attr(attn, proj_name)
+        for ffn_name in ("fc1", "fc2"):
+            _unwrap_attr(layer, ffn_name)
+
+    return restored
+
+
 class PhysicoFeatureEncoder(nn.Module):
     """Lightweight sequence physics (v6-style) fused with ESM embeddings."""
 
@@ -1111,6 +1146,12 @@ class DisorderNetGPU(nn.Module):
         super().__init__()
         self.esm = esm_model
         self.cfg = cfg
+
+        # CV shares one ESM across folds — peel any prior LoRA wrappers first so
+        # isinstance(..., nn.Linear) succeeds and each fold gets fresh adapters.
+        n_unwrapped = unwrap_lora_from_esm(self.esm)
+        if verbose and n_unwrapped:
+            print(f"  Unwrapped {n_unwrapped} stale LoRA adapter(s) from shared ESM")
 
         for p in self.esm.parameters():
             p.requires_grad = False
