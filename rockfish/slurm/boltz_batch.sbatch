@@ -8,7 +8,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --time=03-00:00:00
-#SBATCH --account=CHANGE_ME_gpu
+#SBATCH --account=sfried3
 #SBATCH --export=ALL
 #SBATCH --output=logs/dn-boltz_%j.out
 #SBATCH --error=logs/dn-boltz_%j.err

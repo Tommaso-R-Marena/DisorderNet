@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
 #SBATCH --time=00-08:00:00
-#SBATCH --account=CHANGE_ME
+#SBATCH --account=sfried3
 #SBATCH --export=ALL
 #SBATCH --output=logs/dn-stack_%j.out
 #SBATCH --error=logs/dn-stack_%j.err

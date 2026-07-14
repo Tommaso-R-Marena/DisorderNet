@@ -17,7 +17,7 @@ All `rockfish/slurm/*.sbatch` files follow the lab Rockfish style:
 #SBATCH --gres=gpu:1              # GPU jobs only
 #SBATCH --mem=…
 #SBATCH --time=DD-HH:MM:SS        # e.g. 03-00:00:00 = 72 h
-#SBATCH --account=CHANGE_ME_gpu
+#SBATCH --account=sfried3
 #SBATCH --export=ALL
 #SBATCH --output=logs/…_%j.out
 #SBATCH --error=logs/…_%j.err
@@ -46,7 +46,7 @@ Shared runtime logic lives in `rockfish/slurm/_common.sh` (`ml` modules + venv a
    bash rockfish/setup_env.sh
    source ~/venvs/disordernet/bin/activate
    mkdir -p logs
-   export DISORDERNET_ACCOUNT=your_pi_gpu   # replace with your _gpu account
+   export DISORDERNET_ACCOUNT=sfried3   # Rockfish account (default: sfried3)
    export DISORDERNET_BOLTZ_ROOT=$HOME/boltz
    export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
    ```
@@ -69,7 +69,7 @@ bash rockfish/setup_env.sh
 source ~/venvs/disordernet/bin/activate
 mkdir -p logs
 
-export DISORDERNET_ACCOUNT=your_pi_gpu          # REQUIRED — your _gpu account
+export DISORDERNET_ACCOUNT=sfried3          # Rockfish account (default: sfried3)
 export DISORDERNET_BOLTZ_ROOT=$HOME/boltz       # optional but recommended
 export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
 ```
@@ -92,7 +92,7 @@ Runs: **ultra 650M → ultra_clean 650M → package**.
 ```bash
 cd ~/DisorderNet
 source ~/venvs/disordernet/bin/activate
-export DISORDERNET_ACCOUNT=your_pi_gpu
+export DISORDERNET_ACCOUNT=sfried3
 
 bash rockfish/slurm/submit_publish_650m.sh
 ```
@@ -145,7 +145,7 @@ Runs: **ultra3b → ultra_clean 3B → package**.
 ```bash
 cd ~/DisorderNet
 source ~/venvs/disordernet/bin/activate
-export DISORDERNET_ACCOUNT=your_pi_gpu
+export DISORDERNET_ACCOUNT=sfried3
 
 bash rockfish/slurm/submit_publish_3b.sh
 ```
@@ -315,7 +315,7 @@ scaffolding.
 ```bash
 cd ~/DisorderNet
 mkdir -p logs
-export DISORDERNET_ACCOUNT=your_pi_gpu   # replace with your _gpu account
+export DISORDERNET_ACCOUNT=sfried3   # Rockfish account (default: sfried3)
 
 # Step 1: go/no-go screen (~2–3 h)
 sbatch --account=$DISORDERNET_ACCOUNT \
@@ -338,7 +338,7 @@ sbatch --account=$DISORDERNET_ACCOUNT \
   rockfish/slurm/train_ultra3b.sbatch
 
 # Publish bundles (see Publish path above)
-export DISORDERNET_ACCOUNT=your_pi_gpu
+export DISORDERNET_ACCOUNT=sfried3
 bash rockfish/slurm/submit_publish_650m.sh
 bash rockfish/slurm/submit_publish_3b.sh
 
@@ -546,7 +546,7 @@ sbatch --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR rockfish/slurm/train
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `DISORDERNET_ACCOUNT` | (required) | Slurm `_gpu` account |
+| `DISORDERNET_ACCOUNT` | `sfried3` | Slurm account |
 | `DISORDERNET_REPO` | `~/DisorderNet` | Repo path |
 | `DISORDERNET_VENV` | `~/venvs/disordernet` | Python venv |
 | `DISORDERNET_WORKDIR` | Slurm scratch | Run directory |

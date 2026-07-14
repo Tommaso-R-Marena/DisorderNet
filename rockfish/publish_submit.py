@@ -55,10 +55,7 @@ def _submit_gpu_chain(
         {
             **defaults,
             "DISORDERNET_ACCOUNT": account,
-            "DISORDERNET_CPU_ACCOUNT": os.environ.get("DISORDERNET_CPU_ACCOUNT")
-            if os.environ.get("DISORDERNET_CPU_ACCOUNT")
-            and os.environ.get("DISORDERNET_CPU_ACCOUNT") != "CHANGE_ME_gpu"
-            else account,
+            "DISORDERNET_CPU_ACCOUNT": os.environ.get("DISORDERNET_CPU_ACCOUNT") or account,
             "DISORDERNET_PUBLISH_ROOT": str(root),
             "DISORDERNET_PACKAGE_DIR": str(package_dir),
             "PACKAGE_ID": package_id,

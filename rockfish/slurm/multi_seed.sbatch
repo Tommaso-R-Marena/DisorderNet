@@ -8,7 +8,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=192G
 #SBATCH --time=03-00:00:00
-#SBATCH --account=CHANGE_ME_gpu
+#SBATCH --account=sfried3
 #SBATCH --export=ALL
 #SBATCH --array=0-2
 #SBATCH --output=logs/dn-seed_%A_%a.out
@@ -18,7 +18,7 @@
 
 # Multi-seed CV array (seeds 42, 43, 44) for +0.005–0.015 AUC blend.
 #
-#   export DISORDERNET_ACCOUNT=your_pi_gpu
+#   export DISORDERNET_ACCOUNT=sfried3
 #   export DISORDERNET_WORKDIR="${HOME}/disordernet_runs/ultra_multiseed"
 #   sbatch --account="${DISORDERNET_ACCOUNT}" \\
 #     --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR,PROFILE=ultra,BACKBONE=650M \\
