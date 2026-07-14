@@ -4,7 +4,9 @@ import matplotlib; matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, precision_recall_curve, roc_auc_score, average_precision_score
 
-R = "/home/user/workspace/disorder_model/results_v6"
+from disordernet_paths import results_dir
+
+R = results_dir("results_v6")
 yt = np.load(os.path.join(R, "y_true.npy"))
 yp = np.load(os.path.join(R, "y_pred.npy"))
 with open(os.path.join(R, "metrics.json")) as f: M = json.load(f)

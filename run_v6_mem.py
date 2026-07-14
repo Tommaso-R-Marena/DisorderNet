@@ -12,10 +12,9 @@ import lightgbm as lgb
 import xgboost as xgb
 warnings.filterwarnings('ignore')
 
-DATA_PATH = "/home/user/workspace/disorder_model/data/disprot_processed.json"
-EMB_DIR = "/home/user/workspace/disorder_model/data/embeddings"
-RESULTS_DIR = "/home/user/workspace/disorder_model/results_v6"
-os.makedirs(RESULTS_DIR, exist_ok=True)
+from disordernet_paths import DISPROT_JSON as DATA_PATH, EMB_DIR, results_dir
+
+RESULTS_DIR = results_dir("results_v6", create=True)
 
 ESM_PCA = 48; SEED = 42; MAX_PROT = 1500; MAX_LEN = 800
 

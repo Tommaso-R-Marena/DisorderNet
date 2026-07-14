@@ -9,7 +9,9 @@ import matplotlib.patches as mpatches
 from sklearn.metrics import roc_curve, precision_recall_curve, roc_auc_score, average_precision_score
 import json, os
 
-RESULTS_DIR = "/home/user/workspace/disorder_model/results"
+from disordernet_paths import results_dir
+
+RESULTS_DIR = results_dir("results")
 y_true = np.load(os.path.join(RESULTS_DIR, "y_true.npy"))
 y_pred = np.load(os.path.join(RESULTS_DIR, "y_pred.npy"))
 
