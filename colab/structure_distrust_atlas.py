@@ -29,6 +29,49 @@ from colab.hallucination_benchmark import (
 ATLAS_VERSION = "1.0.0"
 
 
+def load_plddt_cache_for_proteins(
+    proteins: list[dict],
+    cache_dir: str,
+) -> dict[str, np.ndarray]:
+    """
+    Load pLDDT arrays from a cache directory for atlas-only CPU export.
+
+    Tries UniProt accession JSON (AF-style) then protein_id stem JSON
+    (``{\"plddt\": [...]}`` or Boltz-style caches).
+    """
+    from colab.af_plddt import load_cached_plddt
+
+    out: dict[str, np.ndarray] = {}
+    if not cache_dir or not os.path.isdir(cache_dir):
+        return out
+    for p in proteins:
+        pid = p["id"]
+        seq = p["sequence"]
+        acc = (p.get("uniprot_acc") or "").upper()
+        arr = None
+        if acc:
+            arr = load_cached_plddt(acc, seq, cache_dir=cache_dir)
+        if arr is None:
+            for stem in (pid, acc, pid.replace("|", "_")):
+                if not stem:
+                    continue
+                path = os.path.join(cache_dir, f"{stem}.json")
+                if not os.path.isfile(path):
+                    # case-insensitive scan of small caches
+                    continue
+                try:
+                    with open(path) as f:
+                        cached = json.load(f)
+                    if "plddt" in cached:
+                        arr = np.asarray(cached["plddt"], dtype=np.float32)
+                        break
+                except (OSError, json.JSONDecodeError, TypeError):
+                    continue
+        if arr is not None:
+            out[pid] = arr
+    return out
+
+
 def compute_protein_distrust_row(
     *,
     protein_id: str,

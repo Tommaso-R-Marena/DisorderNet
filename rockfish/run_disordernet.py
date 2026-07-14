@@ -642,6 +642,73 @@ def stage_idr_layer(args, cfg, proteins, fold_results) -> dict:
     return report
 
 
+def stage_structure_distrust_atlas(args, cfg, proteins) -> dict:
+    """
+    CPU-only structure distrust atlas from pred dir + pLDDT cache.
+
+    Does not require fold OOF (proxy atlas). Optional labels via
+    ``--atlas-labels-dir`` of ``*.npy`` arrays keyed by protein id.
+    """
+    from colab.idr_layer_io import load_disorder_preds_from_dir
+    from colab.predict_batch import parse_fasta
+    from colab.structure_distrust_atlas import (
+        build_structure_distrust_atlas,
+        export_structure_distrust_atlas_bundle,
+        load_plddt_cache_for_proteins,
+        print_distrust_atlas,
+    )
+    from colab.training_contamination_audit import attach_contamination_flags
+
+    ckpt = cfg.checkpoint_dir
+    if getattr(args, "fasta", None):
+        proteins = parse_fasta(args.fasta)
+
+    preds_dir = getattr(args, "atlas_preds_dir", None) or getattr(args, "idr_preds_dir", None)
+    if not preds_dir:
+        raise ValueError("--atlas-preds-dir (or --idr-preds-dir) required for structure-distrust-atlas")
+    preds = load_disorder_preds_from_dir(preds_dir, proteins=proteins)
+    if not preds:
+        raise ValueError(f"No disorder predictions loaded from {preds_dir}")
+
+    plddt_dir = (
+        getattr(args, "atlas_plddt_dir", None)
+        or os.path.join(ckpt, getattr(cfg, "af_plddt_cache_dir", "af_plddt_cache"))
+    )
+    plddt_by_id = load_plddt_cache_for_proteins(proteins, plddt_dir)
+    if not plddt_by_id:
+        raise ValueError(f"No pLDDT cache entries loaded from {plddt_dir}")
+
+    labels_by_id: dict = {}
+    labels_dir = getattr(args, "atlas_labels_dir", None)
+    if labels_dir and os.path.isdir(labels_dir):
+        import numpy as np
+        for p in proteins:
+            path = os.path.join(labels_dir, f"{p['id']}.npy")
+            if os.path.isfile(path):
+                labels_by_id[p["id"]] = np.load(path).astype(np.int8)
+
+    structure_source = getattr(args, "atlas_structure_source", None) or "af2"
+    atlas = build_structure_distrust_atlas(
+        proteins, preds, plddt_by_id,
+        labels_by_id=labels_by_id or None,
+        disorder_threshold=getattr(args, "idr_disorder_threshold", 0.5),
+        structure_source=structure_source,
+    )
+    atlas = attach_contamination_flags(atlas, cfg)
+    print_distrust_atlas(atlas)
+    paths = export_structure_distrust_atlas_bundle(atlas, ckpt)
+    if not getattr(args, "no_distrust_figures", False):
+        try:
+            from colab.colab_figures import generate_distrust_atlas_figure
+            fig_dir = os.path.join(ckpt, "distrust_figures")
+            generate_distrust_atlas_figure(atlas, out_dir=fig_dir)
+            paths["figures"] = fig_dir
+        except Exception as exc:
+            print(f"Distrust figures skipped: {exc}")
+    print(f"Structure distrust atlas (CPU) → {paths}")
+    return atlas
+
+
 def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
     """Cells 8–11: CAID, biological utility, AF rescue, structure calibration, Phase 3."""
     import json
@@ -799,6 +866,8 @@ def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
 
     stats_report = run_full_statistical_validation(
         proteins, fold_results, plddt_by_protein=plddt_by_id, n_folds=cfg.n_folds,
+        split_method=getattr(cfg, "split_method", "protein"),
+        homology_min_identity=float(getattr(cfg, "homology_min_identity", 0.4)),
     )
     print_statistical_validation(stats_report)
     save_statistical_validation(
@@ -854,10 +923,17 @@ def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
         )
 
         structure_source = "boltz2" if plddt_boltz else ("af3" if plddt_af3 else "af2")
+        caid3_report = None
+        caid3_path = os.path.join(ckpt, "caid3_eval_report.json")
+        if os.path.isfile(caid3_path):
+            with open(caid3_path) as f:
+                caid3_report = json.load(f)
         bench = run_labeled_distrust_benchmark(
             proteins, fold_results, plddt_by_id,
             n_folds=cfg.n_folds,
             structure_source=structure_source,
+            cfg=cfg,
+            caid3_report=caid3_report,
         )
         # Attach computational downstream utility on pooled labeled residues
         try:
@@ -896,6 +972,22 @@ def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
         print_distrust_atlas(atlas)
         atlas_paths = export_structure_distrust_atlas_bundle(atlas, ckpt)
         print(f"Structure distrust atlas → {atlas_paths}")
+        if not getattr(args, "no_distrust_figures", False):
+            try:
+                from colab.colab_figures import (
+                    generate_distrust_atlas_figure,
+                    generate_distrust_benchmark_figure,
+                    generate_downstream_mask_utility_figure,
+                )
+                fig_dir = os.path.join(ckpt, "distrust_figures")
+                generate_distrust_benchmark_figure(bench, out_dir=fig_dir)
+                generate_distrust_atlas_figure(atlas, out_dir=fig_dir)
+                util = bench.get("downstream_mask_utility") or {}
+                if util.get("enabled"):
+                    generate_downstream_mask_utility_figure(util, out_dir=fig_dir)
+                print(f"Distrust figures → {fig_dir}")
+            except Exception as exc:
+                print(f"Distrust figures skipped: {exc}")
 
     eval_summary = {
         "pooled_auc": cv_pooled["auc"],
@@ -1193,6 +1285,9 @@ def run_pipeline(args) -> int:
         fold_results, cv_summary = _load_fold_results(cfg.checkpoint_dir)
         stage_idr_layer(args, cfg, proteins, fold_results)
 
+    elif args.stage == "structure-distrust-atlas":
+        stage_structure_distrust_atlas(args, cfg, proteins)
+
     elif args.stage == "predict":
         stage_predict(args, cfg, model, converter)
 
@@ -1235,7 +1330,8 @@ def build_parser() -> argparse.ArgumentParser:
         "stage",
         choices=[
             "screen", "cv", "stack", "postprocess", "full",
-            "eval", "idr-layer", "predict", "multi-seed-blend", "pipeline", "boltz", "af3",
+            "eval", "idr-layer", "structure-distrust-atlas",
+            "predict", "multi-seed-blend", "pipeline", "boltz", "af3",
         ],
         help="Pipeline stage to run",
     )
@@ -1291,6 +1387,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--no-structure-distrust-atlas", action="store_true",
         help="eval: skip labeled distrust benchmark + proteome atlas export",
+    )
+    p.add_argument(
+        "--no-distrust-figures", action="store_true",
+        help="Skip matplotlib distrust paper figures",
+    )
+    p.add_argument(
+        "--atlas-preds-dir", default=None,
+        help="structure-distrust-atlas: directory of disorder .tsv/.caid preds",
+    )
+    p.add_argument(
+        "--atlas-plddt-dir", default=None,
+        help="structure-distrust-atlas: pLDDT JSON cache directory",
+    )
+    p.add_argument(
+        "--atlas-labels-dir", default=None,
+        help="structure-distrust-atlas: optional dir of label .npy arrays",
+    )
+    p.add_argument(
+        "--atlas-structure-source", default="af2",
+        help="structure-distrust-atlas: label for structure backend in report",
     )
     p.add_argument(
         "--idr-layer-max-proteins", type=int, default=100,

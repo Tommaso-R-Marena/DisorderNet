@@ -118,11 +118,19 @@ def run_per_fold_paired_comparison(
     fold_results: list,
     plddt_by_protein: dict[str, np.ndarray],
     n_folds: int = 5,
+    *,
+    split_method: str = "protein",
+    homology_min_identity: float = 0.4,
 ) -> dict:
     """
     Per-fold AUC: DisorderNet vs inverse-pLDDT on AF-covered validation residues.
     """
-    splits = get_cv_splits(proteins, n_folds)
+    splits = get_cv_splits(
+        proteins,
+        n_folds,
+        split_method=split_method,
+        homology_min_identity=homology_min_identity,
+    )
     fold_rows = []
 
     for fold_idx, (_, val_idx) in enumerate(splits):
@@ -213,6 +221,8 @@ def run_per_fold_paired_comparison(
         "sign_test_disordernet_vs_plddt": sign,
         "wilcoxon_disordernet_vs_plddt": wilcoxon,
         "bootstrap_mean_delta_auc": bootstrap_fold,
+        "split_method": split_method,
+        "homology_min_identity": homology_min_identity if split_method == "homology" else None,
         "comparison": "DisorderNet vs inverse-pLDDT (AF-covered val residues per fold)",
     }
 
@@ -243,14 +253,20 @@ def run_full_statistical_validation(
     fold_results: list,
     plddt_by_protein: Optional[dict[str, np.ndarray]] = None,
     n_folds: int = 5,
+    *,
+    split_method: str = "protein",
+    homology_min_identity: float = 0.4,
 ) -> dict:
     """Combined statistical validation report."""
     report = {
         "cv_fold_stability": run_cv_fold_stability_report(fold_results),
+        "split_method": split_method,
     }
     if plddt_by_protein:
         report["paired_af_baseline"] = run_per_fold_paired_comparison(
             proteins, fold_results, plddt_by_protein, n_folds=n_folds,
+            split_method=split_method,
+            homology_min_identity=homology_min_identity,
         )
     else:
         report["paired_af_baseline"] = {
