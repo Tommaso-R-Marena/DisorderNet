@@ -56,6 +56,6 @@ Artifacts under checkpoint dir:
 
 ## Operator path
 
-To run Rockfish end-to-end and decide publish go/no-go, follow
-[`ROCKFISH_PUBLISH_RUNBOOK.md`](ROCKFISH_PUBLISH_RUNBOOK.md).
+Canonical commands, artifacts, and publish go/no-go:
+[`rockfish/README.md`](../rockfish/README.md#publish-path-main--clean-companion).
 Fill [`METHODS_CHECKLIST.md`](METHODS_CHECKLIST.md) from mirrored artifacts.  
