@@ -21,54 +21,174 @@ Run the full SOTA pipeline on Rockfish instead of Colab: longer wall times (72 h
    export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
    ```
 
-## Publish path (main + clean companion)
+## Publish path (exact usage)
 
-**Recommended (all-in-one):** one submit chains 650M → clean → 3B → organized package.
-
-```bash
-export DISORDERNET_ACCOUNT=your_pi_gpu
-# optional:
-# export DISORDERNET_BOLTZ_ROOT=$HOME/boltz
-# export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
-bash rockfish/slurm/submit_publish_all.sh
-```
-
-This submits Slurm jobs with dependencies (each ≤72 h):
-
-| Phase | Profile | Approx. GPU time |
-|-------|---------|------------------|
-| `ultra_650M` | `ultra` / 650M | ~24–48 h |
-| `ultra_clean_650M` | `ultra_clean` (optional, `INCLUDE_CLEAN=0` to skip) | ~24–48 h after 650M |
-| `ultra3b` | `ultra3b` / 3B (optional, `INCLUDE_3B=0` to skip) | ~30–40 h after 650M (parallel with clean) |
-| `publish_package/` | CPU packaging | minutes |
-
-Results land under `$DISORDERNET_PUBLISH_ROOT` (default `~/disordernet_runs/publish_bundle_<stamp>/`):
-
-```text
-publish_bundle_*/
-  ultra_650M/checkpoints/…
-  ultra_clean_650M/checkpoints_ultra_clean/…
-  ultra3b/checkpoints/…
-  publish_package/
-    PACKAGE_README.md
-    MANIFEST.json
-    comparison.json          # side-by-side headline metrics
-    ultra_650M/              # copied key reports + figures
-    ultra_clean_650M/
-    ultra3b/
-```
-
-Skip pieces: `INCLUDE_CLEAN=0` and/or `INCLUDE_3B=0`.  
-Monitor: `squeue -u $USER`. After package job finishes, open `publish_package/PACKAGE_README.md`.
+Two separate submitters (recommended). Each fits Rockfish’s **72 h** GPU wall
+time by chaining Slurm jobs, then writing an organized `publish_package/`.
 
 Frozen checklist: [`docs/METHODS_CHECKLIST.md`](../docs/METHODS_CHECKLIST.md).
 
-```text
-checkout master → setup_env → bash rockfish/slurm/submit_publish_all.sh
-  → open publish_package/ → METHODS_CHECKLIST → go/no-go on numbers
+### Shared one-time setup (do this once)
+
+```bash
+git clone https://github.com/Tommaso-R-Marena/DisorderNet.git ~/DisorderNet
+cd ~/DisorderNet
+git checkout master
+
+bash rockfish/setup_env.sh
+source ~/venvs/disordernet/bin/activate
+mkdir -p logs
+
+export DISORDERNET_ACCOUNT=your_pi_gpu          # REQUIRED — your _gpu account
+export DISORDERNET_BOLTZ_ROOT=$HOME/boltz       # optional but recommended
+export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
 ```
 
-### Manual one-offs (if you prefer separate submits)
+Optional Boltz warm-up (if structures are not ready yet):
+
+```bash
+sbatch --account=$DISORDERNET_ACCOUNT \
+  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_BOLTZ_ROOT,BOLTZ_MODE=auto \
+  rockfish/slurm/boltz_batch.sbatch
+```
+
+---
+
+### Script 1 — ESM-2 650M publish bundle
+
+Runs: **ultra 650M → ultra_clean 650M → package**.
+
+**Bash (exact):**
+```bash
+cd ~/DisorderNet
+source ~/venvs/disordernet/bin/activate
+export DISORDERNET_ACCOUNT=your_pi_gpu
+
+bash rockfish/slurm/submit_publish_650m.sh
+```
+
+**CLI (exact equivalents — pick one):**
+```bash
+python rockfish/publish_submit.py submit-650m --account "$DISORDERNET_ACCOUNT"
+
+# or via the HPC runner:
+python rockfish/run_disordernet.py publish-650m --account "$DISORDERNET_ACCOUNT"
+```
+
+**Useful flags (bash passes them through to the CLI):**
+```bash
+bash rockfish/slurm/submit_publish_650m.sh --dry-run
+bash rockfish/slurm/submit_publish_650m.sh --no-clean
+bash rockfish/slurm/submit_publish_650m.sh --root-workdir $HOME/disordernet_runs/my_650m
+bash rockfish/slurm/submit_publish_650m.sh --partition a100
+```
+
+**What gets submitted**
+
+| Job | Profile | Approx. GPU time |
+|-----|---------|------------------|
+| `ultra_650M` | `ultra` / 650M | ~24–48 h |
+| `ultra_clean_650M` | `ultra_clean` / 650M (omit with `--no-clean`) | ~24–48 h after main |
+| `publish_package/` | CPU | minutes |
+
+**Output layout**
+```text
+~/disordernet_runs/publish_650m_<stamp>/
+  ultra_650M/checkpoints/…
+  ultra_clean_650M/checkpoints_ultra_clean/…
+  submit_summary.json
+  publish_package/
+    PACKAGE_README.md
+    MANIFEST.json
+    comparison.json
+    ultra_650M/
+    ultra_clean_650M/
+```
+
+---
+
+### Script 2 — ESM-2 3B publish bundle
+
+Runs: **ultra3b → ultra_clean 3B → package**.
+
+**Bash (exact):**
+```bash
+cd ~/DisorderNet
+source ~/venvs/disordernet/bin/activate
+export DISORDERNET_ACCOUNT=your_pi_gpu
+
+bash rockfish/slurm/submit_publish_3b.sh
+```
+
+**If OOM on 40GB A100:**
+```bash
+bash rockfish/slurm/submit_publish_3b.sh --partition ica100
+```
+
+**CLI (exact equivalents — pick one):**
+```bash
+python rockfish/publish_submit.py submit-3b --account "$DISORDERNET_ACCOUNT"
+
+python rockfish/run_disordernet.py publish-3b --account "$DISORDERNET_ACCOUNT" --partition ica100
+```
+
+**What gets submitted**
+
+| Job | Profile | Approx. GPU time |
+|-----|---------|------------------|
+| `ultra3b` | `ultra3b` / 3B | ~30–40 h |
+| `ultra_clean_3B` | `ultra3b` + clean flags (omit with `--no-clean`) | ~30–40 h after main |
+| `publish_package/` | CPU | minutes |
+
+**Output layout**
+```text
+~/disordernet_runs/publish_3b_<stamp>/
+  ultra3b/checkpoints/…
+  ultra_clean_3B/checkpoints_ultra_clean_3b/…
+  submit_summary.json
+  publish_package/
+    PACKAGE_README.md
+    MANIFEST.json
+    comparison.json
+    ultra3b/
+    ultra_clean_3B/
+```
+
+---
+
+### After jobs finish
+
+```bash
+# Monitor
+squeue -u $USER
+
+# Open the package (path also printed at submit time / in submit_summary.json)
+less ~/disordernet_runs/publish_650m_*/publish_package/PACKAGE_README.md
+# or for 3B:
+less ~/disordernet_runs/publish_3b_*/publish_package/PACKAGE_README.md
+```
+
+Re-package without re-training (if GPU jobs already finished):
+```bash
+python rockfish/publish_submit.py package \
+  --kind 650m \
+  --root-workdir ~/disordernet_runs/publish_650m_YYYYMMDDTHHMMSSZ
+
+python rockfish/run_disordernet.py package-publish \
+  --publish-root ~/disordernet_runs/publish_3b_YYYYMMDDTHHMMSSZ \
+  --bundle-kind 3b
+```
+
+Then fill [`docs/METHODS_CHECKLIST.md`](../docs/METHODS_CHECKLIST.md) and apply go/no-go below.
+
+```text
+setup → submit_publish_650m.sh and/or submit_publish_3b.sh
+  → open publish_package/ → METHODS_CHECKLIST → go/no-go
+```
+
+### Manual one-offs (advanced; not required)
+
+Use these only if you need a single stage without packaging.
 
 ### 1. Optional Boltz warm-up
 
@@ -78,28 +198,18 @@ sbatch --account=$DISORDERNET_ACCOUNT \
   rockfish/slurm/boltz_batch.sbatch
 ```
 
-### 2. Main run (production ultra + CAID3)
-
-Boltz ingest + full pipeline + CAID3. Eval writes the labeled distrust benchmark;
-CAID3 then **patches** `structure_distrust_benchmark.json` in place via
-`finalize_distrust_benchmark_with_caid3`.
+### 2. Single `pipeline_ultra` job (no packaging)
 
 ```bash
 export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_main
 export RUN_CAID3=1
-export BOLTZ_MODE=ingest   # or auto if structures not yet available
+export BOLTZ_MODE=ingest
 sbatch --account=$DISORDERNET_ACCOUNT \
   --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR,RUN_CAID3,BOLTZ_MODE \
   rockfish/slurm/pipeline_ultra.sbatch
 ```
 
-### 3. Clean companion (required for publish honesty)
-
-Same capacity as ultra, but `use_hallucination_weighting=False` and
-`use_plddt_features=False`. **Must use a separate workdir** so it cannot
-clobber the main run. Script sets `PROFILE=ultra_clean`,
-`CHECKPOINT_SUBDIR=checkpoints_ultra_clean`, and
-`RUN_NO_HALLUC_WEIGHT=1` / `RUN_NO_PLDDT_FEATURES=1`.
+### 3. Single clean companion
 
 ```bash
 export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_clean
@@ -107,8 +217,6 @@ sbatch --account=$DISORDERNET_ACCOUNT \
   --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR \
   rockfish/slurm/pipeline_ultra_clean.sbatch
 ```
-
-Equivalent CLI (interactive GPU node):
 
 ```bash
 python rockfish/run_disordernet.py pipeline \
@@ -120,9 +228,9 @@ python rockfish/run_disordernet.py pipeline \
   --workdir "$DISORDERNET_WORKDIR"
 ```
 
-### 4. Verify mirrored artifacts
+### 4. Verify package / mirrored artifacts
 
-After jobs finish (or use the all-in-one `publish_package/`), confirm these exist:
+Confirm these exist under each run’s checkpoint dir (or inside `publish_package/`):
 
 | Artifact | Purpose |
 |----------|---------|
@@ -199,21 +307,10 @@ sbatch --account=$DISORDERNET_ACCOUNT \
   --export=ALL,DISORDERNET_ACCOUNT \
   rockfish/slurm/train_ultra3b.sbatch
 
-# Recommended publish pair / all-in-one (see Publish path above)
+# Publish bundles (see Publish path above)
 export DISORDERNET_ACCOUNT=your_pi_gpu
-bash rockfish/slurm/submit_publish_all.sh
-
-# Or individual jobs:
-export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_main
-export RUN_CAID3=1
-sbatch --account=$DISORDERNET_ACCOUNT \
-  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR,RUN_CAID3=1 \
-  rockfish/slurm/pipeline_ultra.sbatch
-
-export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_clean
-sbatch --account=$DISORDERNET_ACCOUNT \
-  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR \
-  rockfish/slurm/pipeline_ultra_clean.sbatch
+bash rockfish/slurm/submit_publish_650m.sh
+bash rockfish/slurm/submit_publish_3b.sh
 
 # Multi-seed for +0.005–0.015 AUC (3 parallel jobs)
 export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_ms
@@ -264,6 +361,9 @@ sbatch --partition=ica100 --export=ALL,... rockfish/slurm/train_ultra3b.sbatch
 | `structure-distrust-atlas` | paper | Labeled/proxy distrust atlas from preds + pLDDT cache |
 | `eval` | 8–11 | CAID, AF/Boltz rescue, structure distrust, Phase 3 |
 | `pipeline` | all + eval | full → eval [→ CAID3 with `RUN_CAID3=1`; CAID floor patched into distrust benchmark] |
+| `publish-650m` | submit | Submit 650M ultra + clean → package (see Publish path) |
+| `publish-3b` | submit | Submit ultra3b + clean → package (see Publish path) |
+| `package-publish` | package | Assemble `publish_package/` from an existing bundle root |
 | `predict` | deploy | FASTA batch inference + `.caid` export |
 | `multi-seed-blend` | 7e | Average OOF from multiple seed dirs |
 

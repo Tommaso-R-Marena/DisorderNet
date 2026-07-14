@@ -1361,6 +1361,7 @@ def build_parser() -> argparse.ArgumentParser:
             "screen", "cv", "stack", "postprocess", "full",
             "eval", "idr-layer", "structure-distrust-atlas",
             "predict", "multi-seed-blend", "pipeline", "boltz", "af3",
+            "publish-650m", "publish-3b", "package-publish",
         ],
         help="Pipeline stage to run",
     )
@@ -1607,11 +1608,90 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-overlap-prefetch", action="store_true",
         help="Disable ESM‖pLDDT overlap (debug)",
     )
+
+    # Publish submitters (delegate to rockfish/publish_submit.py)
+    p.add_argument(
+        "--account",
+        default=None,
+        help="publish-650m / publish-3b: Rockfish _gpu account "
+             "(or set DISORDERNET_ACCOUNT)",
+    )
+    p.add_argument(
+        "--publish-root",
+        default=None,
+        help="publish-*: bundle parent directory (DISORDERNET_PUBLISH_ROOT)",
+    )
+    p.add_argument(
+        "--package-dir",
+        default=None,
+        help="publish-* / package-publish: output publish_package directory",
+    )
+    p.add_argument(
+        "--bundle-kind",
+        default="650m",
+        choices=["650m", "3b"],
+        help="package-publish: which bundle layout to assemble",
+    )
+    p.add_argument(
+        "--no-clean",
+        action="store_true",
+        help="publish-*: skip contamination-clean companion",
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="publish-*: print sbatch commands without submitting",
+    )
+    p.add_argument(
+        "--partition",
+        default=None,
+        help="publish-*: GPU partition override (e.g. ica100)",
+    )
     return p
+
+
+def _run_publish_stage(args) -> int:
+    """Delegate publish submit / package stages to publish_submit CLI."""
+    from rockfish.publish_submit import main as publish_main
+
+    if args.stage == "publish-650m":
+        argv = ["submit-650m"]
+    elif args.stage == "publish-3b":
+        argv = ["submit-3b"]
+    elif args.stage == "package-publish":
+        if not args.publish_root:
+            raise ValueError("package-publish requires --publish-root")
+        argv = [
+            "package",
+            "--root-workdir", args.publish_root,
+            "--kind", args.bundle_kind,
+        ]
+    else:
+        raise ValueError(f"Not a publish stage: {args.stage}")
+
+    if getattr(args, "account", None):
+        argv.extend(["--account", args.account])
+    if getattr(args, "publish_root", None) and args.stage != "package-publish":
+        argv.extend(["--root-workdir", args.publish_root])
+    if getattr(args, "package_dir", None):
+        argv.extend(["--package-dir", args.package_dir])
+    if getattr(args, "no_clean", False):
+        argv.append("--no-clean")
+    if getattr(args, "dry_run", False) and args.stage != "package-publish":
+        argv.append("--dry-run")
+    if getattr(args, "partition", None) and args.stage != "package-publish":
+        argv.extend(["--partition", args.partition])
+    return publish_main(argv)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.stage in ("publish-650m", "publish-3b", "package-publish"):
+        try:
+            return _run_publish_stage(args)
+        except Exception as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            raise
     try:
         return run_pipeline(args)
     except Exception as exc:

@@ -174,14 +174,13 @@ def write_package_readme(package_dir: Path, comparison: dict) -> Path:
         "## Layout",
         "",
         "```",
-        "publish_package_*/",
-        "  MANIFEST.json          # machine-readable comparison + paths",
-        "  PACKAGE_README.md      # this file",
-        "  comparison.json        # headline metrics only",
-        "  ultra_650M/            # main production reports",
-        "  ultra_clean_650M/      # contamination-clean ablation (if run)",
-        "  ultra3b/               # ESM-2 3B production reports (if run)",
+        "publish_*/",
+        "  MANIFEST.json / PACKAGE_README.md / comparison.json",
+        "  <run_label>/   # key reports + distrust_figures/",
         "```",
+        "",
+        "Submitters: `submit_publish_650m.sh` or `submit_publish_3b.sh`",
+        "(CLI: `python rockfish/publish_submit.py submit-650m|submit-3b`).",
         "",
         "## Next step",
         "",
@@ -258,36 +257,47 @@ def build_default_runs(
     include_clean: bool = True,
     include_3b: bool = True,
 ) -> list[dict]:
-    """Standard layout used by submit_publish_all.sh."""
-    root = Path(root_workdir)
-    runs = [
-        {
-            "label": "ultra_650M",
-            "profile": "ultra",
-            "backbone": "650M",
-            "checkpoint_dir": root / "ultra_650M" / "checkpoints",
-        }
-    ]
-    if include_clean:
-        runs.append(
-            {
-                "label": "ultra_clean_650M",
-                "profile": "ultra_clean",
-                "backbone": "650M",
-                "checkpoint_dir": root / "ultra_clean_650M" / "checkpoints_ultra_clean",
-            }
-        )
-    if include_3b:
-        runs.append(
-            {
-                "label": "ultra3b",
-                "profile": "ultra3b",
-                "backbone": "3B",
-                "checkpoint_dir": root / "ultra3b" / "checkpoints",
-            }
-        )
-    return runs
+    """Legacy combined layout (650M + clean + 3B). Prefer build_runs_for_kind."""
+    from rockfish.utils import run_specs_3b, run_specs_650m
 
+    runs = run_specs_650m(root_workdir, include_clean=include_clean)
+    if include_3b:
+        runs.extend(run_specs_3b(root_workdir, include_clean=False))
+    # Strip internal keys for package assembler
+    return [
+        {
+            "label": r["label"],
+            "profile": r["profile"],
+            "backbone": r["backbone"],
+            "checkpoint_dir": r["checkpoint_dir"],
+        }
+        for r in runs
+    ]
+
+
+def build_runs_for_kind(
+    root_workdir: str | Path,
+    kind: str,
+    *,
+    include_clean: bool = True,
+) -> list[dict]:
+    from rockfish.utils import run_specs_3b, run_specs_650m
+
+    if kind == "650m":
+        specs = run_specs_650m(root_workdir, include_clean=include_clean)
+    elif kind == "3b":
+        specs = run_specs_3b(root_workdir, include_clean=include_clean)
+    else:
+        raise ValueError(f"Unknown kind {kind!r}")
+    return [
+        {
+            "label": r["label"],
+            "profile": r["profile"],
+            "backbone": r["backbone"],
+            "checkpoint_dir": r["checkpoint_dir"],
+        }
+        for r in specs
+    ]
 
 def main() -> int:
     p = argparse.ArgumentParser(description="Assemble DisorderNet Rockfish publish package")
