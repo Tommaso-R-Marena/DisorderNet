@@ -16,9 +16,13 @@ from typing import Any, Optional
 import numpy as np
 from sklearn.model_selection import GroupKFold
 
+from colab.homology_splits import get_homology_cv_splits as _homology_splits
+
 # TrainConfig fields that affect splits, training, or evaluation comparability.
 _FINGERPRINT_KEYS = (
     "seed",
+    "split_method",
+    "homology_min_identity",
     "min_seq_len",
     "max_seq_len",
     "min_disorder",
@@ -64,8 +68,8 @@ _FINGERPRINT_KEYS = (
     "lora_on_ffn",
     "unfreeze_last_layers",
     "head_type",
-    "esm_backbone",
-    "esm_embed_dim",
+    "use_plddt_features",
+    "plddt_feature_dim",
 )
 
 
@@ -74,18 +78,41 @@ def sort_proteins_deterministic(proteins: list) -> list:
     return sorted(proteins, key=lambda p: p["id"])
 
 
-def get_cv_splits(proteins: list, n_folds: int) -> list[tuple[np.ndarray, np.ndarray]]:
-    """GroupKFold splits using one group per protein index."""
+def get_cv_splits(
+    proteins: list,
+    n_folds: int,
+    split_method: str = "protein",
+    homology_min_identity: float = 0.40,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """
+    CV splits.
+
+    split_method:
+      protein  — one group per protein (default, fast)
+      homology — cluster by ~40% sequence identity (CAID-credible)
+    """
+    if split_method == "homology":
+        splits, _ = _homology_splits(proteins, n_folds, min_identity=homology_min_identity)
+        return splits
     groups = np.arange(len(proteins))
     gkf = GroupKFold(n_splits=n_folds)
     return list(gkf.split(groups, groups=groups))
 
 
-def get_fold_val_protein_ids(proteins: list, n_folds: int) -> list[list[str]]:
+def get_fold_val_protein_ids(
+    proteins: list,
+    n_folds: int,
+    split_method: str = "protein",
+    homology_min_identity: float = 0.40,
+) -> list[list[str]]:
     """Validation protein IDs per fold (for resume / audit fingerprints)."""
     return [
         [proteins[i]["id"] for i in val_idx]
-        for _, val_idx in get_cv_splits(proteins, n_folds)
+        for _, val_idx in get_cv_splits(
+            proteins, n_folds,
+            split_method=split_method,
+            homology_min_identity=homology_min_identity,
+        )
     ]
 
 

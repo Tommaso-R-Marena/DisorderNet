@@ -153,16 +153,30 @@ class TestDisorderNetGPU:
         assert model.training
         assert not model.esm.training
 
+    def test_function_head_multitask(self, mock_esm):
+        cfg = TrainConfig(
+            lora_layers=2, lora_rank=4, use_physico_features=False, use_function_head=True,
+        )
+        model = DisorderNetGPU(mock_esm, cfg, verbose=False)
+        assert model.function_head is not None
+        tokens = torch.randint(0, 20, (2, 32))
+        mask = torch.ones(2, 30, dtype=torch.bool)
+        out = model(tokens, pad_mask=mask, return_function=True)
+        assert isinstance(out, tuple)
+        dis, fn = out
+        assert dis.shape == (2, 30)
+        assert fn.shape == (2, 30, 5)
+
 
 class TestDataset:
     def test_collate_padding(self):
         batch = [
             (torch.arange(12), torch.zeros(10), torch.ones(10, dtype=torch.bool),
-             torch.zeros(10, dtype=torch.long), torch.ones(10), None, "a"),
+             torch.zeros(10, dtype=torch.long), torch.ones(10), None, None, "a"),
             (torch.arange(8), torch.ones(6), torch.ones(6, dtype=torch.bool),
-             torch.zeros(6, dtype=torch.long), torch.ones(6), None, "b"),
+             torch.zeros(6, dtype=torch.long), torch.ones(6), None, None, "b"),
         ]
-        tok, lab, msk, aa, wt, rich, ids = disprot_collate(batch)
+        tok, lab, msk, aa, wt, rich, plddt, ids = disprot_collate(batch)
         assert tok.shape == (2, 12)
         assert lab.shape == (2, 10)
         assert msk.shape == (2, 10)
@@ -182,9 +196,10 @@ class TestDataset:
         assert "P1" in cache
         ds2 = DisProtDataset(proteins, mock_batch_converter, cache)
         assert len(ds2) == 2
-        tok, lab, msk, aa, wt, rich, pid = ds2[0]
+        tok, lab, msk, aa, wt, rich, plddt, pid = ds2[0]
         assert pid == "P1"
         assert rich is None
+        assert plddt is None
         assert lab.shape[0] == msk.sum()
         assert aa.shape[0] == lab.shape[0]
 

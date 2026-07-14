@@ -164,14 +164,29 @@ def merge_plddt_for_training(
     plddt_af2: Optional[dict[str, np.ndarray]] = None,
     plddt_af3: Optional[dict[str, np.ndarray]] = None,
     prefer_af3: bool = True,
+    plddt_boltz: Optional[dict[str, np.ndarray]] = None,
+    prefer: Optional[str] = None,
 ) -> dict[str, np.ndarray]:
-    """Merge AF2/AF3 pLDDT caches for hallucination weighting (AF3 preferred)."""
+    """
+    Merge structure pLDDT caches for hallucination weighting / train channel.
+
+    prefer: 'boltz' | 'af3' | 'af2'. If None, uses 'boltz' when Boltz map is
+    non-empty, else AF3 when prefer_af3, else AF2.
+    """
     from colab.inference_fusion import build_combined_plddt_map
 
+    if prefer is None:
+        if plddt_boltz:
+            prefer = "boltz"
+        elif prefer_af3:
+            prefer = "af3"
+        else:
+            prefer = "af2"
     combined, _ = build_combined_plddt_map(
         plddt_af2 or {},
         plddt_af3,
-        prefer="af3" if prefer_af3 else "af2",
+        prefer=prefer,
+        plddt_boltz=plddt_boltz,
     )
     return combined
 
@@ -249,9 +264,12 @@ class TrainConfig:
     esm_embed_dim: int = 1280
 
     n_folds: int = 5
+    split_method: str = "protein"  # "protein" | "homology" (CAID-credible)
+    homology_min_identity: float = 0.40
     num_workers: int = 2
     checkpoint_dir: str = "checkpoints"
     data_cache: str = "disprot_raw.json"
+    token_disk_cache_dir: str = "token_cache"  # HPC: persist tokenization across jobs
 
     # Performance toggles
     use_gradient_checkpointing: bool = True
@@ -309,6 +327,15 @@ class TrainConfig:
     high_plddt_threshold: float = 70.0
     af_plddt_cache_dir: str = "af_plddt_cache"
 
+    # Train-time structure channel (novel vs sequence-only SOTA)
+    use_plddt_features: bool = False
+    plddt_feature_dim: int = 16
+
+    # Disorder → function (multi-label IDR roles on DisProt functional terms)
+    use_function_head: bool = False
+    function_loss_weight: float = 0.35
+    function_on_disordered_only: bool = True
+
     # Set automatically by setup_environment()
     device: torch.device = field(default_factory=lambda: torch.device("cpu"))
     amp_dtype: torch.dtype = torch.float16
@@ -329,6 +356,8 @@ class TrainConfig:
         sota     — SOTA push: rank 64, Transformer head, Dice+EMA, compact ckpt
         ultra    — maximum push: rich features, attn fusion, FFN LoRA, v6-pro stack
         ultra3b  — ultra on ESM-2 3B (A100 40GB+); primary backbone upgrade
+        ultra_clean — ultra without structure-training contamination signals
+        ultra_fun — ultra + disorder→function multi-label head
         screen   — fast paradigm check (~2h): 8 epochs, CNN head, 10 LoRA layers
         screen_plus — paradigm fidelity (~4h): mini-ultra on subset
         """
@@ -416,6 +445,8 @@ class TrainConfig:
                 "unfreeze_last_layers": 2,
                 "use_mc_dropout_tta": True,
                 "mc_dropout_tta_passes": 6,
+                "use_plddt_features": True,
+                "split_method": "homology",
             },
             "ultra3b": {
                 "esm_backbone": "3B",
@@ -459,6 +490,8 @@ class TrainConfig:
                 "use_mc_dropout_tta": True,
                 "mc_dropout_tta_passes": 4,
                 "max_seq_len": 1022,
+                "use_plddt_features": True,
+                "split_method": "homology",
             },
             "screen": {
                 "lora_rank": 32,
@@ -504,6 +537,21 @@ class TrainConfig:
                 "use_hallucination_weighting": False,
             },
         }
+        # ultra_clean = ultra capacity without structure-training contamination
+        if profile == "ultra_clean":
+            presets["ultra_clean"] = {
+                **presets["ultra"],
+                "use_hallucination_weighting": False,
+                "use_plddt_features": False,
+            }
+        # ultra_fun = ultra + multi-label function head (Disorder → function)
+        if profile == "ultra_fun":
+            presets["ultra_fun"] = {
+                **presets["ultra"],
+                "use_function_head": True,
+                "function_loss_weight": 0.35,
+                "function_on_disordered_only": True,
+            }
         if profile not in presets:
             raise ValueError(
                 f"Unknown profile '{profile}'. Choose: {list(presets)}"
@@ -602,8 +650,13 @@ def setup_environment(cfg: TrainConfig) -> TrainConfig:
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
+    # Accuracy-preserving HPC speedups (no change to bf16 training path)
+    if not _in_colab():
+        from colab.hpc_efficiency import apply_hpc_runtime_settings
+        apply_hpc_runtime_settings(verbose=True)
+
     print(f"\n{'=' * 55}")
-    print(f"  Environment : {'Google Colab' if _in_colab() else 'local'}")
+    print(f"  Environment : {'Google Colab' if _in_colab() else 'local/HPC'}")
     print(f"  GPU         : {cfg.gpu_name}")
     print(f"  VRAM        : {cfg.vram_gb:.1f} GB")
     print(f"  CUDA        : {torch.version.cuda}")
@@ -624,8 +677,12 @@ def setup_environment(cfg: TrainConfig) -> TrainConfig:
 # ---------------------------------------------------------------------------
 # Data
 # ---------------------------------------------------------------------------
-def fetch_disprot(cache_path: str = "disprot_raw.json") -> list:
+def fetch_disprot(cache_path: str = "disprot_raw.json", concurrent: bool = True) -> list:
     """Fetch DisProt via REST API with local JSON cache (versioned metadata wrapper)."""
+    if concurrent and not os.path.exists(cache_path):
+        from colab.async_io import fetch_disprot_concurrent
+        return fetch_disprot_concurrent(cache_path=cache_path)
+
     if os.path.exists(cache_path):
         print(f"Loading cached DisProt from '{cache_path}'...")
         with open(cache_path) as f:
@@ -689,6 +746,7 @@ def fetch_disprot(cache_path: str = "disprot_raw.json") -> list:
         "content_sha256": hashlib.sha256(
             json.dumps(all_entries, sort_keys=True).encode()
         ).hexdigest(),
+        "fetch_mode": "sequential",
     }
     with open(cache_path, "w") as f:
         json.dump({"meta": meta, "data": all_entries}, f)
@@ -1121,9 +1179,11 @@ class DisorderNetGPU(nn.Module):
 
         self.use_rich = cfg.use_rich_features
         self.use_physico = cfg.use_physico_features and not self.use_rich
+        self.use_plddt = cfg.use_plddt_features
         extra_dim = 0
         self.rich_encoder = None
         self.physico = None
+        self.plddt_encoder = None
 
         if self.use_rich:
             from colab.rich_features import RichFeatureEncoder
@@ -1132,6 +1192,11 @@ class DisorderNetGPU(nn.Module):
         elif self.use_physico:
             self.physico = PhysicoFeatureEncoder(cfg.physico_dim)
             extra_dim = cfg.physico_dim
+
+        if self.use_plddt:
+            from colab.structure_encoder import PlddtFeatureEncoder
+            self.plddt_encoder = PlddtFeatureEncoder(out_dim=cfg.plddt_feature_dim)
+            extra_dim += cfg.plddt_feature_dim
 
         head_in = esm_dim + extra_dim
 
@@ -1146,6 +1211,16 @@ class DisorderNetGPU(nn.Module):
         else:
             self.head = DisorderCNNHead(in_dim=head_in, dropout=cfg.head_dropout)
 
+        self.function_head = None
+        self.use_function_head = bool(getattr(cfg, "use_function_head", False))
+        if self.use_function_head:
+            from colab.function_predict import FunctionMultiLabelHead, N_FUNCTION_GROUPS
+            self.function_head = FunctionMultiLabelHead(
+                in_dim=head_in,
+                n_groups=N_FUNCTION_GROUPS,
+                dropout=cfg.head_dropout,
+            )
+
         if verbose:
             total = sum(p.numel() for p in self.parameters())
             trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
@@ -1156,6 +1231,7 @@ class DisorderNetGPU(nn.Module):
             print(
                 f"  Fusion={cfg.fusion_type}  rich={self.use_rich}  "
                 f"unfreeze_tail={cfg.unfreeze_last_layers}"
+                f"  function_head={self.use_function_head}"
             )
             print(
                 f"  Parameters: {total / 1e6:.1f}M total, "
@@ -1180,18 +1256,23 @@ class DisorderNetGPU(nn.Module):
             params.extend(self.physico.parameters())
         if self.rich_encoder is not None:
             params.extend(self.rich_encoder.parameters())
+        if self.plddt_encoder is not None:
+            params.extend(self.plddt_encoder.parameters())
+        if self.function_head is not None:
+            params.extend(self.function_head.parameters())
         return iter(params)
 
     def get_esm_tail_params(self) -> Iterator[nn.Parameter]:
         return iter(self._esm_tail_params)
 
-    def forward(
+    def _encode(
         self,
         tokens: torch.Tensor,
         aa_idx: Optional[torch.Tensor] = None,
-        pad_mask: Optional[torch.Tensor] = None,
         rich_feats: Optional[torch.Tensor] = None,
+        plddt_feats: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        """Shared ESM fusion + optional physico/rich/plddt features → (B, L, C)."""
         out = self.esm(tokens, repr_layers=self._fusion_layer_ids, return_contacts=False)
         layer_hiddens = [
             out["representations"][i][:, 1:-1, :] for i in self._fusion_layer_ids
@@ -1208,14 +1289,44 @@ class DisorderNetGPU(nn.Module):
                 raise ValueError("aa_idx required when use_physico_features=True")
             embeddings = torch.cat([embeddings, self.physico(aa_idx)], dim=-1)
 
+        if self.plddt_encoder is not None:
+            if plddt_feats is None:
+                raise ValueError("plddt_feats required when use_plddt_features=True")
+            embeddings = torch.cat([embeddings, self.plddt_encoder(plddt_feats)], dim=-1)
+        return embeddings
+
+    def forward(
+        self,
+        tokens: torch.Tensor,
+        aa_idx: Optional[torch.Tensor] = None,
+        pad_mask: Optional[torch.Tensor] = None,
+        rich_feats: Optional[torch.Tensor] = None,
+        plddt_feats: Optional[torch.Tensor] = None,
+        return_function: bool = False,
+    ):
+        embeddings = self._encode(
+            tokens, aa_idx=aa_idx, rich_feats=rich_feats, plddt_feats=plddt_feats,
+        )
+
         if self.head_type == "sota":
             if pad_mask is None:
                 pad_mask = torch.ones(
                     embeddings.shape[0], embeddings.shape[1],
                     dtype=torch.bool, device=embeddings.device,
                 )
-            return self.head(embeddings, pad_mask=pad_mask)
-        return self.head(embeddings)
+            disorder_logits = self.head(embeddings, pad_mask=pad_mask)
+        else:
+            disorder_logits = self.head(embeddings)
+
+        if return_function and self.function_head is not None:
+            if pad_mask is None:
+                pad_mask = torch.ones(
+                    embeddings.shape[0], embeddings.shape[1],
+                    dtype=torch.bool, device=embeddings.device,
+                )
+            function_logits = self.function_head(embeddings, pad_mask=pad_mask)
+            return disorder_logits, function_logits
+        return disorder_logits
 
 
 def load_esm_model(
@@ -1254,10 +1365,16 @@ class DisProtDataset(Dataset):
         self.cfg = cfg
         self.plddt_by_id = plddt_by_id or {}
 
-        missing = [p for p in proteins if p["id"] not in self._cache]
+        missing = [p for p in proteins if p["id"] not in self._cache or "labels" not in self._cache.get(p["id"], {})]
         if missing:
             for p in tqdm(missing, desc="Tokenizing", leave=False):
-                _, _, tokens = batch_converter([(p["id"], p["sequence"])])
+                cached = self._cache.get(p["id"], {})
+                if "tokens" in cached:
+                    tokens = cached["tokens"]
+                    if tokens.dim() == 1:
+                        tokens = tokens.unsqueeze(0)
+                else:
+                    _, _, tokens = batch_converter([(p["id"], p["sequence"])])
                 labels = p["labels"]
                 boundary = _label_boundary_mask(labels, radius=self.boundary_radius)
                 trans = p.get("transition_mask") or [0] * len(labels)
@@ -1279,11 +1396,16 @@ class DisProtDataset(Dataset):
                     for i in range(len(labels))
                 ]
 
-                aa_idx = [AA_TO_IDX.get(c, 0) for c in p["sequence"]]
+                if "aa_idx" in cached:
+                    aa_tensor = cached["aa_idx"]
+                else:
+                    aa_idx = [AA_TO_IDX.get(c, 0) for c in p["sequence"]]
+                    aa_tensor = torch.tensor(aa_idx, dtype=torch.long)
+
                 entry = {
                     "tokens": tokens.squeeze(0),
                     "labels": torch.tensor(labels, dtype=torch.float32),
-                    "aa_idx": torch.tensor(aa_idx, dtype=torch.long),
+                    "aa_idx": aa_tensor,
                     "sample_weight": torch.tensor(sample_weight, dtype=torch.float32),
                 }
                 if self.cfg is not None and self.cfg.use_rich_features:
@@ -1291,7 +1413,18 @@ class DisProtDataset(Dataset):
                     rich = compute_rich_features(p["sequence"])
                     length = min(len(labels), rich.shape[0])
                     entry["rich_feats"] = torch.tensor(rich[:length], dtype=torch.float32)
+                if self.cfg is not None and self.cfg.use_plddt_features:
+                    from colab.structure_encoder import build_plddt_feature_tensor
+                    entry["plddt_feats"] = build_plddt_feature_tensor(plddt, len(labels))
                 self._cache[p["id"]] = entry
+                disk_dir = getattr(self.cfg, "token_disk_cache_dir", "") if self.cfg else ""
+                if disk_dir and not _in_colab():
+                    from colab.hpc_efficiency import save_disk_token_cache
+                    save_disk_token_cache(
+                        p["id"], p["sequence"],
+                        {"tokens": entry["tokens"], "aa_idx": entry["aa_idx"]},
+                        disk_dir,
+                    )
 
     def __len__(self) -> int:
         return len(self.proteins)
@@ -1302,6 +1435,7 @@ class DisProtDataset(Dataset):
         labels = item["labels"]
         mask = torch.ones(labels.shape[0], dtype=torch.bool)
         rich = item.get("rich_feats")
+        plddt = item.get("plddt_feats")
         return (
             item["tokens"],
             labels,
@@ -1309,12 +1443,13 @@ class DisProtDataset(Dataset):
             item["aa_idx"],
             item["sample_weight"],
             rich,
+            plddt,
             p["id"],
         )
 
 
 def disprot_collate(batch):
-    tokens_list, labels_list, mask_list, aa_list, weight_list, rich_list, ids = zip(*batch)
+    tokens_list, labels_list, mask_list, aa_list, weight_list, rich_list, plddt_list, ids = zip(*batch)
     max_tok = max(t.shape[0] for t in tokens_list)
     max_seq = max_tok - 2
     pad_idx = 1
@@ -1334,6 +1469,15 @@ def disprot_collate(batch):
             lr = rich.shape[0]
             rich_padded[i, :lr] = rich
 
+    plddt_padded = None
+    if any(p is not None for p in plddt_list):
+        plddt_padded = torch.zeros(len(batch), max_seq, 2, dtype=torch.float32)
+        for i, plddt in enumerate(plddt_list):
+            if plddt is None:
+                continue
+            lp = plddt.shape[0]
+            plddt_padded[i, :lp] = plddt
+
     for i, (tok, lab, msk, aa, wt) in enumerate(
         zip(tokens_list, labels_list, mask_list, aa_list, weight_list)
     ):
@@ -1344,7 +1488,7 @@ def disprot_collate(batch):
         aa_padded[i, :ls] = aa
         weight_padded[i, :ls] = wt
 
-    return tokens_padded, labels_padded, mask_padded, aa_padded, weight_padded, rich_padded, list(ids)
+    return tokens_padded, labels_padded, mask_padded, aa_padded, weight_padded, rich_padded, plddt_padded, list(ids)
 
 
 # ---------------------------------------------------------------------------
@@ -1368,12 +1512,44 @@ def _forward_logits(
     aa_idx: Optional[torch.Tensor],
     mask: torch.Tensor,
     rich_feats: Optional[torch.Tensor] = None,
+    plddt_feats: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     use_physico = getattr(model, "use_physico", False)
     aa = aa_idx if use_physico else None
     if getattr(model, "head_type", "cnn") == "sota":
-        return model(tokens, aa_idx=aa, pad_mask=mask, rich_feats=rich_feats)
-    return model(tokens, aa_idx=aa, rich_feats=rich_feats)
+        return model(
+            tokens, aa_idx=aa, pad_mask=mask,
+            rich_feats=rich_feats, plddt_feats=plddt_feats,
+        )
+    return model(tokens, aa_idx=aa, rich_feats=rich_feats, plddt_feats=plddt_feats)
+
+
+def _forward_multitask(
+    model: nn.Module,
+    tokens: torch.Tensor,
+    aa_idx: Optional[torch.Tensor],
+    mask: torch.Tensor,
+    rich_feats: Optional[torch.Tensor] = None,
+    plddt_feats: Optional[torch.Tensor] = None,
+):
+    """Disorder logits, or (disorder, function) when function head is enabled."""
+    use_physico = getattr(model, "use_physico", False)
+    aa = aa_idx if use_physico else None
+    want_fn = bool(
+        getattr(model, "use_function_head", False)
+        and getattr(model, "function_head", None) is not None
+    )
+    if getattr(model, "head_type", "cnn") == "sota":
+        return model(
+            tokens, aa_idx=aa, pad_mask=mask,
+            rich_feats=rich_feats, plddt_feats=plddt_feats,
+            return_function=want_fn,
+        )
+    return model(
+        tokens, aa_idx=aa, pad_mask=mask if want_fn else None,
+        rich_feats=rich_feats, plddt_feats=plddt_feats,
+        return_function=want_fn,
+    )
 
 
 def _disorder_loss(
@@ -1433,31 +1609,51 @@ def eval_epoch(
     amp_dtype: torch.dtype,
     pos_weight: Optional[torch.Tensor] = None,
     cfg: Optional[TrainConfig] = None,
+    proteins_by_id: Optional[dict] = None,
+    function_pos_weight: Optional[torch.Tensor] = None,
 ) -> dict:
     model.eval()
     all_probs, all_labels = [], []
+    all_fn_probs, all_fn_labels = [], []
     total_loss, n_batches = 0.0, 0
+    use_fn = bool(cfg is not None and getattr(cfg, "use_function_head", False))
 
-    for tokens, labels, mask, aa_idx, sample_weight, rich_feats, _ in loader:
+    for tokens, labels, mask, aa_idx, sample_weight, rich_feats, plddt_feats, batch_ids in loader:
         tokens = tokens.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
         mask = mask.to(device, non_blocking=True)
         aa_idx = aa_idx.to(device, non_blocking=True)
         sample_weight = sample_weight.to(device, non_blocking=True)
-        rich_t = None
-        if rich_feats is not None:
-            rich_t = rich_feats.to(device, non_blocking=True)
+        rich_t = rich_feats.to(device, non_blocking=True) if rich_feats is not None else None
+        plddt_t = plddt_feats.to(device, non_blocking=True) if plddt_feats is not None else None
 
         with autocast(device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda"):
-            logits = _forward_logits(
+            out = _forward_multitask(
                 model, tokens, aa_idx if getattr(model, "use_physico", False) else None, mask,
-                rich_feats=rich_t,
+                rich_feats=rich_t, plddt_feats=plddt_t,
             )
+            if isinstance(out, tuple):
+                logits, fn_logits = out
+            else:
+                logits, fn_logits = out, None
 
         if cfg is not None:
             loss = _disorder_loss(
                 logits, labels, pos_weight, sample_weight, cfg, mask=mask,
             )
+            if use_fn and fn_logits is not None and proteins_by_id is not None:
+                from colab.function_predict import (
+                    function_multilabel_loss,
+                    stack_batch_function_labels,
+                )
+                fn_labels, fn_sup = stack_batch_function_labels(
+                    list(batch_ids), proteins_by_id, mask.shape[1], device,
+                    disordered_only=cfg.function_on_disordered_only,
+                )
+                fn_loss = function_multilabel_loss(
+                    fn_logits, fn_labels, mask, fn_sup, pos_weight=function_pos_weight,
+                )
+                loss = loss + cfg.function_loss_weight * fn_loss
         else:
             loss = nn.functional.binary_cross_entropy_with_logits(
                 logits[mask], labels[mask], pos_weight=pos_weight,
@@ -1469,12 +1665,23 @@ def eval_epoch(
         all_probs.append(probs[mask].float().cpu().numpy())
         all_labels.append(labels[mask].cpu().numpy())
 
+        if use_fn and fn_logits is not None and proteins_by_id is not None:
+            from colab.function_predict import stack_batch_function_labels
+            fn_labels, _fn_sup = stack_batch_function_labels(
+                list(batch_ids), proteins_by_id, mask.shape[1], device,
+                disordered_only=cfg.function_on_disordered_only,
+            )
+            # Same residue stream as disorder OOF (pad mask) — enables IDR-layer align.
+            # Loss still uses supervise mask above; this export is accuracy-neutral.
+            all_fn_probs.append(torch.sigmoid(fn_logits)[mask].float().cpu().numpy())
+            all_fn_labels.append(fn_labels[mask].cpu().numpy())
+
     all_probs = np.concatenate(all_probs)
     all_labels = np.concatenate(all_labels)
     preds = (all_probs >= 0.5).astype(int)
     labels_int = all_labels.astype(int)
 
-    return {
+    result = {
         "loss": total_loss / max(n_batches, 1),
         "auc": roc_auc_score(all_labels, all_probs),
         "ap": average_precision_score(all_labels, all_probs),
@@ -1483,6 +1690,10 @@ def eval_epoch(
         "probs": all_probs,
         "labels": all_labels,
     }
+    if all_fn_probs:
+        result["function_probs"] = np.concatenate(all_fn_probs)
+        result["function_labels"] = np.concatenate(all_fn_labels)
+    return result
 
 
 def _pad_teacher_probs(
@@ -1549,6 +1760,8 @@ def train_fold(
         pin_memory=cfg.pin_memory,
         persistent_workers=cfg.num_workers > 0,
     )
+    if cfg.num_workers > 0:
+        loader_kw["prefetch_factor"] = 2
     train_gen = torch.Generator()
     train_gen.manual_seed(cfg.seed + fold_idx * 1000)
     train_dl = DataLoader(
@@ -1577,6 +1790,10 @@ def train_fold(
     scheduler = _warmup_cosine_scheduler(optimizer, total_steps, warmup_steps)
 
     pos_weight = _compute_pos_weight(proteins_train, device)
+    function_pos_weight = None
+    if cfg.use_function_head:
+        from colab.function_predict import compute_function_pos_weight
+        function_pos_weight = compute_function_pos_weight(proteins_train, device)
     scaler = GradScaler(device="cuda", enabled=(amp_dtype == torch.float16))
 
     best_score = -1.0
@@ -1584,6 +1801,7 @@ def train_fold(
     best_ap = 0.0
     best_state: Optional[dict] = None
     best_probs = best_labels = None
+    best_fn_probs = best_fn_labels = None
     best_epoch = 0
     ckpt_path = os.path.join(cfg.checkpoint_dir, f"fold{fold_idx + 1}_best.pt")
     patience_counter = 0
@@ -1618,15 +1836,14 @@ def train_fold(
             leave=False,
         )
 
-        for step, (tokens, labels, mask, aa_idx, sample_weight, rich_feats, batch_ids) in enumerate(pbar):
+        for step, (tokens, labels, mask, aa_idx, sample_weight, rich_feats, plddt_feats, batch_ids) in enumerate(pbar):
             tokens = tokens.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             mask = mask.to(device, non_blocking=True)
             aa_idx = aa_idx.to(device, non_blocking=True)
             sample_weight = sample_weight.to(device, non_blocking=True)
-            rich_t = None
-            if rich_feats is not None:
-                rich_t = rich_feats.to(device, non_blocking=True)
+            rich_t = rich_feats.to(device, non_blocking=True) if rich_feats is not None else None
+            plddt_t = plddt_feats.to(device, non_blocking=True) if plddt_feats is not None else None
             max_seq = mask.shape[1]
             teacher_probs = None
             if use_distill and v6_teacher_by_id is not None:
@@ -1636,9 +1853,16 @@ def train_fold(
 
             with autocast(device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda"):
                 aa = aa_idx if fold_model.use_physico else None
+                fn_logits = None
                 if cfg.use_rdrop:
-                    logits_a = _forward_logits(fold_model, tokens, aa, mask, rich_feats=rich_t)
-                    logits_b = _forward_logits(fold_model, tokens, aa, mask, rich_feats=rich_t)
+                    out_a = _forward_multitask(fold_model, tokens, aa, mask, rich_feats=rich_t, plddt_feats=plddt_t)
+                    out_b = _forward_multitask(fold_model, tokens, aa, mask, rich_feats=rich_t, plddt_feats=plddt_t)
+                    if isinstance(out_a, tuple):
+                        logits_a, fn_a = out_a
+                        logits_b, fn_b = out_b
+                        fn_logits = fn_a
+                    else:
+                        logits_a, logits_b = out_a, out_b
                     loss_a = _disorder_loss(
                         logits_a, labels, pos_weight, sample_weight, cfg, mask=mask,
                     )
@@ -1650,10 +1874,28 @@ def train_fold(
                     loss = 0.5 * (loss_a + loss_b) + cfg.rdrop_weight * cons
                     logits = logits_a
                 else:
-                    logits = _forward_logits(fold_model, tokens, aa, mask, rich_feats=rich_t)
+                    out = _forward_multitask(fold_model, tokens, aa, mask, rich_feats=rich_t, plddt_feats=plddt_t)
+                    if isinstance(out, tuple):
+                        logits, fn_logits = out
+                    else:
+                        logits = out
                     loss = _disorder_loss(
                         logits, labels, pos_weight, sample_weight, cfg, mask=mask,
                     )
+
+                if cfg.use_function_head and fn_logits is not None:
+                    from colab.function_predict import (
+                        function_multilabel_loss,
+                        stack_batch_function_labels,
+                    )
+                    fn_labels, fn_sup = stack_batch_function_labels(
+                        list(batch_ids), proteins_by_id, max_seq, device,
+                        disordered_only=cfg.function_on_disordered_only,
+                    )
+                    fn_loss = function_multilabel_loss(
+                        fn_logits, fn_labels, mask, fn_sup, pos_weight=function_pos_weight,
+                    )
+                    loss = loss + cfg.function_loss_weight * fn_loss
 
                 if use_distill and teacher_probs is not None:
                     from colab.sota_losses import v6_distillation_loss
@@ -1706,7 +1948,11 @@ def train_fold(
         elif swa is not None and swa.ready and epoch >= swa_start_epoch:
             swa_backup = swa.apply_swa(fold_model)
 
-        val_metrics = eval_epoch(fold_model, val_dl, device, amp_dtype, pos_weight, cfg)
+        val_metrics = eval_epoch(
+            fold_model, val_dl, device, amp_dtype, pos_weight, cfg,
+            proteins_by_id=proteins_by_id,
+            function_pos_weight=function_pos_weight,
+        )
 
         if ema is not None:
             ema.restore(fold_model)
@@ -1778,6 +2024,8 @@ def train_fold(
                 best_state = copy.deepcopy(fold_model.state_dict())
             best_probs = val_metrics["probs"]
             best_labels = val_metrics["labels"]
+            best_fn_probs = val_metrics.get("function_probs")
+            best_fn_labels = val_metrics.get("function_labels")
             patience_counter = 0
             meta = {
                 "fold": fold_idx + 1,
@@ -1827,7 +2075,7 @@ def train_fold(
     if device.type == "cuda":
         torch.cuda.empty_cache()
 
-    return {
+    result = {
         "fold": fold_idx + 1,
         "best_auc": best_auc,
         "best_ap": best_ap,
@@ -1839,25 +2087,27 @@ def train_fold(
         "ckpt_path": ckpt_path if best_state is not None else None,
         "total_time": total_time,
     }
+    if best_fn_probs is not None:
+        result["val_function_probs"] = best_fn_probs
+        result["val_function_labels"] = best_fn_labels
+    return result
 
 
 def _serialize_fold_result(result: dict) -> dict:
     """JSON-safe fold result (numpy arrays → lists)."""
     out = dict(result)
-    if out.get("val_probs") is not None:
-        out["val_probs"] = np.asarray(out["val_probs"]).tolist()
-    if out.get("val_labels") is not None:
-        out["val_labels"] = np.asarray(out["val_labels"]).tolist()
+    for key in ("val_probs", "val_labels", "val_function_probs", "val_function_labels"):
+        if out.get(key) is not None:
+            out[key] = np.asarray(out[key]).tolist()
     return out
 
 
 def _deserialize_fold_result(data: dict) -> dict:
     """Restore fold result from cv_progress.json."""
     out = dict(data)
-    if out.get("val_probs") is not None:
-        out["val_probs"] = np.asarray(out["val_probs"], dtype=np.float32)
-    if out.get("val_labels") is not None:
-        out["val_labels"] = np.asarray(out["val_labels"], dtype=np.float32)
+    for key in ("val_probs", "val_labels", "val_function_probs", "val_function_labels"):
+        if out.get(key) is not None:
+            out[key] = np.asarray(out[key], dtype=np.float32)
     return out
 
 
@@ -1963,6 +2213,11 @@ def run_cross_validation(
     Completed folds are loaded from checkpoints/cv_progress.json when resuming.
     prefetch_af_plddt: fetch AF pLDDT cache before training (hallucination weights).
     """
+    if cfg.use_plddt_features and plddt_by_id is None:
+        print("Prefetching AF pLDDT for structure-aware training channel…")
+        plddt_by_id = build_plddt_cache_for_training(proteins, cache_dir=cfg.af_plddt_cache_dir)
+        print(f"  pLDDT for structure channel: {len(plddt_by_id)}/{len(proteins)} proteins")
+
     if plddt_by_id is None and cfg.use_hallucination_weighting and prefetch_af_plddt:
         print("Pre-fetching AF pLDDT for hallucination hard-negative weighting...")
         plddt_by_id = build_plddt_cache_for_training(proteins, cache_dir=cfg.af_plddt_cache_dir)
@@ -1970,7 +2225,18 @@ def run_cross_validation(
         print(f"  pLDDT available for {n_cached}/{len(proteins)} proteins")
 
     token_cache: dict = {}
-    splits = get_cv_splits(proteins, cfg.n_folds)
+    disk_dir = getattr(cfg, "token_disk_cache_dir", "")
+    if disk_dir and not _in_colab():
+        from colab.hpc_efficiency import warm_token_disk_cache
+        cache_path = disk_dir if os.path.isabs(disk_dir) else os.path.join(cfg.checkpoint_dir, disk_dir)
+        token_cache = warm_token_disk_cache(proteins, batch_converter, cache_path, token_cache)
+        cfg.token_disk_cache_dir = cache_path
+
+    splits = get_cv_splits(
+        proteins, cfg.n_folds,
+        split_method=getattr(cfg, "split_method", "protein"),
+        homology_min_identity=getattr(cfg, "homology_min_identity", 0.40),
+    )
 
     progress_path = os.path.join(cfg.checkpoint_dir, "cv_progress.json")
     disprot_meta = get_disprot_cache_meta(cfg.data_cache)

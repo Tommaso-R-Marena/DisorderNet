@@ -89,11 +89,16 @@ def verify_af3_weights(paths: dict[str, str]) -> tuple[bool, str]:
 
 
 def verify_af3_outputs(paths: dict[str, str]) -> tuple[bool, str]:
-    """Check that an AF3 output directory exists for ingest mode."""
+    """Check that an AF3 output directory exists and has job folders."""
     out = paths["output_dir"]
     if os.path.isdir(out):
         n = len([e for e in os.listdir(out) if not e.startswith(".")])
-        return True, f"AF3 output dir: {out} ({n} entries)"
+        if n > 0:
+            return True, f"AF3 output dir: {out} ({n} entries)"
+        return False, (
+            f"AF3 output dir empty: {out}. "
+            "Run AF3 jobs or copy outputs into this folder."
+        )
     return False, (
         f"No AF3 outputs at {out}. "
         "Use AF3_MODE='auto' or 'run' to generate predictions, "
