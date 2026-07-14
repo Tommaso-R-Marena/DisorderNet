@@ -10,6 +10,6 @@ Related checklists / claim docs:
 - [`PAPER_OUTLINE_STRUCTURE_DISTRUST.md`](PAPER_OUTLINE_STRUCTURE_DISTRUST.md)
 
 ```text
-checkout master → setup_env → sbatch pipeline_ultra → sbatch pipeline_ultra_clean
-  → verify mirrored artifacts → METHODS_CHECKLIST → go/no-go on numbers
+checkout master → setup_env → bash rockfish/slurm/submit_publish_all.sh
+  → open publish_package/ → METHODS_CHECKLIST → go/no-go on numbers
 ```

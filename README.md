@@ -111,21 +111,11 @@ export DISORDERNET_ACCOUNT=your_pi_gpu
 export DISORDERNET_BOLTZ_ROOT=$HOME/boltz
 export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
 
-# Main publish run (ultra + CAID3 + distrust benchmark finalize)
-export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_main
-export RUN_CAID3=1
-sbatch --account=$DISORDERNET_ACCOUNT \
-  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR,RUN_CAID3 \
-  rockfish/slurm/pipeline_ultra.sbatch
-
-# Contamination-clean companion (separate workdir — required)
-export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_clean
-sbatch --account=$DISORDERNET_ACCOUNT \
-  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR \
-  rockfish/slurm/pipeline_ultra_clean.sbatch
+# All-in-one: 650M → clean companion → 3B → organized publish_package/
+bash rockfish/slurm/submit_publish_all.sh
 ```
 
-Operator path: checkout `master` → setup → `pipeline_ultra` → `pipeline_ultra_clean` → verify mirrored artifacts → [`docs/METHODS_CHECKLIST.md`](docs/METHODS_CHECKLIST.md) → publish go/no-go (criteria in [rockfish/README.md](rockfish/README.md#5-publish-go--no-go)).
+Operator path: checkout `master` → setup → `submit_publish_all.sh` → open `publish_package/` → [`docs/METHODS_CHECKLIST.md`](docs/METHODS_CHECKLIST.md) → go/no-go ([rockfish/README.md](rockfish/README.md#publish-path-main--clean-companion)).
 
 Ultra on Rockfish uses **homology-safe CV**, optional **train-time pLDDT** (disabled in `ultra_clean`), and **CAID3** scoring for fair comparison vs ESMDisPred (0.895).
 
@@ -276,6 +266,8 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `rockfish/run_disordernet.py` | HPC CLI: screen / cv / stack / postprocess / full / pipeline / eval / atlas |
 | `rockfish/slurm/pipeline_ultra.sbatch` | Full production + eval + CAID3 |
 | `rockfish/slurm/pipeline_ultra_clean.sbatch` | Contamination-clean companion (separate workdir) |
+| `rockfish/slurm/submit_publish_all.sh` | **All-in-one:** 650M → clean → 3B → organize `publish_package/` |
+| `rockfish/package_publish_results.py` | Assemble side-by-side publish package from run workdirs |
 | `rockfish/slurm/multi_seed.sbatch` | Slurm array for seeds 42/43/44 |
 | `rockfish/README.md` | **Canonical Rockfish usage** (publish path, artifacts, go/no-go) |
 | `docs/ROCKFISH_PUBLISH_RUNBOOK.md` | Short pointer to rockfish README publish path |
