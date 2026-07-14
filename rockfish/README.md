@@ -2,6 +2,20 @@
 
 Run the full SOTA pipeline on Rockfish instead of Colab: longer wall times (72 h), more RAM, scratch storage, and no Drive quota issues.
 
+## Related documentation
+
+| Document | Role |
+|----------|------|
+| **This file** | Canonical Rockfish setup, publish path, artifacts, go/no-go, env vars |
+| [`docs/ROCKFISH_PUBLISH_RUNBOOK.md`](../docs/ROCKFISH_PUBLISH_RUNBOOK.md) | Short publish-path pointer |
+| [`docs/METHODS_CHECKLIST.md`](../docs/METHODS_CHECKLIST.md) | Preprint freeze checklist |
+| [`docs/STRUCTURE_DISTRUST_ATLAS.md`](../docs/STRUCTURE_DISTRUST_ATLAS.md) | Structure-distrust claim + eval artifacts |
+| [`docs/IDR_BIOLOGY_LAYER.md`](../docs/IDR_BIOLOGY_LAYER.md) | IDR biology layer thesis + stages |
+| [`docs/PAPER_OUTLINE_STRUCTURE_DISTRUST.md`](../docs/PAPER_OUTLINE_STRUCTURE_DISTRUST.md) | Paper outline / evidence stack |
+| [`docs/HOMOLOGY_HOLDOUT.md`](../docs/HOMOLOGY_HOLDOUT.md) | Homology CV wording |
+| [Root `README.md`](../README.md) | Project overview, Colab paths, full documentation index |
+| [`AGENTS.md`](../AGENTS.md) | Contributor / agent notes (pytest, CPU pipeline, Rockfish conventions) |
+
 ## Slurm script convention
 
 All `rockfish/slurm/*.sbatch` files follow the lab Rockfish style:
