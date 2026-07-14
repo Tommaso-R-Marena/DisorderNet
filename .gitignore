@@ -27,3 +27,7 @@ statistical_validation_report.json
 inference_fusion_report.json
 gpu_v6_ensemble_report.json
 v6_oof_probs_cache.json
+
+# Generated experiment outputs
+experiments/out/
+results_v7/
