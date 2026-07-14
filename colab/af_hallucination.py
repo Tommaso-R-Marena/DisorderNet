@@ -240,6 +240,37 @@ def run_af2_af3_comparison_report(
     }
 
 
+def fetch_and_run_boltz_rescue_report(
+    proteins: list,
+    fold_results: list,
+    boltz_output_root: str,
+    threshold: float = 0.5,
+    high_plddt_threshold: float = 70.0,
+    n_folds: int = 5,
+    cache_dir: str = "boltz_plddt_cache",
+) -> tuple[dict, dict[str, np.ndarray]]:
+    """Load Boltz-2 pLDDT then run hallucination rescue report."""
+    from colab.boltz_plddt import DEFAULT_BOLTZ_CACHE_DIR, load_boltz_plddt_batch
+
+    cache_dir = cache_dir or DEFAULT_BOLTZ_CACHE_DIR
+    plddt_by_protein = load_boltz_plddt_batch(
+        proteins, output_root=boltz_output_root, cache_dir=cache_dir, verbose=True,
+    )
+    report = run_af_rescue_report(
+        proteins=proteins,
+        fold_results=fold_results,
+        plddt_by_protein=plddt_by_protein,
+        threshold=threshold,
+        high_plddt_threshold=high_plddt_threshold,
+        n_folds=n_folds,
+        source="Boltz-2 (pinned auto-download)",
+    )
+    report["n_plddt_loaded"] = len(plddt_by_protein)
+    report["boltz_output_root"] = boltz_output_root
+    report["cache_dir"] = cache_dir
+    return report, plddt_by_protein
+
+
 def fetch_and_run_af3_rescue_report(
     proteins: list,
     fold_results: list,

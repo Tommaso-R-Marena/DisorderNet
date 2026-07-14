@@ -180,27 +180,54 @@ def fetch_plddt_batch(
     cache_dir: str = DEFAULT_CACHE_DIR,
     sleep_s: float = 0.1,
     verbose: bool = True,
+    max_workers: int = 8,
 ) -> dict[str, np.ndarray]:
     """
     Fetch pLDDT for all proteins with UniProt accessions.
 
-    Returns dict mapping protein id → aligned pLDDT array.
+    Uses parallel workers when max_workers > 1 (recommended on HPC).
     """
-    results: dict[str, np.ndarray] = {}
-    session = requests.Session()
-    iterator = proteins
-    if verbose:
-        iterator = tqdm(proteins, desc="Fetching AlphaFold pLDDT")
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    for p in iterator:
-        acc = p.get("uniprot_acc", "")
-        if not acc:
-            continue
+    results: dict[str, np.ndarray] = {}
+    to_fetch = [
+        p for p in proteins
+        if p.get("uniprot_acc")
+    ]
+
+    if max_workers <= 1:
+        session = requests.Session()
+        iterator = to_fetch
+        if verbose:
+            iterator = tqdm(to_fetch, desc="Fetching AlphaFold pLDDT")
+        for p in iterator:
+            plddt = fetch_plddt_for_uniprot(
+                p["uniprot_acc"], p["sequence"], cache_dir=cache_dir, session=session,
+            )
+            if plddt is not None:
+                results[p["id"]] = plddt
+            if sleep_s > 0:
+                time.sleep(sleep_s)
+        return results
+
+    def _one(p: dict) -> tuple[str, Optional[np.ndarray]]:
+        session = requests.Session()
         plddt = fetch_plddt_for_uniprot(
-            acc, p["sequence"], cache_dir=cache_dir, session=session,
+            p["uniprot_acc"], p["sequence"], cache_dir=cache_dir, session=session,
         )
-        if plddt is not None:
-            results[p["id"]] = plddt
         if sleep_s > 0:
             time.sleep(sleep_s)
+        return p["id"], plddt
+
+    if verbose:
+        print(f"Fetching pLDDT for {len(to_fetch)} proteins ({max_workers} workers)…")
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_one, p): p for p in to_fetch}
+        iterator = as_completed(futures)
+        if verbose:
+            iterator = tqdm(iterator, total=len(futures), desc="Fetching AlphaFold pLDDT")
+        for fut in iterator:
+            pid, plddt = fut.result()
+            if plddt is not None:
+                results[pid] = plddt
     return results

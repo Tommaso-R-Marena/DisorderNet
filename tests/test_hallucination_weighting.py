@@ -58,7 +58,7 @@ class TestHallucinationWeights:
         }))
 
         ds = DisProtDataset([p], mock_batch_converter, cfg=cfg)
-        _, labels, mask, _, sample_weight, _, _ = ds[0]
+        _, labels, mask, _, sample_weight, _, _, _ = ds[0]
 
         dis_mask = labels[mask] == 1
         dis_weights = sample_weight[mask][dis_mask]

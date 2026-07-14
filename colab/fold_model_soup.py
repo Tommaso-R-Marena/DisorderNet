@@ -40,9 +40,36 @@ def _predict_proteins(
     use_tta: bool = False,
     tta_passes: int = 1,
 ) -> dict[str, np.ndarray]:
-    """Run inference; return protein_id -> per-residue probabilities."""
+    """Run inference; return protein_id -> per-residue disorder probabilities."""
+    disorder, _fn = _predict_proteins_multitask(
+        model, proteins, batch_converter, token_cache, cfg,
+        plddt_by_id=plddt_by_id, use_tta=use_tta, tta_passes=tta_passes,
+        return_function=False,
+    )
+    return disorder
+
+
+def _predict_proteins_multitask(
+    model: DisorderNetGPU,
+    proteins: list,
+    batch_converter,
+    token_cache: dict,
+    cfg: TrainConfig,
+    plddt_by_id: Optional[dict] = None,
+    use_tta: bool = False,
+    tta_passes: int = 1,
+    return_function: bool = True,
+) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+    """
+    Inference returning disorder probs and optional function probs (L, G).
+
+    Function head uses a single forward (no MC-TTA) to keep logits calibrated;
+    disorder may still use MC-dropout TTA when enabled.
+    """
+    from colab.disordernet_gpu import _forward_multitask
+
     if not proteins:
-        return {}
+        return {}, {}
     ds = DisProtDataset(
         proteins, batch_converter, token_cache,
         boundary_radius=cfg.boundary_radius, cfg=cfg, plddt_by_id=plddt_by_id,
@@ -53,35 +80,54 @@ def _predict_proteins(
     )
     device = cfg.device
     amp_dtype = cfg.amp_dtype
-    out: dict[str, np.ndarray] = {}
-    use_mc = use_tta and tta_passes > 1
+    disorder_out: dict[str, np.ndarray] = {}
+    function_out: dict[str, np.ndarray] = {}
+    want_fn = (
+        return_function
+        and bool(getattr(model, "use_function_head", False))
+        and getattr(model, "function_head", None) is not None
+    )
+    use_mc = use_tta and tta_passes > 1 and not want_fn
 
-    def _one_batch(tokens, aa_idx, mask, rich_t):
-        aa = aa_idx if model.use_physico else None
-        if use_mc:
-            from colab.inference_tta import mc_dropout_predict_probs
-            return mc_dropout_predict_probs(
-                model, tokens, aa, mask, rich_t, tta_passes, _forward_logits,
-            )
-        with torch.inference_mode():
-            return torch.sigmoid(
-                _forward_logits(model, tokens, aa, mask, rich_feats=rich_t),
-            ).float()
-
-    for tokens, labels, mask, aa_idx, _, rich_feats, ids in dl:
+    for tokens, labels, mask, aa_idx, _, rich_feats, plddt_feats, ids in dl:
         tokens = tokens.to(device, non_blocking=True)
         mask = mask.to(device, non_blocking=True)
         aa_idx = aa_idx.to(device, non_blocking=True)
         rich_t = rich_feats.to(device, non_blocking=True) if rich_feats is not None else None
+        plddt_t = plddt_feats.to(device, non_blocking=True) if plddt_feats is not None else None
+        aa = aa_idx if model.use_physico else None
         with torch.amp.autocast(
             device_type=device.type, dtype=amp_dtype, enabled=device.type == "cuda",
         ):
-            probs = _one_batch(tokens, aa_idx, mask, rich_t).cpu().numpy()
+            if use_mc:
+                from colab.inference_tta import mc_dropout_predict_probs
+                dis_probs = mc_dropout_predict_probs(
+                    model, tokens, aa, mask, rich_t, tta_passes, _forward_logits,
+                    plddt_feats=plddt_t,
+                )
+                fn_probs = None
+            else:
+                with torch.inference_mode():
+                    out = _forward_multitask(
+                        model, tokens, aa, mask, rich_feats=rich_t, plddt_feats=plddt_t,
+                    )
+                if isinstance(out, tuple):
+                    dis_logits, fn_logits = out
+                    dis_probs = torch.sigmoid(dis_logits).float()
+                    fn_probs = torch.sigmoid(fn_logits).float() if want_fn else None
+                else:
+                    dis_probs = torch.sigmoid(out).float()
+                    fn_probs = None
+
         mask_np = mask.cpu().numpy()
+        dis_np = dis_probs.cpu().numpy()
+        fn_np = fn_probs.cpu().numpy() if fn_probs is not None else None
         for i, pid in enumerate(ids):
             m = mask_np[i]
-            out[pid] = probs[i][m].astype(np.float32)
-    return out
+            disorder_out[pid] = dis_np[i][m].astype(np.float32)
+            if fn_np is not None:
+                function_out[pid] = fn_np[i][m].astype(np.float32)
+    return disorder_out, function_out
 
 
 def _load_fold_model(

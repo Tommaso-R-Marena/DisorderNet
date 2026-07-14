@@ -50,6 +50,55 @@ fi
 if [[ "${PREFETCH_AF:-0}" == "1" ]]; then
   EXTRA_ARGS+=(--prefetch-af-plddt)
 fi
+if [[ "${RUN_CAID3:-0}" == "1" ]]; then
+  EXTRA_ARGS+=(--run-caid3-eval)
+fi
+if [[ "${RUN_NO_HALLUC_WEIGHT:-0}" == "1" ]]; then
+  EXTRA_ARGS+=(--no-hallucination-weighting)
+fi
+if [[ "${RUN_NO_PLDDT_FEATURES:-0}" == "1" ]]; then
+  EXTRA_ARGS+=(--no-plddt-features)
+fi
+if [[ -n "${SEED_DIRS:-}" ]]; then
+  EXTRA_ARGS+=(--seed-dirs "$SEED_DIRS")
+fi
+if [[ -n "${FASTA_PATH:-}" ]]; then
+  EXTRA_ARGS+=(--fasta "$FASTA_PATH")
+fi
+if [[ "${AF3_MODE:-off}" != "off" ]]; then
+  EXTRA_ARGS+=(--af3-mode "$AF3_MODE")
+fi
+if [[ -n "${DISORDERNET_AF3_ROOT:-}" ]]; then
+  EXTRA_ARGS+=(--af3-root "$DISORDERNET_AF3_ROOT")
+fi
+if [[ -n "${AF3_MAX_PROTEINS:-}" ]]; then
+  EXTRA_ARGS+=(--af3-max-proteins "$AF3_MAX_PROTEINS")
+fi
+if [[ -n "${AF3_SHARD_INDEX:-}" && -n "${AF3_SHARD_COUNT:-}" ]]; then
+  EXTRA_ARGS+=(--af3-shard-index "$AF3_SHARD_INDEX" --af3-shard-count "$AF3_SHARD_COUNT")
+fi
+
+# Boltz-2 (default structure backend). Training jobs default to ingest-only;
+# use BOLTZ_MODE=auto or rockfish/slurm/boltz_batch.sbatch to run predictions
+# (pinned boltz auto-downloads weights on first use).
+: "${BOLTZ_MODE:=ingest}"
+: "${STRUCTURE_BACKEND:=boltz}"
+EXTRA_ARGS+=(--structure-backend "$STRUCTURE_BACKEND")
+EXTRA_ARGS+=(--boltz-mode "$BOLTZ_MODE")
+if [[ -n "${DISORDERNET_BOLTZ_ROOT:-}" ]]; then
+  EXTRA_ARGS+=(--boltz-root "$DISORDERNET_BOLTZ_ROOT")
+fi
+if [[ -n "${BOLTZ_MAX_PROTEINS:-}" ]]; then
+  EXTRA_ARGS+=(--boltz-max-proteins "$BOLTZ_MAX_PROTEINS")
+fi
+if [[ -n "${BOLTZ_SHARD_INDEX:-}" && -n "${BOLTZ_SHARD_COUNT:-}" ]]; then
+  EXTRA_ARGS+=(--boltz-shard-index "$BOLTZ_SHARD_INDEX" --boltz-shard-count "$BOLTZ_SHARD_COUNT")
+fi
+if [[ "${BOLTZ_USE_MSA_SERVER:-0}" == "1" ]]; then
+  EXTRA_ARGS+=(--boltz-use-msa-server)
+fi
+
+CHECKPOINT_ARG=(--checkpoint-dir "${CHECKPOINT_SUBDIR:-checkpoints}")
 
 python rockfish/run_disordernet.py "$STAGE" \
   --profile "$PROFILE" \
@@ -57,22 +106,18 @@ python rockfish/run_disordernet.py "$STAGE" \
   --seed "$SEED" \
   --num-workers "$NUM_WORKERS" \
   "${WORKDIR_ARG[@]}" \
+  "${CHECKPOINT_ARG[@]}" \
   "${EXTRA_ARGS[@]}"
 
 RUN_TAG="${STAGE}_${PROFILE}_${BACKBONE}_s${SEED}_j${SLURM_JOB_ID:-local}"
+if [[ -n "${SLURM_ARRAY_TASK_ID:-}" ]]; then
+  RUN_TAG="${RUN_TAG}_a${SLURM_ARRAY_TASK_ID}"
+fi
 DEST="$DISORDERNET_RESULTS/$RUN_TAG"
 mkdir -p "$DEST"
 
-for f in checkpoints/cv_progress.json checkpoints/cv_summary.json \
-         checkpoints/run_manifest.json checkpoints/sota_postprocess_report.json \
-         checkpoints/gpu_v6_ensemble_report.json checkpoints/sota_stack_report.json \
-         checkpoints/quick_screen_*.json; do
-  [[ -f "$f" ]] && cp -a "$f" "$DEST/"
-done
-
-if [[ -d checkpoints ]]; then
-  find checkpoints -maxdepth 1 -name 'fold_*_compact.pt' -exec cp -a {} "$DEST/" \; 2>/dev/null || true
-fi
+# Parallel mirror (threads) — faster than serial cp for many reports
+python rockfish/mirror_results.py --dest "$DEST" --workers "${MIRROR_WORKERS:-8}" --cwd .
 
 echo "Results mirrored to $DEST"
 date
