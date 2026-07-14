@@ -85,6 +85,10 @@ def _build_cfg(args, workdir: str):
         overrides["use_function_head"] = False
     if getattr(args, "function_loss_weight", None) is not None:
         overrides["function_loss_weight"] = args.function_loss_weight
+    if getattr(args, "no_hallucination_weighting", False):
+        overrides["use_hallucination_weighting"] = False
+    if getattr(args, "no_plddt_features", False):
+        overrides["use_plddt_features"] = False
     cfg = TrainConfig.from_profile(args.profile, **overrides)
     cfg = setup_environment(cfg)
     cfg = apply_backbone_to_config(cfg, args.backbone)
@@ -1187,6 +1191,20 @@ def stage_caid3_eval(args, cfg, proteins, fold_results, model, converter) -> dic
     report = evaluate_caid_predictions(ref_proteins, preds_by_id)
     print_caid3_eval_report(report)
     save_caid3_eval_report(report, os.path.join(cfg.checkpoint_dir, "caid3_eval_report.json"))
+
+    # Eval typically runs before CAID3; patch the distrust benchmark in-place.
+    try:
+        from colab.hallucination_benchmark import finalize_distrust_benchmark_with_caid3
+
+        patched = finalize_distrust_benchmark_with_caid3(
+            cfg.checkpoint_dir,
+            cfg,
+            regenerate_figure=not getattr(args, "no_distrust_figures", False),
+        )
+        if patched and (patched.get("caid3_credibility_floor") or {}).get("available"):
+            print("  Attached CAID3 credibility floor → structure_distrust_benchmark.json")
+    except Exception as exc:
+        print(f"  Warning: could not finalize distrust benchmark with CAID3: {exc}")
     return report
 
 
@@ -1312,6 +1330,17 @@ def run_pipeline(args) -> int:
             stage_idr_layer(args, cfg, proteins, fold_results)
         if args.run_caid3_eval:
             stage_caid3_eval(args, cfg, proteins, fold_results, model, converter)
+            # Defense in depth: re-finalize after CAID3 even if stage helper skipped.
+            try:
+                from colab.hallucination_benchmark import finalize_distrust_benchmark_with_caid3
+
+                finalize_distrust_benchmark_with_caid3(
+                    cfg.checkpoint_dir,
+                    cfg,
+                    regenerate_figure=not getattr(args, "no_distrust_figures", False),
+                )
+            except Exception as exc:
+                print(f"  Warning: pipeline CAID3 finalize skipped: {exc}")
 
     else:
         raise ValueError(f"Unknown stage: {args.stage}")
@@ -1351,6 +1380,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     # CV
     p.add_argument("--prefetch-af-plddt", action="store_true", help="Prefetch AF pLDDT cache")
+    p.add_argument(
+        "--no-hallucination-weighting",
+        action="store_true",
+        help="Disable train-time hallucination/pLDDT loss weighting (contamination-clean)",
+    )
+    p.add_argument(
+        "--no-plddt-features",
+        action="store_true",
+        help="Disable pLDDT input features (contamination-clean ablation)",
+    )
     p.add_argument(
         "--function-head", action="store_true",
         help="Enable disorder→function multi-label head (or use --profile ultra_fun)",

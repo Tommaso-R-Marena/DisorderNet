@@ -150,6 +150,54 @@ def attach_caid3_credibility_floor(
     return bench
 
 
+def finalize_distrust_benchmark_with_caid3(
+    checkpoint_dir: str,
+    cfg=None,
+    *,
+    regenerate_figure: bool = True,
+) -> Optional[dict]:
+    """
+    Patch structure_distrust_benchmark.json in-place after CAID3 lands.
+
+    Eval usually runs before CAID3 in the Rockfish pipeline, so the first
+    benchmark write has no credibility floor. Call this after CAID3 to attach
+    the floor without re-running the full labeled eval.
+    """
+    import os
+
+    bench_path = os.path.join(checkpoint_dir, "structure_distrust_benchmark.json")
+    caid3_path = os.path.join(checkpoint_dir, "caid3_eval_report.json")
+    if not os.path.isfile(bench_path):
+        return None
+    if not os.path.isfile(caid3_path):
+        return None
+
+    with open(bench_path) as f:
+        bench = json.load(f)
+    with open(caid3_path) as f:
+        caid3_report = json.load(f)
+
+    bench = attach_caid3_credibility_floor(bench, caid3_report)
+    if cfg is not None:
+        try:
+            from colab.training_contamination_audit import attach_contamination_flags
+            bench = attach_contamination_flags(bench, cfg)
+        except Exception:
+            pass
+
+    save_distrust_benchmark(bench, bench_path)
+
+    if regenerate_figure:
+        try:
+            from colab.colab_figures import generate_distrust_benchmark_figure
+            fig_dir = os.path.join(checkpoint_dir, "distrust_figures")
+            generate_distrust_benchmark_figure(bench, out_dir=fig_dir)
+        except Exception:
+            pass
+
+    return bench
+
+
 def run_labeled_distrust_benchmark(
     proteins: list,
     fold_results: list,

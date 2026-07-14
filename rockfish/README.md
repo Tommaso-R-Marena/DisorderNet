@@ -5,12 +5,16 @@ Run the full SOTA pipeline on Rockfish instead of Colab: longer wall times (72 h
 ## Prerequisites
 
 1. **GPU allocation** — your PI must have a Rockfish `_gpu` account (e.g. `jsmith123_gpu`) and `qos_gpu`. Request via [ARCH support](https://docs.arch.jhu.edu/) if needed.
-2. **Clone the repo** on Rockfish login node:
+2. **Clone the repo** on Rockfish login node (**use the publish PR branch** until
+   `feature/idr-biology-layer-c41e` is merged to `master`):
    ```bash
    git clone https://github.com/Tommaso-R-Marena/DisorderNet.git ~/DisorderNet
    cd ~/DisorderNet
-   git checkout master
+   git fetch origin feature/idr-biology-layer-c41e
+   git checkout feature/idr-biology-layer-c41e
    ```
+   After merge, `git checkout master` is fine. See
+   [`docs/ROCKFISH_PUBLISH_RUNBOOK.md`](../docs/ROCKFISH_PUBLISH_RUNBOOK.md).
 3. **One-time env setup**:
    ```bash
    bash rockfish/setup_env.sh
@@ -49,6 +53,12 @@ export RUN_CAID3=1
 sbatch --account=$DISORDERNET_ACCOUNT \
   --export=ALL,DISORDERNET_ACCOUNT,RUN_CAID3=1 \
   rockfish/slurm/pipeline_ultra.sbatch
+
+# Contamination-clean companion (separate workdir — required for publish honesty)
+export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_clean
+sbatch --account=$DISORDERNET_ACCOUNT \
+  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR \
+  rockfish/slurm/pipeline_ultra_clean.sbatch
 
 # Multi-seed for +0.005–0.015 AUC (3 parallel jobs)
 export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_ms
@@ -96,8 +106,9 @@ sbatch --partition=ica100 --export=ALL,... rockfish/slurm/train_ultra3b.sbatch
 | `boltz` | structure | Boltz-2 pLDDT (pinned, auto-download) |
 | `af3` | structure | Optional AlphaFold 3 ingest/run |
 | `idr-layer` | product | Post-structure IDR biology layer export |
-| `eval` | 8–11 | CAID, AF/Boltz rescue, structure calibration, Phase 3 |
-| `pipeline` | all + eval | full → eval [→ CAID3 with `RUN_CAID3=1`] |
+| `structure-distrust-atlas` | paper | Labeled/proxy distrust atlas from preds + pLDDT cache |
+| `eval` | 8–11 | CAID, AF/Boltz rescue, structure distrust, Phase 3 |
+| `pipeline` | all + eval | full → eval [→ CAID3 with `RUN_CAID3=1`; CAID floor patched into distrust benchmark] |
 | `predict` | deploy | FASTA batch inference + `.caid` export |
 | `multi-seed-blend` | 7e | Average OOF from multiple seed dirs |
 

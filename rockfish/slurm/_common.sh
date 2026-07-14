@@ -53,6 +53,12 @@ fi
 if [[ "${RUN_CAID3:-0}" == "1" ]]; then
   EXTRA_ARGS+=(--run-caid3-eval)
 fi
+if [[ "${RUN_NO_HALLUC_WEIGHT:-0}" == "1" ]]; then
+  EXTRA_ARGS+=(--no-hallucination-weighting)
+fi
+if [[ "${RUN_NO_PLDDT_FEATURES:-0}" == "1" ]]; then
+  EXTRA_ARGS+=(--no-plddt-features)
+fi
 if [[ -n "${SEED_DIRS:-}" ]]; then
   EXTRA_ARGS+=(--seed-dirs "$SEED_DIRS")
 fi
