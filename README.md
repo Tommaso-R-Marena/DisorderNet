@@ -111,13 +111,17 @@ export DISORDERNET_ACCOUNT=your_pi_gpu
 export DISORDERNET_BOLTZ_ROOT=$HOME/boltz
 export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
 
-# All-in-one: 650M → clean companion → 3B → organized publish_package/
-bash rockfish/slurm/submit_publish_all.sh
+# Script 1 — ESM-2 650M (+ clean) → publish_package/
+bash rockfish/slurm/submit_publish_650m.sh
+
+# Script 2 — ESM-2 3B (+ clean) → publish_package/  (optional; try --partition ica100 if OOM)
+bash rockfish/slurm/submit_publish_3b.sh
 ```
 
-Operator path: checkout `master` → setup → `submit_publish_all.sh` → open `publish_package/` → [`docs/METHODS_CHECKLIST.md`](docs/METHODS_CHECKLIST.md) → go/no-go ([rockfish/README.md](rockfish/README.md#publish-path-main--clean-companion)).
+Exact flags and layouts: **[rockfish/README.md — Publish path](rockfish/README.md#publish-path-exact-usage)**.  
+CLI: `python rockfish/publish_submit.py submit-650m|submit-3b --account $DISORDERNET_ACCOUNT`.
 
-Ultra on Rockfish uses **homology-safe CV**, optional **train-time pLDDT** (disabled in `ultra_clean`), and **CAID3** scoring for fair comparison vs ESMDisPred (0.895).
+Ultra on Rockfish uses **homology-safe CV**, optional **train-time pLDDT** (disabled in clean companions), and **CAID3** scoring for fair comparison vs ESMDisPred (0.895).
 
 ### SOTA track (`QUALITY_PROFILE = "sota"`)
 
@@ -266,7 +270,10 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `rockfish/run_disordernet.py` | HPC CLI: screen / cv / stack / postprocess / full / pipeline / eval / atlas |
 | `rockfish/slurm/pipeline_ultra.sbatch` | Full production + eval + CAID3 |
 | `rockfish/slurm/pipeline_ultra_clean.sbatch` | Contamination-clean companion (separate workdir) |
-| `rockfish/slurm/submit_publish_all.sh` | **All-in-one:** 650M → clean → 3B → organize `publish_package/` |
+| `rockfish/slurm/submit_publish_650m.sh` | **Script 1:** 650M ultra + clean → `publish_package/` |
+| `rockfish/slurm/submit_publish_3b.sh` | **Script 2:** ultra3b + clean → `publish_package/` |
+| `rockfish/publish_submit.py` | CLI: `submit-650m` / `submit-3b` / `package` |
+| `rockfish/utils.py` | Shared paths, run specs, sbatch helpers |
 | `rockfish/package_publish_results.py` | Assemble side-by-side publish package from run workdirs |
 | `rockfish/slurm/multi_seed.sbatch` | Slurm array for seeds 42/43/44 |
 | `rockfish/README.md` | **Canonical Rockfish usage** (publish path, artifacts, go/no-go) |
