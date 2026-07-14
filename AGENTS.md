@@ -48,6 +48,8 @@ Notes:
 - These generated data/results files are gitignored and live outside the repo.
 
 ### Rockfish publish path (HPC)
+- From scratch: see root `README.md` § **From scratch** (Path C) and
+  `rockfish/README.md` § **From scratch on Rockfish**.
 - Use the two submitters (not the retired all-in-one):
   `bash rockfish/slurm/submit_publish_650m.sh` and/or
   `bash rockfish/slurm/submit_publish_3b.sh`.
