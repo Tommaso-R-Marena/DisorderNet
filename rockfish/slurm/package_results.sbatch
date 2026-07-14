@@ -25,59 +25,24 @@
 #   INCLUDE_CLEAN             — 1 (default) include clean companion in package
 #   PACKAGE_ID                — optional stable package id
 
-# ── Paths (override via env before sbatch) ───────────────────────────────────
+# Paths are resolved inside _common.sh (fail-loud venv + repo checks).
 PROJECT_DIR="${DISORDERNET_REPO:-${HOME}/DisorderNet}"
 ENV_DIR="${DISORDERNET_VENV:-${HOME}/venvs/disordernet}"
 RESULTS_DIR="${DISORDERNET_RESULTS:-${HOME}/disordernet_runs}"
-WK_DIR="${DISORDERNET_WORKDIR:-}"
-export DISORDERNET_REPO="${PROJECT_DIR}"
-export DISORDERNET_VENV="${ENV_DIR}"
-export DISORDERNET_RESULTS="${RESULTS_DIR}"
-[[ -n "${WK_DIR}" ]] && export DISORDERNET_WORKDIR="${WK_DIR}"
-mkdir -p "${PROJECT_DIR}/logs"
 : "${DISORDERNET_PUBLISH_ROOT:=${RESULTS_DIR}/publish_bundle}"
 : "${DISORDERNET_PACKAGE_DIR:=${DISORDERNET_PUBLISH_ROOT}/publish_package}"
 : "${BUNDLE_KIND:=650m}"
 : "${PACKAGE_STRICT:=1}"
+export DISORDERNET_REPO="${PROJECT_DIR}"
+export DISORDERNET_VENV="${ENV_DIR}"
+export DISORDERNET_RESULTS="${RESULTS_DIR}"
+export DISORDERNET_PUBLISH_ROOT DISORDERNET_PACKAGE_DIR BUNDLE_KIND PACKAGE_STRICT
 
-echo "Packaging publish results (${BUNDLE_KIND}) from ${DISORDERNET_PUBLISH_ROOT} → ${DISORDERNET_PACKAGE_DIR}"
-echo "PACKAGE_STRICT=${PACKAGE_STRICT}"
-date -Is
+# Package job: setup + package only (no GPU pipeline run / mirror).
+export DISORDERNET_COMMON_AUTORUN=1
+export DISORDERNET_COMMON_PACKAGE_ONLY=1
+export SKIP_MIRROR=1
 
-# Prefer Rockfish `ml`; venv activate is enough for packaging
-if command -v ml &>/dev/null; then
-  ml purge 2>/dev/null || true
-elif command -v module &>/dev/null; then
-  module purge 2>/dev/null || true
-fi
-
-if [[ ! -f "${ENV_DIR}/bin/activate" ]]; then
-  echo "ERROR: Python venv missing: ${ENV_DIR}/bin/activate" >&2
-  echo "Run: bash rockfish/setup_env.sh" >&2
-  exit 1
-fi
-# shellcheck disable=SC1091
-source "${ENV_DIR}/bin/activate"
-cd "${PROJECT_DIR}" || exit 1
-
-PKG_ARGS=(
-  package
-  --root-workdir "${DISORDERNET_PUBLISH_ROOT}"
-  --kind "${BUNDLE_KIND}"
-  --package-dir "${DISORDERNET_PACKAGE_DIR}"
-)
-if [[ "${INCLUDE_CLEAN:-1}" != "1" ]]; then
-  PKG_ARGS+=(--no-clean)
-fi
-if [[ -n "${PACKAGE_ID:-}" ]]; then
-  PKG_ARGS+=(--package-id "${PACKAGE_ID}")
-fi
-case "${PACKAGE_STRICT}" in
-  0|false|FALSE|no|NO) PKG_ARGS+=(--no-strict) ;;
-  *) PKG_ARGS+=(--strict) ;;
-esac
-
-python rockfish/publish_submit.py "${PKG_ARGS[@]}"
-
-echo "Done. Open ${DISORDERNET_PACKAGE_DIR}/PACKAGE_README.md"
-date -Is
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=_common.sh
+source "${SCRIPT_DIR}/_common.sh"

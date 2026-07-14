@@ -214,8 +214,16 @@ python rockfish/publish_submit.py package \
 ```
 
 Prefer `publish_submit.py package --kind …` over the legacy combined layout in
-`package_publish_results.py` (no `--kind`). Package jobs set `PACKAGE_STRICT=1`
-by default; `submit_summary.json` records `git_revision` for provenance.
+`package_publish_results.py` (requires `--legacy-combined` without `--kind`).
+Package jobs set `PACKAGE_STRICT=1` by default; `submit_summary.json` records
+`git_revision` for provenance.
+
+```bash
+# Via the HPC runner (strict by default):
+python rockfish/run_disordernet.py package-publish \
+  --publish-root ~/disordernet_runs/publish_650m_<stamp> \
+  --bundle-kind 650m
+```
 
 Re-package without re-training (if GPU jobs already finished):
 ```bash
@@ -583,6 +591,12 @@ sbatch --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR rockfish/slurm/train
 | `BOLTZ_MODE` | `ingest` (train) / `auto` (boltz jobs) | Boltz-2 ingest/run/auto |
 | `DISORDERNET_BOLTZ_ROOT` | `~/boltz` | Boltz inputs/outputs/cache root |
 | `BOLTZ_CACHE` | `$DISORDERNET_BOLTZ_ROOT/cache` | Auto-downloaded Boltz weights |
+| `DISORDERNET_PUBLISH_ROOT` | (set by submitter) | Publish bundle parent |
+| `DISORDERNET_PACKAGE_DIR` | `$PUBLISH_ROOT/publish_package` | Organized package output |
+| `BUNDLE_KIND` | `650m` / `3b` | Kind-aware packaging |
+| `PACKAGE_STRICT` | `1` | Fail package job if go/no-go artifacts missing |
+| `INCLUDE_CLEAN` | `1` | Include contamination-clean companion in package |
+| `MIRROR_REQUIRE_MIN_FILES` | `1` | Fail-loud empty GPU result mirrors |
 
 ## Copy DisProt cache from Colab (optional)
 

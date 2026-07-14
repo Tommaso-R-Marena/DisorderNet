@@ -46,3 +46,14 @@ Notes:
 - `lightgbm`/`xgboost`/`fair-esm` are required for this pipeline but are NOT in
   `requirements-dev.txt` (they are installed by the startup update script).
 - These generated data/results files are gitignored and live outside the repo.
+
+### Rockfish publish path (HPC)
+- Use the two submitters (not the retired all-in-one):
+  `bash rockfish/slurm/submit_publish_650m.sh` and/or
+  `bash rockfish/slurm/submit_publish_3b.sh`.
+- Prefer `python rockfish/publish_submit.py submit-650m|submit-3b|package --kind …`.
+- Packaging is **strict by default** (`PACKAGE_STRICT=1` / `--strict`): missing
+  go/no-go artifacts fail the job. Use `--no-strict` / `--no-strict-package` only
+  when debugging.
+- Canonical docs: `rockfish/README.md` § Publish path; checklist:
+  `docs/METHODS_CHECKLIST.md`. `submit_publish_all.sh` exits with an error redirect.

@@ -196,10 +196,58 @@ disordernet_slurm_mirror() {
   date -Is
 }
 
+# Package a kind-aware publish bundle (CPU). Env:
+#   DISORDERNET_PUBLISH_ROOT  — bundle parent
+#   DISORDERNET_PACKAGE_DIR   — output (default: $PUBLISH_ROOT/publish_package)
+#   BUNDLE_KIND               — 650m | 3b (default: 650m)
+#   PACKAGE_STRICT            — 1 (default) | 0
+#   INCLUDE_CLEAN             — 1 (default) | 0
+#   PACKAGE_ID                — optional
+disordernet_slurm_package() {
+  local publish_root="${DISORDERNET_PUBLISH_ROOT:-${RESULTS_DIR}/publish_bundle}"
+  local package_dir="${DISORDERNET_PACKAGE_DIR:-${publish_root}/publish_package}"
+  local kind="${BUNDLE_KIND:-650m}"
+  : "${PACKAGE_STRICT:=1}"
+
+  if [[ ! -f "${PROJECT_DIR}/rockfish/publish_submit.py" ]]; then
+    echo "ERROR: Cannot find rockfish/publish_submit.py under PROJECT_DIR=${PROJECT_DIR}" >&2
+    exit 1
+  fi
+
+  echo "Packaging publish results (${kind}) from ${publish_root} → ${package_dir}"
+  echo "PACKAGE_STRICT=${PACKAGE_STRICT}"
+  date -Is
+
+  local PKG_ARGS=(
+    package
+    --root-workdir "${publish_root}"
+    --kind "${kind}"
+    --package-dir "${package_dir}"
+  )
+  if [[ "${INCLUDE_CLEAN:-1}" != "1" ]]; then
+    PKG_ARGS+=(--no-clean)
+  fi
+  if [[ -n "${PACKAGE_ID:-}" ]]; then
+    PKG_ARGS+=(--package-id "${PACKAGE_ID}")
+  fi
+  case "${PACKAGE_STRICT}" in
+    0|false|FALSE|no|NO) PKG_ARGS+=(--no-strict) ;;
+    *) PKG_ARGS+=(--strict) ;;
+  esac
+
+  python rockfish/publish_submit.py "${PKG_ARGS[@]}"
+  echo "Done. Open ${package_dir}/PACKAGE_README.md"
+  date -Is
+}
+
 if [[ "${DISORDERNET_COMMON_AUTORUN:-1}" == "1" ]]; then
   disordernet_slurm_setup
-  disordernet_slurm_run
-  if [[ "${SKIP_MIRROR:-0}" != "1" ]]; then
-    disordernet_slurm_mirror
+  if [[ "${DISORDERNET_COMMON_PACKAGE_ONLY:-0}" == "1" ]]; then
+    disordernet_slurm_package
+  else
+    disordernet_slurm_run
+    if [[ "${SKIP_MIRROR:-0}" != "1" ]]; then
+      disordernet_slurm_mirror
+    fi
   fi
 fi

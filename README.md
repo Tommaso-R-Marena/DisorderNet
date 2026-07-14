@@ -272,9 +272,9 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `rockfish/slurm/pipeline_ultra_clean.sbatch` | Contamination-clean companion (separate workdir) |
 | `rockfish/slurm/submit_publish_650m.sh` | **Script 1:** 650M ultra + clean → `publish_package/` |
 | `rockfish/slurm/submit_publish_3b.sh` | **Script 2:** ultra3b + clean → `publish_package/` |
-| `rockfish/publish_submit.py` | CLI: `submit-650m` / `submit-3b` / `package` |
-| `rockfish/utils.py` | Shared paths, run specs, sbatch helpers |
-| `rockfish/package_publish_results.py` | Assemble side-by-side publish package from run workdirs |
+| `rockfish/publish_submit.py` | **Preferred CLI:** `submit-650m` / `submit-3b` / `package --kind --strict` |
+| `rockfish/utils.py` | Shared artifact catalog, RunSpec, sbatch helpers, git provenance |
+| `rockfish/package_publish_results.py` | Package library (prefer `publish_submit.py package --kind`) |
 | `rockfish/slurm/multi_seed.sbatch` | Slurm array for seeds 42/43/44 |
 | `rockfish/README.md` | **Canonical Rockfish usage** (publish path, artifacts, go/no-go) |
 | `docs/ROCKFISH_PUBLISH_RUNBOOK.md` | Short pointer to rockfish README publish path |

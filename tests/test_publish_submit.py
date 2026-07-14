@@ -174,8 +174,44 @@ class TestPublishCLI:
         a = p.parse_args(["publish-650m", "--account", "x", "--dry-run"])
         assert a.stage == "publish-650m"
         assert a.dry_run is True
+        assert a.no_strict_package is False
         b = p.parse_args(
             ["package-publish", "--publish-root", "/tmp/x", "--bundle-kind", "3b"],
         )
         assert b.stage == "package-publish"
         assert b.bundle_kind == "3b"
+
+    def test_run_publish_stage_forwards_strict(self, tmp_path, monkeypatch):
+        from rockfish.run_disordernet import _run_publish_stage
+
+        captured: list[list[str]] = []
+
+        def fake_main(argv):
+            captured.append(list(argv))
+            return 0
+
+        monkeypatch.setattr("rockfish.publish_submit.main", fake_main)
+
+        args = rockfish_parser().parse_args(
+            [
+                "package-publish",
+                "--publish-root", str(tmp_path),
+                "--bundle-kind", "650m",
+            ]
+        )
+        assert _run_publish_stage(args) == 0
+        assert captured[0][0] == "package"
+        assert "--strict" in captured[0]
+        assert "--kind" in captured[0]
+
+        args2 = rockfish_parser().parse_args(
+            [
+                "publish-650m",
+                "--account", "x",
+                "--dry-run",
+                "--no-strict-package",
+                "--publish-root", str(tmp_path),
+            ]
+        )
+        assert _run_publish_stage(args2) == 0
+        assert "--no-strict-package" in captured[-1]
