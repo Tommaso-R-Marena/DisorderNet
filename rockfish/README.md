@@ -23,14 +23,52 @@ Run the full SOTA pipeline on Rockfish instead of Colab: longer wall times (72 h
 
 ## Publish path (main + clean companion)
 
-Frozen operator path for the structure-distrust paper. After these jobs finish,
-remaining work is **judge numbers → go/no-go** — not more feature code.
-Checklist boxes: [`docs/METHODS_CHECKLIST.md`](../docs/METHODS_CHECKLIST.md).
+**Recommended (all-in-one):** one submit chains 650M → clean → 3B → organized package.
+
+```bash
+export DISORDERNET_ACCOUNT=your_pi_gpu
+# optional:
+# export DISORDERNET_BOLTZ_ROOT=$HOME/boltz
+# export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
+bash rockfish/slurm/submit_publish_all.sh
+```
+
+This submits Slurm jobs with dependencies (each ≤72 h):
+
+| Phase | Profile | Approx. GPU time |
+|-------|---------|------------------|
+| `ultra_650M` | `ultra` / 650M | ~24–48 h |
+| `ultra_clean_650M` | `ultra_clean` (optional, `INCLUDE_CLEAN=0` to skip) | ~24–48 h after 650M |
+| `ultra3b` | `ultra3b` / 3B (optional, `INCLUDE_3B=0` to skip) | ~30–40 h after 650M (parallel with clean) |
+| `publish_package/` | CPU packaging | minutes |
+
+Results land under `$DISORDERNET_PUBLISH_ROOT` (default `~/disordernet_runs/publish_bundle_<stamp>/`):
 
 ```text
-checkout master → setup_env → sbatch pipeline_ultra → sbatch pipeline_ultra_clean
-  → verify mirrored artifacts → METHODS_CHECKLIST → go/no-go on numbers
+publish_bundle_*/
+  ultra_650M/checkpoints/…
+  ultra_clean_650M/checkpoints_ultra_clean/…
+  ultra3b/checkpoints/…
+  publish_package/
+    PACKAGE_README.md
+    MANIFEST.json
+    comparison.json          # side-by-side headline metrics
+    ultra_650M/              # copied key reports + figures
+    ultra_clean_650M/
+    ultra3b/
 ```
+
+Skip pieces: `INCLUDE_CLEAN=0` and/or `INCLUDE_3B=0`.  
+Monitor: `squeue -u $USER`. After package job finishes, open `publish_package/PACKAGE_README.md`.
+
+Frozen checklist: [`docs/METHODS_CHECKLIST.md`](../docs/METHODS_CHECKLIST.md).
+
+```text
+checkout master → setup_env → bash rockfish/slurm/submit_publish_all.sh
+  → open publish_package/ → METHODS_CHECKLIST → go/no-go on numbers
+```
+
+### Manual one-offs (if you prefer separate submits)
 
 ### 1. Optional Boltz warm-up
 
@@ -84,8 +122,7 @@ python rockfish/run_disordernet.py pipeline \
 
 ### 4. Verify mirrored artifacts
 
-After both jobs finish, confirm these exist under the workdir checkpoints (or
-`$DISORDERNET_RESULTS/<run_tag>/`):
+After jobs finish (or use the all-in-one `publish_package/`), confirm these exist:
 
 | Artifact | Purpose |
 |----------|---------|
@@ -162,7 +199,11 @@ sbatch --account=$DISORDERNET_ACCOUNT \
   --export=ALL,DISORDERNET_ACCOUNT \
   rockfish/slurm/train_ultra3b.sbatch
 
-# Recommended publish pair (see Publish path above)
+# Recommended publish pair / all-in-one (see Publish path above)
+export DISORDERNET_ACCOUNT=your_pi_gpu
+bash rockfish/slurm/submit_publish_all.sh
+
+# Or individual jobs:
 export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_main
 export RUN_CAID3=1
 sbatch --account=$DISORDERNET_ACCOUNT \
