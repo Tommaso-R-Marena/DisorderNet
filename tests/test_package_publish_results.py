@@ -12,14 +12,18 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
 from rockfish.package_publish_results import (  # noqa: E402
-    KEEP_NAMES,
     PackageIncompleteError,
     assemble_publish_package,
     build_default_runs,
     build_runs_for_kind,
     extract_run_summary,
+    main as package_main,
 )
-from rockfish.utils import ARTIFACT_REPORT_GLOBS  # noqa: E402
+from rockfish.utils import (  # noqa: E402
+    ARTIFACT_FILES,
+    ARTIFACT_REPORT_GLOBS,
+    REQUIRED_ARTIFACTS_STRICT,
+)
 
 
 def _write_ckpt(ckpt: Path, *, auc: float, delta: float, clean: bool = False) -> None:
@@ -68,7 +72,7 @@ class TestPublishPackage:
         r3b = build_runs_for_kind(tmp_path, "3b", include_clean=False)
         assert [r["label"] for r in r3b] == ["ultra3b"]
 
-    def test_assemble_package(self, tmp_path):
+    def test_assemble_package_kind_650m(self, tmp_path):
         root = tmp_path / "bundle"
         _write_ckpt(root / "ultra_650M" / "checkpoints", auc=0.90, delta=0.12)
         _write_ckpt(
@@ -77,38 +81,44 @@ class TestPublishPackage:
             delta=0.08,
             clean=True,
         )
-        _write_ckpt(root / "ultra3b" / "checkpoints", auc=0.92, delta=0.15)
 
         pkg = tmp_path / "publish_package"
         manifest = assemble_publish_package(
             pkg,
-            build_default_runs(root),
+            build_runs_for_kind(root, "650m"),
             package_id="test_pkg",
+            kind="650m",
+            strict=True,
         )
         assert (pkg / "MANIFEST.json").is_file()
         assert (pkg / "comparison.json").is_file()
         assert (pkg / "PACKAGE_README.md").is_file()
         assert (pkg / "ultra_650M" / "structure_distrust_benchmark.json").is_file()
         assert (pkg / "ultra_clean_650M" / "caid3_eval_report.json").is_file()
-        assert (pkg / "ultra3b" / "distrust_figures" / "fig_distrust_benchmark.png").is_file()
-        # Weight files belong in mirrors, not publish packages
+        assert (pkg / "ultra_650M" / "distrust_figures" / "fig_distrust_benchmark.png").is_file()
         assert "fold_*_compact.pt" not in ARTIFACT_REPORT_GLOBS
-        assert "sota_postprocess_report.json" in KEEP_NAMES
+        assert "sota_postprocess_report.json" in ARTIFACT_FILES
+        assert set(REQUIRED_ARTIFACTS_STRICT) <= set(ARTIFACT_FILES)
 
         assert manifest["package_id"] == "test_pkg"
+        assert manifest["kind"] == "650m"
         assert "git_revision" in manifest
-        assert len(manifest["runs"]) == 3
+        assert len(manifest["runs"]) == 2
         by_label = {r["label"]: r for r in manifest["runs"]}
         assert by_label["ultra_650M"]["pooled_auc"] == 0.90
         assert by_label["ultra_clean_650M"]["contamination_risk_tier"] == "low"
-        assert by_label["ultra3b"]["delta_auc_dn_minus_plddt"] == 0.15
+
+    def test_cli_requires_kind(self, tmp_path):
+        rc = package_main(
+            ["--package-dir", str(tmp_path / "out"), "--root-workdir", str(tmp_path)]
+        )
+        assert rc == 2
 
     def test_strict_package_fails_before_copy(self, tmp_path):
         root = tmp_path / "bundle"
         ckpt = root / "ultra_650M" / "checkpoints"
         ckpt.mkdir(parents=True)
         (ckpt / "sota_postprocess_report.json").write_text('{"pooled_auc": 0.9}')
-        # missing structure_distrust_benchmark.json
         pkg = tmp_path / "pkg"
         with pytest.raises(PackageIncompleteError):
             assemble_publish_package(
@@ -118,7 +128,6 @@ class TestPublishPackage:
                 strict=True,
                 kind="650m",
             )
-        # No partial run folder when validation fails first
         assert not (pkg / "ultra_650M").exists() or not any((pkg / "ultra_650M").iterdir())
 
     def test_extract_summary_missing_dir(self, tmp_path):

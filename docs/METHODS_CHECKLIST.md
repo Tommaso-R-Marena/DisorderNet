@@ -35,5 +35,5 @@ Tick before freezing a preprint. Each item points at a concrete artifact.
 - [ ] Proxy flags ≠ independent rescue
 
 ## Operator runbook
-- [ ] Follow [`rockfish/README.md` publish path](../rockfish/README.md#publish-path-main--clean-companion) for main + clean companion
+- [ ] Follow [`rockfish/README.md` publish path](../rockfish/README.md#publish-path-exact-usage) (`submit_publish_650m.sh` / `submit_publish_3b.sh`, then strict `publish_package/`)
 - [ ] Publish go/no-go decided from rockfish README §5 (not calendar)

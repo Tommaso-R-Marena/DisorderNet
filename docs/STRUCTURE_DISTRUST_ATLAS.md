@@ -57,5 +57,5 @@ Artifacts under checkpoint dir:
 ## Operator path
 
 Canonical commands, artifacts, and publish go/no-go:
-[`rockfish/README.md`](../rockfish/README.md#publish-path-main--clean-companion).
+[`rockfish/README.md`](../rockfish/README.md#publish-path-exact-usage).
 Fill [`METHODS_CHECKLIST.md`](METHODS_CHECKLIST.md) from mirrored artifacts.  

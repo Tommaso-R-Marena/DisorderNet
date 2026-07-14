@@ -48,5 +48,5 @@ Supporting (not load-bearing): IDR roles, SLiMs, biophysics cues, Boltz variance
 Strong methods / genome biology tier if utility + atlas + baselines are crisp; top venue only with undeniable proteome resource + clean low-contamination ablation + fair CAID competitiveness.
 
 See also: `METHODS_CHECKLIST.md`, `STRUCTURE_DISTRUST_ATLAS.md`,
-[`rockfish/README.md`](../rockfish/README.md#publish-path-main--clean-companion)
-(checkout → sbatch main → sbatch clean → artifacts → go/no-go).
+[`rockfish/README.md`](../rockfish/README.md#publish-path-exact-usage)
+(`submit_publish_650m.sh` / `submit_publish_3b.sh` → strict `publish_package/` → go/no-go).

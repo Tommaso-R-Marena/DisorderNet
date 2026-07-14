@@ -197,7 +197,7 @@ def assemble_publish_package(
     runs: Sequence[dict | RunSpec],
     *,
     package_id: Optional[str] = None,
-    strict: bool = False,
+    strict: bool = True,
     kind: Optional[str] = None,
 ) -> dict:
     """
@@ -313,7 +313,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p = argparse.ArgumentParser(
         description=(
             "Assemble DisorderNet Rockfish publish package. "
-            "Prefer: python rockfish/publish_submit.py package --kind 650m|3b"
+            "Prefer: python rockfish/publish_submit.py package --kind 650m|3b --strict"
         ),
     )
     p.add_argument("--package-dir", required=True, help="Output package directory")
@@ -322,19 +322,31 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--kind",
         choices=["650m", "3b"],
         default=None,
-        help="Bundle kind (recommended). If omitted with --root-workdir, uses legacy 650m+3b.",
+        help="Bundle kind (required with --root-workdir)",
     )
     p.add_argument("--no-clean", action="store_true", help="Skip clean companion in package")
     p.add_argument(
+        "--legacy-combined",
+        action="store_true",
+        help="Deprecated: allow omitting --kind (650m+clean+3b layout)",
+    )
+    p.add_argument(
         "--no-3b",
         action="store_true",
-        help="Legacy: skip ultra3b when --kind is omitted",
+        help="Legacy: skip ultra3b when --legacy-combined is set",
     )
     p.add_argument("--package-id", default=None)
     p.add_argument(
         "--strict",
         action="store_true",
-        help="Exit 1 if required go/no-go artifacts are missing",
+        default=True,
+        help="Fail if required go/no-go artifacts are missing (default: on)",
+    )
+    p.add_argument(
+        "--no-strict",
+        action="store_false",
+        dest="strict",
+        help="Allow incomplete packages",
     )
     p.add_argument(
         "--run",
@@ -370,10 +382,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         runs = build_runs_for_kind(
             args.root_workdir, kind, include_clean=include_clean,
         )
-    elif args.root_workdir:
+    elif args.root_workdir and args.legacy_combined:
         print(
-            "Warning: --kind omitted; using legacy combined 650m+3b layout. "
-            "Prefer --kind 650m|3b.",
+            "Warning: --legacy-combined without --kind; using deprecated 650m+3b layout.",
             file=sys.stderr,
         )
         runs = build_default_runs(
@@ -381,6 +392,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             include_clean=include_clean,
             include_3b=not args.no_3b,
         )
+    elif args.root_workdir:
+        print(
+            "ERROR: --root-workdir requires --kind 650m|3b "
+            "(or pass --legacy-combined for the deprecated layout).",
+            file=sys.stderr,
+        )
+        return 2
     else:
         print("ERROR: provide --root-workdir (with --kind) or --run", file=sys.stderr)
         return 2
