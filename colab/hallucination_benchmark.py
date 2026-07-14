@@ -121,6 +121,35 @@ def compare_distrust_baselines(
     }
 
 
+def attach_caid3_credibility_floor(
+    bench: dict,
+    caid3_report: Optional[dict] = None,
+) -> dict:
+    """Attach optional CAID3 disorder evaluation as credibility floor."""
+    bench = dict(bench)
+    if not caid3_report:
+        bench["caid3_credibility_floor"] = {
+            "available": False,
+            "note": "No caid3_eval_report.json attached",
+        }
+        return bench
+    pooled = caid3_report.get("pooled") or caid3_report.get("metrics") or {}
+    bench["caid3_credibility_floor"] = {
+        "available": True,
+        "auc": pooled.get("auc") or pooled.get("AUC"),
+        "ap": pooled.get("ap") or pooled.get("AP"),
+        "n_scored": (
+            caid3_report.get("n_scored")
+            or pooled.get("n_residues")
+            or caid3_report.get("n_proteins")
+        ),
+        "delta_vs_esmdispred": caid3_report.get("delta_vs_esmdispred"),
+        "source_keys": sorted(caid3_report.keys())[:20],
+        "note": "Disorder competitiveness floor — not a hallucination metric",
+    }
+    return bench
+
+
 def run_labeled_distrust_benchmark(
     proteins: list,
     fold_results: list,
@@ -130,12 +159,16 @@ def run_labeled_distrust_benchmark(
     disorder_threshold: float = 0.5,
     high_plddt_threshold: float = 70.0,
     structure_source: str = "af2",
+    cfg=None,
+    caid3_report: Optional[dict] = None,
 ) -> dict:
     """
     Full labeled benchmark: Phase-2 style rescue report + matched baselines.
 
     Requires DisProt (or equivalent) labels via fold OOF alignments.
     """
+    from colab.training_contamination_audit import attach_contamination_flags
+
     rescue = run_af_rescue_report(
         proteins,
         fold_results,
@@ -173,7 +206,7 @@ def run_labeled_distrust_benchmark(
             high_plddt_threshold=high_plddt_threshold,
         )
 
-    return {
+    report = {
         "protocol_version": PROTOCOL_VERSION,
         "claim": (
             "Post-structure distrust layer: independent labels required for "
@@ -188,6 +221,9 @@ def run_labeled_distrust_benchmark(
             "not_an_alphafold_replacement",
         ],
     }
+    report = attach_contamination_flags(report, cfg)
+    report = attach_caid3_credibility_floor(report, caid3_report)
+    return report
 
 
 def save_distrust_benchmark(report: dict, path: str) -> str:

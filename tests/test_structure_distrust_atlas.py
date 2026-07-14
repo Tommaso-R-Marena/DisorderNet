@@ -11,7 +11,13 @@ import numpy as np
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
+from colab.colab_figures import (  # noqa: E402
+    generate_distrust_atlas_figure,
+    generate_distrust_benchmark_figure,
+    generate_downstream_mask_utility_figure,
+)
 from colab.hallucination_benchmark import (  # noqa: E402
+    attach_caid3_credibility_floor,
     compare_distrust_baselines,
 )
 from colab.novel_use_cases import build_af_rescue_manifest, screen_af_hallucinations  # noqa: E402
@@ -21,6 +27,10 @@ from colab.structure_distrust_atlas import (  # noqa: E402
     compute_protein_distrust_row,
     estimate_downstream_mask_utility,
     export_structure_distrust_atlas_bundle,
+    load_plddt_cache_for_proteins,
+)
+from colab.training_contamination_audit import (  # noqa: E402
+    audit_structure_signal_contamination,
 )
 from rockfish.run_disordernet import build_parser  # noqa: E402
 
@@ -136,3 +146,65 @@ class TestStructureDistrustAtlas:
     def test_cli_flag(self):
         args = build_parser().parse_args(["eval", "--no-structure-distrust-atlas"])
         assert args.no_structure_distrust_atlas is True
+
+    def test_contamination_caid_figures_and_atlas_stage_cli(self, tmp_path):
+        low = audit_structure_signal_contamination(
+            use_hallucination_weighting=False, use_plddt_features=False,
+        )
+        assert low["risk_tier"] == "low"
+        high = audit_structure_signal_contamination(
+            use_hallucination_weighting=True, use_plddt_features=True,
+        )
+        assert high["risk_tier"] == "high"
+        assert high["required_ablation"] is not None
+
+        bench = {
+            "matched_baselines": {
+                "disordernet": {"auc": 0.9},
+                "plddt_inverse_baseline": {"auc": 0.7},
+                "delta_auc_dn_minus_plddt": 0.2,
+            },
+            "labeled_rescue_report": {
+                "pooled": {"hallucination_rate": 0.3, "rescue_rate": 0.8},
+            },
+            "training_contamination": high,
+        }
+        bench = attach_caid3_credibility_floor(bench, {"pooled": {"auc": 0.88}, "n_scored": 100})
+        assert bench["caid3_credibility_floor"]["available"] is True
+
+        proteins = [{"id": "a", "sequence": "A" * 10, "length": 10, "uniprot_acc": "P1"}]
+        cache = tmp_path / "plddt"
+        cache.mkdir()
+        (cache / "P1.json").write_text(json.dumps({
+            "target_sequence": "A" * 10,
+            "plddt": [80.0] * 10,
+        }))
+        loaded = load_plddt_cache_for_proteins(proteins, str(cache))
+        assert "a" in loaded and len(loaded["a"]) == 10
+
+        atlas = build_structure_distrust_atlas(
+            proteins,
+            {"a": np.ones(10, dtype=np.float32) * 0.9},
+            loaded,
+        )
+        fig_dir = tmp_path / "figs"
+        generate_distrust_benchmark_figure(bench, out_dir=str(fig_dir))
+        generate_distrust_atlas_figure(atlas, out_dir=str(fig_dir))
+        util = estimate_downstream_mask_utility(
+            np.ones(40, dtype=np.int8),
+            np.ones(40, dtype=np.float32) * 0.9,
+            np.full(40, 85.0, dtype=np.float32),
+        )
+        generate_downstream_mask_utility_figure(util, out_dir=str(fig_dir))
+        assert (fig_dir / "fig_distrust_benchmark.png").exists()
+        assert (fig_dir / "fig_distrust_atlas.png").exists()
+
+        args = build_parser().parse_args([
+            "structure-distrust-atlas",
+            "--atlas-preds-dir", "preds",
+            "--atlas-plddt-dir", "plddt",
+            "--no-distrust-figures",
+        ])
+        assert args.stage == "structure-distrust-atlas"
+        assert args.atlas_preds_dir == "preds"
+        assert args.no_distrust_figures is True

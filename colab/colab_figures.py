@@ -512,3 +512,123 @@ def generate_phase3_figure(phase3_report: dict, prefix: str = "") -> None:
     plt.close(fig)
     print("Saved fig8_phase3_synthesis.{pdf,png}")
 
+
+def generate_distrust_benchmark_figure(bench: dict, prefix: str = "", out_dir: str = ".") -> list[str]:
+    """Paper fig — labeled rescue + matched DN vs inv-pLDDT baselines."""
+    import os
+    os.makedirs(out_dir, exist_ok=True)
+    p = os.path.join(out_dir, prefix)
+    rescue = (bench.get("labeled_rescue_report") or {}).get("pooled") or {}
+    base = bench.get("matched_baselines") or {}
+    dn = base.get("disordernet") or {}
+    pl = base.get("plddt_inverse_baseline") or {}
+    cont = bench.get("training_contamination") or {}
+
+    fig, axes = plt.subplots(1, 3, figsize=(11, 3.6))
+    # Rescue rates
+    ax = axes[0]
+    vals = [
+        float(rescue.get("hallucination_rate") or 0),
+        float(rescue.get("rescue_rate") or 0),
+    ]
+    ax.bar(["Halluc. rate", "Rescue rate"], vals, color=[C_AF3, C_OURS], alpha=0.9)
+    ax.set_ylim(0, 1.05)
+    ax.set_title("Labeled hallucination rescue")
+
+    # Matched AUCs
+    ax = axes[1]
+    aucs = [dn.get("auc"), pl.get("auc")]
+    labels = ["DisorderNet", "inv-pLDDT"]
+    plot_aucs = [float(a) if a is not None else 0.0 for a in aucs]
+    ax.bar(labels, plot_aucs, color=[C_OURS, C_OTHERS], alpha=0.9)
+    ax.set_ylim(0, 1.05)
+    delta = base.get("delta_auc_dn_minus_plddt")
+    ax.set_title(f"Matched AUC (Δ={delta})")
+
+    # Contamination note
+    ax = axes[2]
+    ax.axis("off")
+    lines = [
+        f"risk_tier: {cont.get('risk_tier', 'n/a')}",
+        f"halluc_weighting: {cont.get('use_hallucination_weighting')}",
+        f"plddt_features: {cont.get('use_plddt_features')}",
+        f"split: {cont.get('split_method')}",
+        "",
+        (cont.get("paper_caveat") or "")[:220],
+    ]
+    ax.text(0.02, 0.95, "\n".join(lines), va="top", fontsize=9, family="monospace",
+            transform=ax.transAxes,
+            bbox=dict(boxstyle="round", facecolor="#F8FAFC", edgecolor="#CBD5E1"))
+    ax.set_title("Contamination audit")
+
+    fig.tight_layout()
+    paths = [f"{p}fig_distrust_benchmark.pdf", f"{p}fig_distrust_benchmark.png"]
+    for path in paths:
+        fig.savefig(path)
+    plt.close(fig)
+    return paths
+
+
+def generate_distrust_atlas_figure(atlas: dict, prefix: str = "", out_dir: str = ".") -> list[str]:
+    """Paper fig — proteome distrust burden + top proteins."""
+    import os
+    os.makedirs(out_dir, exist_ok=True)
+    p = os.path.join(out_dir, prefix)
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    ax = axes[0]
+    n = int(atlas.get("n_proteins") or 0)
+    n_flag = int(atlas.get("n_proteins_with_proxy_distrust") or 0)
+    ax.bar(["All proteins", "With proxy distrust"], [n, n_flag], color=[C_OTHERS, C_AF3], alpha=0.9)
+    ax.set_title("Proteome proxy distrust burden")
+    lab = atlas.get("labeled_evaluation") or {}
+    if lab.get("n_proteins_with_labels"):
+        ax.text(
+            0.02, 0.98,
+            f"labeled rescue_rate={lab.get('overall_rescue_rate')}",
+            transform=ax.transAxes, va="top", fontsize=9,
+        )
+
+    ax = axes[1]
+    top = atlas.get("top_distrust_proteins") or []
+    names = [str(r.get("protein_id"))[:12] for r in top[:12]][::-1]
+    vals = [float(r.get("n_proxy_distrust") or 0) for r in top[:12]][::-1]
+    ax.barh(names, vals, color=C_OURS, alpha=0.9)
+    ax.set_xlabel("Proxy distrust residues")
+    ax.set_title("Top distrust proteins")
+
+    fig.tight_layout()
+    paths = [f"{p}fig_distrust_atlas.pdf", f"{p}fig_distrust_atlas.png"]
+    for path in paths:
+        fig.savefig(path)
+    plt.close(fig)
+    return paths
+
+
+def generate_downstream_mask_utility_figure(util: dict, prefix: str = "", out_dir: str = ".") -> list[str]:
+    """Paper fig — DN distrust mask precision vs baselines."""
+    import os
+    os.makedirs(out_dir, exist_ok=True)
+    p = os.path.join(out_dir, prefix)
+    fig, ax = plt.subplots(figsize=(6, 3.8))
+    if not util.get("enabled"):
+        ax.text(0.5, 0.5, "Mask utility N/A", ha="center", va="center")
+        ax.set_axis_off()
+    else:
+        names = ["Base rate\n(high pLDDT)", "inv-pLDDT\nmask", "DN distrust\nmask"]
+        vals = [
+            float(util.get("base_disorder_rate_in_high_plddt") or 0),
+            float(util.get("precision_plddt_size_matched_mask") or 0),
+            float(util.get("precision_dn_distrust_mask") or 0),
+        ]
+        ax.bar(names, vals, color=[C_OTHERS, C_AF3, C_OURS], alpha=0.9)
+        ax.set_ylim(0, 1.05)
+        ax.set_ylabel("Precision for true disorder")
+        ax.set_title("Downstream distrust-mask utility")
+    fig.tight_layout()
+    paths = [f"{p}fig_distrust_mask_utility.pdf", f"{p}fig_distrust_mask_utility.png"]
+    for path in paths:
+        fig.savefig(path)
+    plt.close(fig)
+    return paths
+

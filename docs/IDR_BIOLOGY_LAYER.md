@@ -49,8 +49,16 @@ The load-bearing paper bet for this layer is documented in
 - Function-pred reload (`--idr-function-preds-dir`); triage filters
 - Richer JSONL compare (role gains/losses + quality deltas)
 
-### Phase D — optional biophysics collaborations
+### Stage D — optional biophysics collaborations
 - Small-system MD / SAXS / NMR benchmarks validating variance proxy
+
+## Paper bet (load-bearing)
+
+See [`STRUCTURE_DISTRUST_ATLAS.md`](STRUCTURE_DISTRUST_ATLAS.md),
+[`PAPER_OUTLINE_STRUCTURE_DISTRUST.md`](PAPER_OUTLINE_STRUCTURE_DISTRUST.md),
+and [`METHODS_CHECKLIST.md`](METHODS_CHECKLIST.md).
+
+Roles / cues / Boltz variance remain **supporting** layers under the distrust thesis.
 
 ## Rockfish usage
 
