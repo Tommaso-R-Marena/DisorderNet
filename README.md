@@ -99,15 +99,37 @@ Breaking **0.90+ consistently** on DisProt likely needs **ESM-2 3B** (`ultra3b`)
 
 ### Rockfish / Slurm (recommended for production)
 
-If you have access to JHU Rockfish (or any Slurm cluster with A100s), use the HPC pipeline instead of Colab for 3B runs and multi-day jobs. See **[rockfish/README.md](rockfish/README.md)** for setup, `sbatch` templates, and fault-tolerant resume.
+If you have access to JHU Rockfish (or any Slurm cluster with A100s), use the HPC pipeline instead of Colab for 3B runs and multi-day jobs. **Full usage instructions** (setup, publish path, artifacts, go/no-go, env vars, Boltz/AF3) live in **[rockfish/README.md](rockfish/README.md)**.
+
+Until `feature/idr-biology-layer-c41e` is merged, checkout that branch on Rockfish:
 
 ```bash
+git clone https://github.com/Tommaso-R-Marena/DisorderNet.git ~/DisorderNet
+cd ~/DisorderNet
+git fetch origin feature/idr-biology-layer-c41e && git checkout feature/idr-biology-layer-c41e
 bash rockfish/setup_env.sh && source ~/venvs/disordernet/bin/activate
+mkdir -p logs
 export DISORDERNET_ACCOUNT=your_pi_gpu
-sbatch --account=$DISORDERNET_ACCOUNT rockfish/slurm/pipeline_ultra.sbatch
+export DISORDERNET_BOLTZ_ROOT=$HOME/boltz
+export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
+
+# Main publish run (ultra + CAID3 + distrust benchmark finalize)
+export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_main
+export RUN_CAID3=1
+sbatch --account=$DISORDERNET_ACCOUNT \
+  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR,RUN_CAID3 \
+  rockfish/slurm/pipeline_ultra.sbatch
+
+# Contamination-clean companion (separate workdir — required)
+export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_clean
+sbatch --account=$DISORDERNET_ACCOUNT \
+  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR \
+  rockfish/slurm/pipeline_ultra_clean.sbatch
 ```
 
-Ultra profile on Rockfish now uses **homology-safe CV**, **train-time pLDDT features**, and optional **CAID3 benchmark** scoring for fair comparison vs ESMDisPred (0.895).
+Operator path: checkout → setup → `pipeline_ultra` → `pipeline_ultra_clean` → verify mirrored artifacts → [`docs/METHODS_CHECKLIST.md`](docs/METHODS_CHECKLIST.md) → publish go/no-go (criteria in [rockfish/README.md](rockfish/README.md#5-publish-go--no-go)).
+
+Ultra on Rockfish uses **homology-safe CV**, optional **train-time pLDDT** (disabled in `ultra_clean`), and **CAID3** scoring for fair comparison vs ESMDisPred (0.895).
 
 ### SOTA track (`QUALITY_PROFILE = "sota"`)
 
@@ -253,9 +275,13 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/DisorderNet_Colab_Pro.ipynb` | Full GPU notebook (ESM-2 650M + LoRA) — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb) |
 | `colab/quick_screen.py` | Quick screen logic (stratified subsample, verdict tiers) |
 | `colab/esm_backbone.py` | ESM-2 backbone registry (650M → 3B) + VRAM batch presets |
-| `rockfish/run_disordernet.py` | HPC CLI: screen / cv / stack / postprocess / full |
-| `rockfish/slurm/pipeline_ultra.sbatch` | Full production + eval + optional CAID3 |
+| `rockfish/run_disordernet.py` | HPC CLI: screen / cv / stack / postprocess / full / pipeline / eval / atlas |
+| `rockfish/slurm/pipeline_ultra.sbatch` | Full production + eval + CAID3 |
+| `rockfish/slurm/pipeline_ultra_clean.sbatch` | Contamination-clean companion (separate workdir) |
 | `rockfish/slurm/multi_seed.sbatch` | Slurm array for seeds 42/43/44 |
+| `rockfish/README.md` | **Canonical Rockfish usage** (publish path, artifacts, go/no-go) |
+| `docs/ROCKFISH_PUBLISH_RUNBOOK.md` | Short pointer to rockfish README publish path |
+| `docs/METHODS_CHECKLIST.md` | Preprint freeze checklist |
 | `colab/homology_splits.py` | CAID-credible homology-clustered CV |
 | `colab/caid3_eval.py` | CAID3 Disorder-PDB benchmark harness |
 | `colab/structure_encoder.py` | Train-time pLDDT feature channel |

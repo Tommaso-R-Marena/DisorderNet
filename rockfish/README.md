@@ -13,15 +13,132 @@ Run the full SOTA pipeline on Rockfish instead of Colab: longer wall times (72 h
    git fetch origin feature/idr-biology-layer-c41e
    git checkout feature/idr-biology-layer-c41e
    ```
-   After merge, `git checkout master` is fine. See
-   [`docs/ROCKFISH_PUBLISH_RUNBOOK.md`](../docs/ROCKFISH_PUBLISH_RUNBOOK.md).
+   After merge, `git checkout master` is fine.
 3. **One-time env setup**:
    ```bash
    bash rockfish/setup_env.sh
    source ~/venvs/disordernet/bin/activate
+   mkdir -p logs
+   export DISORDERNET_ACCOUNT=your_pi_gpu   # replace with your _gpu account
+   export DISORDERNET_BOLTZ_ROOT=$HOME/boltz
+   export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
    ```
 
-## Quick start
+## Publish path (main + clean companion)
+
+Frozen operator path for the structure-distrust paper. After these jobs finish,
+remaining work is **judge numbers → go/no-go** — not more feature code.
+Checklist boxes: [`docs/METHODS_CHECKLIST.md`](../docs/METHODS_CHECKLIST.md).
+
+```text
+checkout PR branch → setup_env → sbatch pipeline_ultra → sbatch pipeline_ultra_clean
+  → verify mirrored artifacts → METHODS_CHECKLIST → go/no-go on numbers
+```
+
+### 1. Optional Boltz warm-up
+
+```bash
+sbatch --account=$DISORDERNET_ACCOUNT \
+  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_BOLTZ_ROOT,BOLTZ_MODE=auto \
+  rockfish/slurm/boltz_batch.sbatch
+```
+
+### 2. Main run (production ultra + CAID3)
+
+Boltz ingest + full pipeline + CAID3. Eval writes the labeled distrust benchmark;
+CAID3 then **patches** `structure_distrust_benchmark.json` in place via
+`finalize_distrust_benchmark_with_caid3`.
+
+```bash
+export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_main
+export RUN_CAID3=1
+export BOLTZ_MODE=ingest   # or auto if structures not yet available
+sbatch --account=$DISORDERNET_ACCOUNT \
+  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR,RUN_CAID3,BOLTZ_MODE \
+  rockfish/slurm/pipeline_ultra.sbatch
+```
+
+### 3. Clean companion (required for publish honesty)
+
+Same capacity as ultra, but `use_hallucination_weighting=False` and
+`use_plddt_features=False`. **Must use a separate workdir** so it cannot
+clobber the main run. Script sets `PROFILE=ultra_clean`,
+`CHECKPOINT_SUBDIR=checkpoints_ultra_clean`, and
+`RUN_NO_HALLUC_WEIGHT=1` / `RUN_NO_PLDDT_FEATURES=1`.
+
+```bash
+export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_clean
+sbatch --account=$DISORDERNET_ACCOUNT \
+  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR \
+  rockfish/slurm/pipeline_ultra_clean.sbatch
+```
+
+Equivalent CLI (interactive GPU node):
+
+```bash
+python rockfish/run_disordernet.py pipeline \
+  --profile ultra_clean \
+  --no-hallucination-weighting \
+  --no-plddt-features \
+  --run-caid3-eval \
+  --checkpoint-dir checkpoints_ultra_clean \
+  --workdir "$DISORDERNET_WORKDIR"
+```
+
+### 4. Verify mirrored artifacts
+
+After both jobs finish, confirm these exist under the workdir checkpoints (or
+`$DISORDERNET_RESULTS/<run_tag>/`):
+
+| Artifact | Purpose |
+|----------|---------|
+| `structure_distrust_benchmark.json` | Labeled rescue + matched baselines + CAID floor + contamination |
+| `structure_distrust_atlas_report.json` | Proteome summary |
+| `structure_distrust_atlas.jsonl` / `.tsv` | Per-protein rows |
+| `distrust_figures/**` | Paper figures (if matplotlib available) |
+| `caid3_eval_report.json` | Credibility floor source |
+| `af_rescue_manifest.json` | Pipeline triage |
+| `statistical_validation_report.json` | Paired / fold stats |
+| `idr_biology_layer_*` | Supporting layer exports |
+| `function_prediction_report.json` | If function head enabled |
+| `run_manifest.json` / `cv_summary.json` | Reproducibility |
+
+```bash
+python -c "
+import json
+b=json.load(open('structure_distrust_benchmark.json'))
+print(b.get('caid3_credibility_floor'))
+print(b.get('training_contamination',{}).get('risk_tier'))
+"
+```
+
+Expect `caid3_credibility_floor.available == true` on the main run after CAID3.
+Fill [`docs/METHODS_CHECKLIST.md`](../docs/METHODS_CHECKLIST.md) from these files
+and build a **main vs clean** comparison table (ΔAUC vs inv-pLDDT, labeled
+rescue, mask utility, contamination `risk_tier`).
+
+### 5. Publish go / no-go
+
+All must hold on the **main** run, with the **clean** run confirming the claim
+is not entirely an artifact of structure training:
+
+1. **Matched distrust** — DN beats inv-pLDDT on matched residues
+   (`matched_baselines.delta_auc_dn_minus_plddt` > 0) with supportive paired
+   stats in `statistical_validation_report.json`.
+2. **Labeled rescue** — meaningful `rescue_rate` under
+   `definition: labeled_independent` (not proxy).
+3. **Mask utility** — DN distrust mask ≥ size-matched pLDDT mask.
+4. **CAID floor** — attached (`available: true`) and competitive enough that
+   disorder credibility is not undermined.
+5. **Contamination honesty** — `training_contamination` present; main vs clean
+   table exists; if clean collapses the ΔAUC claim, do **not** frame rescue as
+   a breakthrough.
+
+If criteria fail: do **not** publish rescue-as-breakthrough. Fall back to a
+disorder + atlas triage / methods paper, or iterate training — not more feature
+scaffolding.
+
+## Quick start (training ladder)
 
 ```bash
 cd ~/DisorderNet
@@ -48,13 +165,13 @@ sbatch --account=$DISORDERNET_ACCOUNT \
   --export=ALL,DISORDERNET_ACCOUNT \
   rockfish/slurm/train_ultra3b.sbatch
 
-# Recommended: complete pipeline + eval + CAID3 (~24–48 h ultra)
+# Recommended publish pair (see Publish path above)
+export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_main
 export RUN_CAID3=1
 sbatch --account=$DISORDERNET_ACCOUNT \
-  --export=ALL,DISORDERNET_ACCOUNT,RUN_CAID3=1 \
+  --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR,RUN_CAID3=1 \
   rockfish/slurm/pipeline_ultra.sbatch
 
-# Contamination-clean companion (separate workdir — required for publish honesty)
 export DISORDERNET_WORKDIR=$HOME/disordernet_runs/ultra_clean
 sbatch --account=$DISORDERNET_ACCOUNT \
   --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR \
@@ -111,6 +228,34 @@ sbatch --partition=ica100 --export=ALL,... rockfish/slurm/train_ultra3b.sbatch
 | `pipeline` | all + eval | full → eval [→ CAID3 with `RUN_CAID3=1`; CAID floor patched into distrust benchmark] |
 | `predict` | deploy | FASTA batch inference + `.caid` export |
 | `multi-seed-blend` | 7e | Average OOF from multiple seed dirs |
+
+Standalone atlas from existing preds + pLDDT cache:
+
+```bash
+python rockfish/run_disordernet.py structure-distrust-atlas \
+  --atlas-preds-dir path/to/preds \
+  --atlas-plddt-dir path/to/plddt_cache
+```
+
+## Training profiles
+
+| Profile | Use | Structure-training flags |
+|---------|-----|--------------------------|
+| `ultra` | Default production (650M) | `use_plddt_features=True`, hallucination wt on |
+| `ultra3b` | ESM-2 3B on A100 40GB+ | same as ultra |
+| `ultra_clean` | Publish ablation companion | **both structure flags off** |
+| `ultra_fun` | ultra + disorder→function head | same as ultra + function head |
+| `sota` / `max` / `balanced` | Intermediate capacity | see `TrainConfig.from_profile` |
+| `screen` / `screen_plus` | Quick screen | hallucination wt off |
+
+Clean override without changing profile:
+
+```bash
+python rockfish/run_disordernet.py pipeline \
+  --profile ultra \
+  --no-hallucination-weighting \
+  --no-plddt-features
+```
 
 ## Boltz-2 structure backend (default)
 
@@ -238,10 +383,15 @@ sbatch --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_WORKDIR rockfish/slurm/train
 | `DISORDERNET_VENV` | `~/venvs/disordernet` | Python venv |
 | `DISORDERNET_WORKDIR` | Slurm scratch | Run directory |
 | `DISORDERNET_RESULTS` | `~/disordernet_runs` | Durable result copies |
-| `PROFILE` | `ultra` / `ultra3b` | Training profile |
+| `CHECKPOINT_SUBDIR` | `checkpoints` | Relative checkpoint dir under workdir |
+| `PROFILE` | `ultra` / `ultra3b` / `ultra_clean` | Training profile |
 | `BACKBONE` | `650M` / `3B` | ESM-2 size |
 | `STAGE` | `full` | Pipeline stage |
 | `SEED` | `42` | Random seed |
+| `RUN_CAID3` | `0` | Set `1` to append CAID3 + finalize distrust floor |
+| `RUN_NO_HALLUC_WEIGHT` | `0` | Set `1` → `--no-hallucination-weighting` |
+| `RUN_NO_PLDDT_FEATURES` | `0` | Set `1` → `--no-plddt-features` |
+| `PREFETCH_AF` | `0` | Set `1` → `--prefetch-af-plddt` |
 | `STRUCTURE_BACKEND` | `boltz` | Prefer boltz / af3 / af2 pLDDT |
 | `BOLTZ_MODE` | `ingest` (train) / `auto` (boltz jobs) | Boltz-2 ingest/run/auto |
 | `DISORDERNET_BOLTZ_ROOT` | `~/boltz` | Boltz inputs/outputs/cache root |
