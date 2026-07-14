@@ -11,8 +11,8 @@ import os
 import time
 import gc
 
-DATA_PATH = "/home/user/workspace/disorder_model/data/disprot_processed.json"
-EMB_DIR = "/home/user/workspace/disorder_model/data/embeddings"
+from disordernet_paths import DISPROT_JSON as DATA_PATH, EMB_DIR
+
 os.makedirs(EMB_DIR, exist_ok=True)
 
 MAX_SEQ_LEN = 1022  # ESM-2 max (with BOS/EOS tokens = 1024)

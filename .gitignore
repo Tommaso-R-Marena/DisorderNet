@@ -8,8 +8,12 @@ __pycache__/
 venv/
 env/
 *.pt
+*.npy
 checkpoints/
+# Repo-local CPU pipeline data (see disordernet_paths.py); generated, not committed
+/data/
 disprot_raw.json
+disprot_processed.json
 cv_results.json
 disordernet_gpu_results_*.json
 fig*.pdf
