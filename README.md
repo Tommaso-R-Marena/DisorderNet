@@ -107,7 +107,7 @@ cd ~/DisorderNet
 git checkout master
 bash rockfish/setup_env.sh && source ~/venvs/disordernet/bin/activate
 mkdir -p logs
-export DISORDERNET_ACCOUNT=your_pi_gpu
+export DISORDERNET_ACCOUNT=sfried3
 export DISORDERNET_BOLTZ_ROOT=$HOME/boltz
 export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
 
