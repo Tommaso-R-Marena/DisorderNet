@@ -60,8 +60,8 @@ python generate_figures_v6.py       # ROC/PR + figures
 1. Open the **Quick Screen** notebook (do this before a full ultra run):  
    [![Open Quick Screen](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_QuickScreen.ipynb)
 2. **Runtime → Change runtime type → GPU (A100 preferred; L4 OK for 650M) + High RAM**.
-3. Set `SCREEN_MODE = "standard"` (or `"flash"` / `"paradigm"`), run all cells.
-4. Read `quick_screen_report.json` — proceed only on **HIGH / MODERATE** (not STOP).
+3. Set `SCREEN_MODE = "standard"` (recommended mini-ultra / `screen_plus`; or `"flash"` / `"paradigm"`), run all cells.
+4. Read `quick_screen_report.json` — proceed only on **HIGH / MODERATE** (not STOP). Confirm the log shows `profile=screen_plus` for `standard`.
 5. Open the **full GPU** notebook:  
    [![Open Full GPU CV](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb)
 6. Set `QUALITY_PROFILE = "ultra"` (or `"ultra3b"` + `ESM_BACKBONE = "3B"` on A100 40GB).  
@@ -229,7 +229,7 @@ Breaking **0.90+ consistently** on DisProt likely needs **ESM-2 3B** (`ultra3b`)
 
 | Step | Action | Notebook | Settings | ~Time (A100) |
 |------|--------|----------|----------|--------------|
-| 1 | Go/no-go | [Quick Screen](colab/DisorderNet_Colab_QuickScreen.ipynb) | `SCREEN_MODE="standard"`, `SCREEN_BACKBONE="650M"` | 2–3 h |
+| 1 | Go/no-go | [Quick Screen](colab/DisorderNet_Colab_QuickScreen.ipynb) | `SCREEN_MODE="standard"` (`screen_plus`), `SCREEN_BACKBONE="650M"` | 2–3 h (40GB) / often &lt;1–1.5 h (80GB) |
 | 2 | Full 650M ultra (if screen ≥ MODERATE) | [Colab Pro](colab/DisorderNet_Colab_Pro.ipynb) | `QUALITY_PROFILE="ultra"` | 18–24 h |
 | 3 | **3B paradigm test** | Quick Screen | `SCREEN_BACKBONE="3B"`, `SCREEN_MODE="paradigm"` | 8–12 h |
 | 4 | **Full 3B production** | Colab Pro | `QUALITY_PROFILE="ultra3b"`, `ESM_BACKBONE="3B"` | 30–40 h |
@@ -389,16 +389,18 @@ Designed to close the gap to ESMDisPred (0.895 CAID3 reference):
 
 The numbered **[From scratch](#from-scratch-start-here)** section above is the canonical zero-to-result guide (CPU / Colab / Rockfish). Short links below.
 
-### Option 1a: Quick paradigm screen (~2–3 hours, recommended first)
+### Option 1a: Quick paradigm screen (~2–3 hours on A100-40GB, recommended first)
 
 [![Open Quick Screen in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_QuickScreen.ipynb)
 
 Run this **before** the full 18–24h CV to get a breakthrough go/no-go verdict on the current paradigm (ESM-2 650M + LoRA + v6 ensemble).
 
+`SCREEN_MODE="standard"` trains the **`screen_plus` mini-ultra** stack (SOTA head, rich features, FFN LoRA, homology splits)—not the old toy CNN `screen` recipe—so STOP/MODERATE is a faithful signal for full ultra. A100-80GB often finishes in under ~1–1.5 h with early stopping; wall clock alone is not a quality signal. After code updates, use **Runtime → Restart session** so Colab is not stuck on an old checkout.
+
 1. Open [`colab/DisorderNet_Colab_QuickScreen.ipynb`](colab/DisorderNet_Colab_QuickScreen.ipynb) in Colab (badge above)
 2. Select **Runtime → Change runtime type → GPU (A100 or L4) + High RAM**
-3. Set `SCREEN_MODE = "standard"` (or `"flash"` for ~1h, `"paradigm"` for mini-ultra)
-4. Run all cells — outputs `quick_screen_report.json` with tier **HIGH / MODERATE / LOW / STOP**
+3. Set `SCREEN_MODE = "standard"` (or `"flash"` for a coarse smoke test, `"paradigm"` for a larger mini-ultra subset)
+4. Run all cells — outputs `quick_screen_report.json` with tier **HIGH / MODERATE / LOW / STOP** (mode-aware uplift; `flash` alone cannot green-light ultra)
 5. Proceed to the full notebook only if the verdict recommends full ultra CV
 
 ### Option 1b: Full GPU cross-validation (Google Colab)
@@ -479,7 +481,7 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 
 | File | Description |
 |------|-------------|
-| `colab/DisorderNet_Colab_QuickScreen.ipynb` | **Quick breakthrough screen** (~2–3h go/no-go before full CV) — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_QuickScreen.ipynb) |
+| `colab/DisorderNet_Colab_QuickScreen.ipynb` | **Quick breakthrough screen** (mini-ultra `screen_plus` go/no-go before full CV) — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_QuickScreen.ipynb) |
 | `colab/DisorderNet_Colab_Pro.ipynb` | Full GPU notebook (ESM-2 650M + LoRA) — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb) |
 | `colab/quick_screen.py` | Quick screen logic (stratified subsample, verdict tiers) |
 | `colab/esm_backbone.py` | ESM-2 backbone registry (650M → 3B) + VRAM batch presets |

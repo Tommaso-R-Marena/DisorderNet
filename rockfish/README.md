@@ -399,7 +399,7 @@ cd ~/DisorderNet
 mkdir -p logs
 export DISORDERNET_ACCOUNT=sfried3   # Rockfish account (default: sfried3)
 
-# Step 1: go/no-go screen (~2–3 h)
+# Step 1: go/no-go screen (~2–3 h; SCREEN_MODE=standard → screen_plus mini-ultra)
 sbatch --account=$DISORDERNET_ACCOUNT \
   --export=ALL,DISORDERNET_ACCOUNT \
   rockfish/slurm/quick_screen.sbatch
@@ -462,7 +462,7 @@ sbatch --partition=ica100 --export=ALL,... rockfish/slurm/train_ultra3b.sbatch
 
 | Stage | Colab cells | Description |
 |-------|-------------|-------------|
-| `screen` | Quick Screen | Stratified subset + verdict |
+| `screen` | Quick Screen | Stratified subset + mode-aware verdict (`standard`→`screen_plus`) |
 | `cv` | 6–7 | 5-fold GPU training |
 | `stack` | 7b–7c | GPU+v6 + meta ensemble |
 | `postprocess` | 7d | Fold soup + calibration |
@@ -496,7 +496,8 @@ python rockfish/run_disordernet.py structure-distrust-atlas \
 | `ultra_clean` | Publish ablation companion | **both structure flags off** |
 | `ultra_fun` | ultra + disorder→function head | same as ultra + function head |
 | `sota` / `max` / `balanced` | Intermediate capacity | see `TrainConfig.from_profile` |
-| `screen` / `screen_plus` | Quick screen | hallucination wt off |
+| `screen` | `flash` mode only (toy CNN) | hallucination wt off |
+| `screen_plus` | `standard`/`paradigm` mini-ultra screen | hallucination wt off |
 
 Clean override without changing profile:
 
