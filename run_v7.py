@@ -18,6 +18,13 @@ New capabilities (see confidence.py) that typical IDR predictors lack:
 Requires the DisProt cache + ESM embeddings produced by fetch_disprot.py /
 extract_esm_embeddings.py. Override the data location with DISORDERNET_HOME.
 
+Backbone note (leakage-free 5-fold CV, pooled AUC, smoothed):
+  * ESM-2  35M embeddings -> 0.8479
+  * ESM-2 150M embeddings -> 0.8498   (bigger PLM helps; diminishing on CPU)
+  * v6 baseline (all-protein PCA)      0.8397
+To reproduce the 150M number: run experiments/extract_esm_150m.py, then
+  DISORDERNET_HOME=/home/user/workspace/dn150m python run_v7.py
+
 Run:  python run_v7.py
 """
 import json, os, time, gc, warnings
