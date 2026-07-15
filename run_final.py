@@ -10,9 +10,9 @@ from sklearn.metrics import (roc_auc_score, average_precision_score, f1_score,
 import lightgbm as lgb
 import xgboost as xgb
 
-DATA_PATH = "/home/user/workspace/disorder_model/data/disprot_processed.json"
-RESULTS_DIR = "/home/user/workspace/disorder_model/results"
-os.makedirs(RESULTS_DIR, exist_ok=True)
+from disordernet_paths import DISPROT_JSON as DATA_PATH, results_dir
+
+RESULTS_DIR = results_dir("results", create=True)
 
 AA = "ACDEFGHIKLMNPQRSTVWY"
 AA_IDX = {a: i for i, a in enumerate(AA)}

@@ -7,7 +7,8 @@ import json
 import os
 import time
 
-OUTPUT_DIR = "/home/user/workspace/disorder_model/data"
+from disordernet_paths import DATA_DIR as OUTPUT_DIR
+
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def fetch_disprot_entries():

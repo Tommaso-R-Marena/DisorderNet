@@ -37,18 +37,16 @@ git checkout master
 
 python3 -m venv .venv && source .venv/bin/activate
 pip install -U pip
-pip install numpy scikit-learn lightgbm xgboost fair-esm torch requests
+pip install -r requirements-cpu.txt
 
-# Optional but recommended: create the hard-coded CPU data dirs the scripts expect
-mkdir -p /home/user/workspace/disorder_model/data/embeddings \
-         /home/user/workspace/disorder_model/results_v6
-# If those paths do not exist on your machine, edit the path constants in
-# fetch_disprot.py / extract_esm_embeddings.py / run_v6_mem.py, or symlink them.
+# Data and results default to repo-local dirs (./data, ./results_v6) — no edits or
+# symlinks needed. To store them elsewhere, set DISORDERNET_HOME (or the finer-grained
+# DISORDERNET_DATA_DIR / DISORDERNET_RESULTS_ROOT); see disordernet_paths.py.
 
-python fetch_disprot.py             # DisProt JSON download (needs network)
-python extract_esm_embeddings.py    # ESM-2 8M embeddings (first run downloads weights)
-python run_v6_mem.py                # 5-fold CV → metrics (~0.83 AUC target)
-python generate_figures_v6.py       # ROC/PR + figures
+python fetch_disprot.py             # DisProt JSON download (needs network) → ./data
+python extract_esm_embeddings.py    # ESM-2 embeddings (first run downloads weights) → ./data/embeddings
+python run_v6_mem.py                # 5-fold CV → metrics (~0.83 AUC target) → ./results_v6
+python generate_figures_v6.py       # ROC/PR + figures → ./results_v6
 ```
 
 **Success:** `results_v6/metrics.json` with pooled AUC ≈ 0.83, plus figures under `results_v6/`.
@@ -425,9 +423,9 @@ The notebook auto-tunes batch size to your GPU VRAM, uses mixed precision (bfloa
 ### Option 2: CPU (Quick, no GPU needed)
 
 ```bash
-pip install numpy scikit-learn lightgbm xgboost fair-esm torch requests
+pip install -r requirements-cpu.txt
 
-# Run the full pipeline
+# Run the full pipeline (data + results default to repo-local ./data and ./results_v6)
 python fetch_disprot.py          # Download DisProt data
 python extract_esm_embeddings.py  # Extract ESM-2 8M embeddings
 python run_v6_mem.py              # Train and evaluate
@@ -617,4 +615,4 @@ If you use DisorderNet, please cite the relevant benchmark papers and this repos
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

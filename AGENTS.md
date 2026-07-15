@@ -10,7 +10,7 @@ GPU/Colab/Rockfish paths are not runnable in this CPU-only cloud environment).
 ### Python environment
 - Dependencies are installed into a virtualenv at `.venv` (Python 3.12). The
   startup update script creates it and installs `requirements-dev.txt` plus the
-  extra CPU-pipeline libs (`lightgbm`, `xgboost`, `fair-esm`).
+  CPU-pipeline deps in `requirements-cpu.txt` (`lightgbm`, `xgboost`, `fair-esm`, …).
 - Activate it before running anything: `source .venv/bin/activate`.
 
 ### Tests (fast, self-contained)
@@ -24,14 +24,11 @@ GPU/Colab/Rockfish paths are not runnable in this CPU-only cloud environment).
   invent a linter.
 
 ### Running the CPU pipeline (the "application")
-The end-to-end CPU model lives in the top-level scripts. Gotcha: these scripts
-read/write **hardcoded absolute paths** under `/home/user/workspace/disorder_model/`,
-not the repo dir. Create them once before running:
-```
-mkdir -p /home/user/workspace/disorder_model/data/embeddings \
-         /home/user/workspace/disorder_model/results_v6
-```
-Then run in order (see README "Option 2"):
+The end-to-end CPU model lives in the top-level scripts. Paths are centralized in
+`disordernet_paths.py` and default to **repo-local** dirs (`./data`, `./data/embeddings`,
+`./results_v6`), so no `mkdir`/symlink workaround is needed. Override the location with
+`DISORDERNET_HOME` (or finer-grained `DISORDERNET_DATA_DIR` / `DISORDERNET_RESULTS_ROOT`).
+Run in order (see README "Option 2" / "Path A"):
 ```
 python fetch_disprot.py            # downloads DisProt -> data/disprot_processed.json (needs network)
 python extract_esm_embeddings.py   # ESM-2 embeddings -> data/embeddings/*.npy (downloads weights; ~9 min CPU for all 3333 proteins)
@@ -43,9 +40,9 @@ Notes:
   to 8M on a `RuntimeError`/`MemoryError`; on CPU it just runs (slower) with 35M.
 - `run_v6_mem.py` only uses proteins that already have an embedding `.npy`, so it
   works even if extraction is partial. Expect pooled AUC ≈ 0.83–0.84.
-- `lightgbm`/`xgboost`/`fair-esm` are required for this pipeline but are NOT in
-  `requirements-dev.txt` (they are installed by the startup update script).
-- These generated data/results files are gitignored and live outside the repo.
+- CPU-pipeline deps live in `requirements-cpu.txt` (not `requirements-dev.txt`,
+  which is test-only); the startup update script installs both.
+- Generated `data/`/`results*/` files are gitignored.
 
 ### Rockfish publish path (HPC)
 - From scratch: see root `README.md` § **From scratch** (Path C) and
