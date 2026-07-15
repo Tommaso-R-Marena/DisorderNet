@@ -41,14 +41,13 @@ import xgboost as xgb
 from run_v6_mem import phys, wavg, wvar
 from confidence import (expected_calibration_error, fit_calibrator, apply_calibrator,
                         conformal_quantile, conformal_report)
+from disordernet_paths import DISPROT_JSON, EMB_DIR, results_dir
 
 warnings.filterwarnings("ignore")
 
-_HOME = os.environ.get("DISORDERNET_HOME", "/home/user/workspace/disorder_model")
-DATA_PATH = os.path.join(_HOME, "data", "disprot_processed.json")
-EMB_DIR = os.path.join(_HOME, "data", "embeddings")
-RESULTS_DIR = os.path.join(_HOME, "results_v7")
-os.makedirs(RESULTS_DIR, exist_ok=True)
+DATA_PATH = str(DISPROT_JSON)
+EMB_DIR = str(EMB_DIR)
+RESULTS_DIR = str(results_dir("results_v7", create=True))
 
 SEED = 42
 MAX_PROT = 1500
