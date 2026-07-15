@@ -277,15 +277,27 @@ def align_fold_predictions(
 
     Returns list of dicts with keys: id, labels, probs, preds, protein, fold.
     """
-    splits = get_cv_splits(proteins, n_folds)
+    proteins_by_id = {p["id"]: p for p in proteins}
+    # Prefer the validation protein order recorded at training time. Re-deriving the
+    # splits here only works when the split_method matches training; profiles such as
+    # "screen_plus"/"ultra" use homology splits, so a plain get_cv_splits() call would
+    # assign proteins to the wrong folds and desync probs from proteins.
+    need_splits = any(not fold.get("val_ids") for fold in fold_results)
+    splits = get_cv_splits(proteins, n_folds) if need_splits else None
     aligned: list[dict] = []
 
-    for fold_idx, (_, val_idx) in enumerate(splits):
-        if fold_idx >= len(fold_results):
-            break
-        val_proteins = [proteins[i] for i in val_idx]
-        val_probs = fold_results[fold_idx]["val_probs"]
-        val_labels = fold_results[fold_idx]["val_labels"]
+    for fold_idx, fold in enumerate(fold_results):
+        val_ids = fold.get("val_ids")
+        if val_ids:
+            val_proteins = [proteins_by_id[pid] for pid in val_ids if pid in proteins_by_id]
+        else:
+            if fold_idx >= len(splits):
+                break
+            _, val_idx = splits[fold_idx]
+            val_proteins = [proteins[i] for i in val_idx]
+
+        val_probs = fold["val_probs"]
+        val_labels = fold["val_labels"]
         offset = 0
         for p in val_proteins:
             L = p["length"]
@@ -297,7 +309,12 @@ def align_fold_predictions(
                 "protein": p,
             })
             offset += L
-        assert offset == len(val_probs), "Prediction length mismatch in fold alignment"
+        assert offset == len(val_probs), (
+            "Prediction length mismatch in fold alignment "
+            f"(fold {fold_idx + 1}: aligned {offset} residues across {len(val_proteins)} "
+            f"proteins vs {len(val_probs)} predicted). This usually means the fold "
+            "membership recorded at training time does not match the supplied proteins."
+        )
 
     return aligned
 
