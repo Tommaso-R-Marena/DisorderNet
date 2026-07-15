@@ -432,6 +432,29 @@ python run_v6_mem.py              # Train and evaluate
 python generate_figures_v6.py     # Generate figures
 ```
 
+### Optimized model + per-sequence predictor (v7)
+
+`run_v7.py` is an optimized CPU model (PCA-96 ESM features + global pooling, a
+LightGBM+XGBoost+HistGBM blend, and contiguity smoothing) evaluated with
+leakage-free 5-fold CV (PCA fit on the train fold only): pooled AUC **0.848**
+with ESM-2 35M, **0.850** with ESM-2 150M (vs the v6 0.840 baseline).
+
+It also adds capabilities most disorder predictors lack (`confidence.py`):
+**isotonic-calibrated probabilities** (ECE ~0.049 → ~0.004, ranking preserved) and
+**split-conformal per-residue prediction sets** with a coverage guarantee
+(`confident disorder / confident order / abstain`).
+
+Train a deployable bundle and predict on any sequence:
+
+```bash
+python train_predictor.py                         # -> results_v7/predictor_bundle.joblib
+python predict_disorder.py --seq MDVFMKGLSKAKEGVV...   # or --fasta proteins.fasta --out preds.json
+```
+
+Each residue gets a calibrated `p(disorder)` plus a conformal decision. On
+α-synuclein this correctly highlights the disordered acidic C-terminal tail while
+calling folded lysozyme ordered.
+
 ## Key Innovation: Why AlphaFold 3 Fails at Disorder
 
 AF3's diffusion architecture generates structured coordinates for every residue, then assigns confidence post-hoc. It has **no concept of "this region should not have structure."** Our model is designed from the ground up to distinguish order from disorder:
