@@ -2135,6 +2135,10 @@ def train_fold(
         "history": history,
         "val_probs": best_probs,
         "val_labels": best_labels,
+        # Record the exact validation protein order so downstream alignment does not
+        # have to re-derive CV splits (which silently breaks when split_method differs,
+        # e.g. "homology" vs the default "protein").
+        "val_ids": [p["id"] for p in proteins_val],
         "ckpt_path": ckpt_path if best_state is not None else None,
         "total_time": total_time,
     }
