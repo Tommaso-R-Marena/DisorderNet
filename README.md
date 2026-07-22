@@ -447,6 +447,28 @@ the best honest CPU result — with calibration ECE 0.005 and conformal coverage
 size, because PCA compression caps how much PLM signal the trees can use; the ensemble
 and the GPU LoRA path are the ways past that.)
 
+#### Honest evaluation: random vs homology split
+
+Random protein-ID GroupKFold can leak signal via near-duplicate homologs. We also
+report **homology-split** CV (`>=40%` identity clusters, CAID-credible; run with
+`DISORDERNET_SPLIT=homology python run_v7.py`). The small gap confirms the random
+number is not badly inflated:
+
+| Model | random split | homology split |
+|-------|-------------:|---------------:|
+| ESM-2 35M | 0.8479 | 0.8396 |
+| ESM-2 150M | 0.8498 | 0.8457 |
+| ESM-2 650M | 0.8505 | 0.8487 |
+| **Ensemble** | **0.8568** | **0.8525** |
+
+#### Calibrated + conformal confidence everywhere
+
+The calibration + conformal layer (`confidence.py`) is also wired into the **GPU/LoRA
+pipeline** (`colab/confidence_layer.py`): `run_cross_validation` now attaches a
+cross-fitted calibration + conformal report to its summary, and `fit_confidence` /
+`apply_confidence` produce calibrated probabilities + `confident/abstain` decisions
+for new sequences from the SOTA models too.
+
 It also adds capabilities most disorder predictors lack (`confidence.py`):
 **isotonic-calibrated probabilities** (ECE ~0.049 → ~0.004, ranking preserved) and
 **split-conformal per-residue prediction sets** with a coverage guarantee
