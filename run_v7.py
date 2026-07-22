@@ -52,7 +52,7 @@ RESULTS_DIR = str(results_dir("results_v7", create=True))
 SEED = 42
 MAX_PROT = 1500
 MAX_LEN = 800
-PCA_DIM = 96
+PCA_DIM = int(os.environ.get("DISORDERNET_PCA_DIM", "96"))
 SMOOTH_WINDOW = 7
 CONFORMAL_ALPHA = 0.10
 N_JOBS = 4
