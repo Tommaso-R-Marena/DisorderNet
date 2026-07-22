@@ -437,7 +437,15 @@ python generate_figures_v6.py     # Generate figures
 `run_v7.py` is an optimized CPU model (PCA-96 ESM features + global pooling, a
 LightGBM+XGBoost+HistGBM blend, and contiguity smoothing) evaluated with
 leakage-free 5-fold CV (PCA fit on the train fold only): pooled AUC **0.848**
-with ESM-2 35M, **0.850** with ESM-2 150M (vs the v6 0.840 baseline).
+with ESM-2 35M, **0.850** with ESM-2 150M/650M (vs the v6 0.840 baseline).
+
+`run_v8_multiscale.py` ensembles the v7 out-of-fold predictions across ESM-2
+backbones (35M + 150M + 650M, equal weights → leakage-free). Different PLM scales
+carry complementary disorder signal, so the ensemble reaches **0.857** pooled AUC —
+the best honest CPU result — with calibration ECE 0.005 and conformal coverage 0.90.
+(Under this GBDT-on-PCA recipe, single-backbone AUC saturates ~0.85 regardless of
+size, because PCA compression caps how much PLM signal the trees can use; the ensemble
+and the GPU LoRA path are the ways past that.)
 
 It also adds capabilities most disorder predictors lack (`confidence.py`):
 **isotonic-calibrated probabilities** (ECE ~0.049 → ~0.004, ranking preserved) and
