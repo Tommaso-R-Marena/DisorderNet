@@ -109,9 +109,14 @@ def main():
     ensemble = np.mean(preds, axis=0)  # equal weights -> leakage-free
     m = evaluate(y_true, ensemble)
 
-    # Cross-fitted calibration + conformal on the ensemble
-    proteins = load_proteins()
-    fold = residue_fold_labels(proteins)
+    # Cross-fitted calibration + conformal on the ensemble. Prefer the per-residue
+    # fold ids saved by run_v7 (correct for any split method); else reconstruct the
+    # default protein GroupKFold.
+    fold_path = os.path.join(args.backbones[0], "fold_ids.npy")
+    if os.path.exists(fold_path):
+        fold = np.load(fold_path)
+    else:
+        fold = residue_fold_labels(load_proteins())
     if len(fold) != len(y_true):
         raise SystemExit(f"residue count mismatch ({len(fold)} vs {len(y_true)}) — "
                          "backbone OOF must come from the same run_v7 protein selection")

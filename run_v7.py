@@ -153,11 +153,18 @@ def main():
         esm_list.append(np.load(os.path.join(EMB_DIR, f"{p['disprot_id']}.npy")).astype(np.float16)[:L])
         lab_list.append(np.array(p["disorder_labels"][:L], dtype=np.float32))
 
-    gkf = GroupKFold(n_splits=5)
+    split_method = os.environ.get("DISORDERNET_SPLIT", "protein")
+    if split_method == "homology":
+        from colab.cv_splits import get_cv_splits
+        splits = get_cv_splits(proteins, 5, split_method="homology", homology_min_identity=0.40)
+        print(f"  CV split: homology (>=40% identity clusters)", flush=True)
+    else:
+        splits = list(GroupKFold(n_splits=5).split(range(n), range(n), range(n)))
+        print(f"  CV split: protein (random GroupKFold)", flush=True)
     rng = np.random.RandomState(SEED)
     oof_raw, oof_lab, fold_of = {}, {}, {}
 
-    for fold, (tr_i, va_i) in enumerate(gkf.split(range(n), range(n), range(n))):
+    for fold, (tr_i, va_i) in enumerate(splits):
         ft = time.time()
         pca = IncrementalPCA(n_components=PCA_DIM, batch_size=10000)
         pca.fit(np.vstack([esm_list[i].astype(np.float32) for i in tr_i]))
@@ -250,6 +257,7 @@ def main():
 
     results = {
         "model": "DisorderNet_v7",
+        "split_method": split_method,
         "pooled_raw": m_raw,
         "pooled_smoothed": m_smooth,
         "smooth_window": SMOOTH_WINDOW,
@@ -261,10 +269,14 @@ def main():
     }
     with open(os.path.join(RESULTS_DIR, "metrics.json"), "w") as f:
         json.dump(results, f, indent=2)
+    # Per-residue fold ids (ids-order) so downstream ensembling can cross-fit
+    # correctly under any split method.
+    fold_ids = np.concatenate([np.full(len(oof_lab[i]), fold_of[i], dtype=np.int64) for i in ids])
     np.save(os.path.join(RESULTS_DIR, "y_true.npy"), y_all)
     np.save(os.path.join(RESULTS_DIR, "y_pred.npy"), smoothed)
     np.save(os.path.join(RESULTS_DIR, "y_pred_calibrated.npy"), calibrated)
     np.save(os.path.join(RESULTS_DIR, "conformal_decisions.npy"), conf_decisions)
+    np.save(os.path.join(RESULTS_DIR, "fold_ids.npy"), fold_ids)
     print(f"\nSaved to {RESULTS_DIR}/  | total {(time.time()-t0)/60:.1f} min")
 
 

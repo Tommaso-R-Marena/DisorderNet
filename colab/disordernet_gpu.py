@@ -2402,6 +2402,15 @@ def run_cross_validation(
         "disprot_meta": disprot_meta,
     }
 
+    # Calibrated + conformal per-residue confidence (cross-fitted, no leakage).
+    if len(fold_results) >= 2:
+        try:
+            from colab.confidence_layer import add_confidence_to_fold_results
+            summary["confidence"] = add_confidence_to_fold_results(
+                fold_results, alpha=getattr(cfg, "conformal_alpha", 0.10))
+        except Exception as e:  # never let confidence reporting break a CV run
+            print(f"  (confidence layer skipped: {e})")
+
     _print_cv_summary(fold_results, summary)
     return fold_results, summary
 
@@ -2425,4 +2434,11 @@ def _print_cv_summary(fold_results: list, summary: dict) -> None:
     print(f"{'─' * 35}")
     print(f"{'Pooled':>5} {summary['pooled_auc']:>8.4f} {summary['pooled_ap']:>8.4f}")
     print(f"{'═' * 60}")
+    conf = summary.get("confidence")
+    if conf:
+        print(f"  Calibration ECE: {conf['ece_raw']:.4f} → {conf['ece_calibrated']:.4f} (isotonic)")
+        print(f"  Conformal @ α={conf['alpha']}: coverage={conf['empirical_coverage']:.3f} "
+              f"confident={conf['confident_rate']:.3f} abstain={conf['abstain_rate']:.3f}")
+        if conf["selective_accuracy"] == conf["selective_accuracy"]:  # not NaN
+            print(f"  Selective accuracy (confident residues): {conf['selective_accuracy']:.3f}")
     print(f"  Total CV time: {summary['total_cv_hours']:.2f}h")
