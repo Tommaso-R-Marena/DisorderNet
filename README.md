@@ -1,8 +1,14 @@
 # DisorderNet: Beating AlphaFold 3 at Intrinsic Disorder Prediction
 
 [![Tests](https://github.com/Tommaso-R-Marena/DisorderNet/actions/workflows/test.yml/badge.svg)](https://github.com/Tommaso-R-Marena/DisorderNet/actions/workflows/test.yml)
-[![Open In Colab — Full GPU CV](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb)
-[![Open In Colab — Quick Screen](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_QuickScreen.ipynb)
+
+**Open the notebooks in Google Colab (GPU):**
+
+| Notebook | What it does | Open |
+|----------|--------------|------|
+| **v8 Multi-scale** | Multi-backbone extraction → v7 CV → **v8 ensemble** → calibration/conformal → predictor | [![Open v8 Multi-scale in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_v8_MultiScale.ipynb) |
+| **Pro (LoRA)** | Full GPU ESM-2 650M/3B + LoRA (targets ≥0.88; auto calibrated conformal) | [![Open Pro in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb) |
+| **Quick Screen** | Mini-ultra go/no-go before a full ultra run | [![Open Quick Screen in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_QuickScreen.ipynb) |
 
 ## Overview
 
