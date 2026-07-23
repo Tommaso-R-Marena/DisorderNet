@@ -7,7 +7,8 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --time=00-08:00:00
-#SBATCH --account=sfried3
+#SBATCH --account=sfried3_gpu
+#SBATCH --qos=qos_gpu
 #SBATCH --export=ALL
 #SBATCH --output=logs/dn-v8-embed_%j.out
 #SBATCH --error=logs/dn-v8-embed_%j.err
@@ -18,10 +19,10 @@
 # Extracts 35M/150M/650M into per-backbone homes under a scratch working dir, then
 # the CPU pipeline job (v8_pipeline.sbatch) trains v7 per backbone and ensembles.
 #
-# Submit (from the repo root, after rockfish/setup_env.sh + prefetch_esm.py):
-#   export DISORDERNET_GPU_ACCOUNT=$(sacctmgr -nP show assoc user=$USER format=account,qos \
-#     | awk -F'|' '/qos_gpu/{print $1; exit}')
-#   sbatch -A "$DISORDERNET_GPU_ACCOUNT" --qos=qos_gpu rockfish/slurm/v8_extract_embeddings.sbatch
+# a100 requires the GPU account + qos_gpu (NOT sfried3 / normal). Prefer:
+#   bash rockfish/slurm/submit_v8.sh
+# Or manually (never pass an empty --qos — that yields "Invalid qos specification"):
+#   sbatch -A sfried3_gpu --qos=qos_gpu rockfish/slurm/v8_extract_embeddings.sbatch
 #
 # Override via env before sbatch (see also --export):
 #   DISORDERNET_REPO, DISORDERNET_VENV, DISORDERNET_V8_DIR, DISORDERNET_BACKBONES

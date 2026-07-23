@@ -44,17 +44,20 @@ echo "GPU account: $DISORDERNET_GPU_ACCOUNT"   # expect sfried3_gpu (or similar)
 # 4) Prefetch on LOGIN (internet) — never load ESM models on login
 #    python rockfish/prefetch_esm.py
 
-# 5) Optional Boltz warm-up (GPU account + qos_gpu)
-sbatch -A "$DISORDERNET_GPU_ACCOUNT" --qos="$DISORDERNET_GPU_QOS" \
+# 5) Optional Boltz warm-up (GPU account + literal qos_gpu — never --qos="")
+sbatch -A "$DISORDERNET_GPU_ACCOUNT" --qos=qos_gpu \
   --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_BOLTZ_ROOT,BOLTZ_MODE=auto \
   rockfish/slurm/boltz_batch.sbatch
 
 # 6) Submit publish bundles (GPU chain → CPU package strips _gpu from account)
 bash rockfish/slurm/submit_publish_650m.sh \
-  --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
+  --account "$DISORDERNET_GPU_ACCOUNT" --qos qos_gpu
 # and/or:
 bash rockfish/slurm/submit_publish_3b.sh \
-  --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"   # add --partition ica100 if OOM
+  --account "$DISORDERNET_GPU_ACCOUNT" --qos qos_gpu   # add --partition ica100 if OOM
+
+# v8 cheaper path first:
+# bash rockfish/slurm/submit_v8.sh
 
 # 7) Monitor — done when queue empty AND sacct shows COMPLETED|0:0
 squeue -u $USER

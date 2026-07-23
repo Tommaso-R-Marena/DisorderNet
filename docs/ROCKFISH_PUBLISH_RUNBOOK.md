@@ -16,18 +16,20 @@ export DISORDERNET_GPU_QOS=qos_gpu
 
 # Script 1 — 650M
 bash rockfish/slurm/submit_publish_650m.sh \
-  --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
+  --account "$DISORDERNET_GPU_ACCOUNT" --qos qos_gpu
 
 # Script 2 — 3B
 bash rockfish/slurm/submit_publish_3b.sh \
-  --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
+  --account "$DISORDERNET_GPU_ACCOUNT" --qos qos_gpu
 
 # CLI equivalents
 python rockfish/publish_submit.py submit-650m \
-  --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
+  --account "$DISORDERNET_GPU_ACCOUNT" --qos qos_gpu
 python rockfish/publish_submit.py submit-3b \
-  --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
+  --account "$DISORDERNET_GPU_ACCOUNT" --qos qos_gpu
 ```
+
+**v8 first (cheaper):** `bash rockfish/slurm/submit_v8.sh` (always sets `--qos=qos_gpu`).
 
 **Done when:** `squeue -u $USER` no longer lists the chain, `sacct` shows `COMPLETED|0:0` for the package job, and `~/disordernet_runs/publish_*/publish_package/PACKAGE_README.md` exists.
 

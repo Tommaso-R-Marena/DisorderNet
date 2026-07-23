@@ -54,9 +54,10 @@ Notes:
   `rockfish/V8_MULTISCALE.md` for the cheaper v8 path.
 - **Accounts:** GPU/`a100` jobs need `-A <gpu_account> --qos=qos_gpu`
   (usually `sfried3_gpu`); CPU/`shared` stays `-A sfried3` with no qos.
+  Prefer `bash rockfish/slurm/submit_v8.sh` (never submits an empty `--qos`).
   Discover GPU account via `sacctmgr … | awk … /qos_gpu/`.
-- Use the two submitters (not the retired all-in-one):
-  `bash rockfish/slurm/submit_publish_650m.sh --account $DISORDERNET_GPU_ACCOUNT --qos qos_gpu`
+- Use the two publish submitters (not the retired all-in-one):
+  `bash rockfish/slurm/submit_publish_650m.sh --account sfried3_gpu --qos qos_gpu`
   (and/or `submit_publish_3b.sh` the same way).
 - Prefer `python rockfish/publish_submit.py submit-650m|submit-3b|package --kind …`.
 - Packaging is **strict by default** (`PACKAGE_STRICT=1` / `--strict`): missing
