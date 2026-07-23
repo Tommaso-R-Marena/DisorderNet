@@ -18,41 +18,55 @@ Run the full SOTA pipeline on Rockfish instead of Colab: longer wall times (72 h
 
 ## From scratch on Rockfish (start here)
 
-End-to-end on a **login node**, with nothing set up yet:
+End-to-end on a **login node**, with nothing set up yet.  
+**Finish signals, timelines, artifacts, and stuck-job recovery** are documented in the root README  
+**[Path C — Rockfish ops guide](../README.md#path-c--rockfish-ops-guide-what-you-know-what-to-run-when-youre-done)**.
 
 ```bash
-# 1) Clone
-git clone https://github.com/Tommaso-R-Marena/DisorderNet.git ~/DisorderNet
-cd ~/DisorderNet
-git checkout master
+# 1) Clone / update
+git clone https://github.com/Tommaso-R-Marena/DisorderNet.git ~/DisorderNet 2>/dev/null || true
+cd ~/DisorderNet && git checkout master && git pull
 
 # 2) One-time Python env + logs
 bash rockfish/setup_env.sh
 source ~/venvs/disordernet/bin/activate
 mkdir -p logs
 
-# 3) Account + optional Boltz roots
+# 3) CPU account + GPU account (a100 requires qos_gpu on the GPU account)
 export DISORDERNET_ACCOUNT=sfried3
-export DISORDERNET_BOLTZ_ROOT=$HOME/boltz
+export DISORDERNET_GPU_ACCOUNT=$(sacctmgr -nP show assoc user=$USER format=account,qos \
+  | awk -F'|' '/qos_gpu/{print $1; exit}')
+export DISORDERNET_GPU_QOS=qos_gpu
+export DISORDERNET_BOLTZ_ROOT=${DISORDERNET_BOLTZ_ROOT:-$HOME/scr4_sfried3/boltz}
 export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
+echo "GPU account: $DISORDERNET_GPU_ACCOUNT"   # expect sfried3_gpu (or similar)
 
-# 4) (Optional) warm Boltz structures once
-sbatch --account=$DISORDERNET_ACCOUNT \
+# 4) Prefetch on LOGIN (internet) — never load ESM models on login
+#    python rockfish/prefetch_esm.py
+
+# 5) Optional Boltz warm-up (GPU account + qos_gpu)
+sbatch -A "$DISORDERNET_GPU_ACCOUNT" --qos="$DISORDERNET_GPU_QOS" \
   --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_BOLTZ_ROOT,BOLTZ_MODE=auto \
   rockfish/slurm/boltz_batch.sbatch
 
-# 5) Submit publish bundles (GPU chain → strict package)
-bash rockfish/slurm/submit_publish_650m.sh
+# 6) Submit publish bundles (GPU chain → CPU package strips _gpu from account)
+bash rockfish/slurm/submit_publish_650m.sh \
+  --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
 # and/or:
-bash rockfish/slurm/submit_publish_3b.sh          # add --partition ica100 if OOM
+bash rockfish/slurm/submit_publish_3b.sh \
+  --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"   # add --partition ica100 if OOM
 
-# 6) Monitor
+# 7) Monitor — done when queue empty AND sacct shows COMPLETED|0:0
 squeue -u $USER
+sacct -j <JOBID> --format=JobID,State,ExitCode,Elapsed -P
 
-# 7) When done: package README + checklist + go/no-go
+# 8) When done: package README + checklist + go/no-go
 less ~/disordernet_runs/publish_650m_*/publish_package/PACKAGE_README.md
 # Tick docs/METHODS_CHECKLIST.md from the package artifacts
 ```
+
+For the cheaper **v8 CPU ensemble** path first (~hours not days), use
+[`V8_MULTISCALE.md`](V8_MULTISCALE.md).
 
 Project-wide paths (CPU / Colab / Rockfish): **[root README — From scratch](../README.md#from-scratch-start-here)**.  
 Exact publish flags and layouts: **[Publish path (exact usage)](#publish-path-exact-usage)** below.
@@ -90,7 +104,11 @@ Shared runtime logic lives in `rockfish/slurm/_common.sh` (`ml` modules + venv a
 
 ## Prerequisites
 
-1. **GPU allocation** — your account (e.g. `sfried3`) must be able to submit to a GPU partition (`a100`). The sbatch files do not hardcode a `--qos`, so Slurm uses the partition/account default; if your cluster rejects it with "Invalid qos specification", find your allowed QOS with `sacctmgr -p show assoc user=$USER format=account,partition,qos` and add `--qos=<name>` to the `sbatch` command. Request access via [ARCH support](https://docs.arch.jhu.edu/) if needed.
+1. **GPU allocation** — Rockfish `a100` requires **`--qos=qos_gpu`**, and that QOS is attached to a **GPU account** (usually `<group>_gpu`, e.g. `sfried3_gpu`), not the CPU account `sfried3`. Discover it with:
+   ```bash
+   sacctmgr -nP show assoc user=$USER format=account,qos | awk -F'|' '/qos_gpu/{print $1; exit}'
+   ```
+   Submit GPU jobs with `-A $DISORDERNET_GPU_ACCOUNT --qos=qos_gpu`. CPU/`shared` jobs stay on `-A sfried3` with no `--qos`. Request access via [ARCH support](https://docs.arch.jhu.edu/) if no GPU account appears. See root README **Path C**.
 2. **Clone the repo** on Rockfish login node:
    ```bash
    git clone https://github.com/Tommaso-R-Marena/DisorderNet.git ~/DisorderNet
