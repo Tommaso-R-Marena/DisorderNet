@@ -95,6 +95,34 @@ class TestPublishCLI:
         assert c.kind == "3b"
         assert c.strict is True
 
+    def test_parser_qos_default(self):
+        p = build_parser()
+        a = p.parse_args(["submit-650m", "--account", "x"])
+        assert a.qos == "qos_gpu"
+        b = p.parse_args(["submit-3b", "--account", "x", "--qos", "qos_gpu_cryo"])
+        assert b.qos == "qos_gpu_cryo"
+
+    def test_dry_run_gpu_jobs_get_qos_package_does_not(self, tmp_path, capsys):
+        rc = publish_main(
+            [
+                "submit-650m",
+                "--account", "sfried3_gpu",
+                "--qos", "qos_gpu",
+                "--dry-run",
+                "--stamp", "TESTSTAMP",
+                "--root-workdir", str(tmp_path / "bundle"),
+            ]
+        )
+        assert rc == 0
+        out = capsys.readouterr().out
+        gpu_lines = [ln for ln in out.splitlines() if "pipeline_phase.sbatch" in ln]
+        pkg_lines = [ln for ln in out.splitlines() if "package_results.sbatch" in ln]
+        assert gpu_lines and all("--qos=qos_gpu" in ln and "--account=sfried3_gpu" in ln
+                                 for ln in gpu_lines)
+        # CPU package job: no GPU qos, non-gpu account (auto-stripped)
+        assert pkg_lines and all("--qos=" not in ln and "--account=sfried3" in ln
+                                 for ln in pkg_lines)
+
     def test_dry_run_650m(self, tmp_path, monkeypatch):
         monkeypatch.setenv("DISORDERNET_RESULTS", str(tmp_path / "results"))
         rc = publish_main(

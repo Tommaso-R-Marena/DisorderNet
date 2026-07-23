@@ -328,6 +328,7 @@ def submit_sbatch(
     job_name: str,
     export: str,
     partition: Optional[str] = None,
+    qos: Optional[str] = None,
     dependency: Optional[str] = None,
     dry_run: bool = False,
     extra_args: Sequence[str] = (),
@@ -350,6 +351,8 @@ def submit_sbatch(
     ]
     if partition:
         cmd.append(f"--partition={partition}")
+    if qos:
+        cmd.append(f"--qos={qos}")
     if dependency:
         cmd.append(f"--dependency={dependency}")
     cmd.extend(extra_args)

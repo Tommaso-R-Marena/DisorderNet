@@ -133,10 +133,16 @@ bash rockfish/setup_env.sh
 source ~/venvs/disordernet/bin/activate
 pip install -r requirements-dev.txt          # adds pytest/ruff (torch already installed)
 mkdir -p logs
-export DISORDERNET_ACCOUNT=sfried3
+export DISORDERNET_ACCOUNT=sfried3            # CPU account (shared partition)
 export DISORDERNET_V8_DIR=$HOME/scr4_sfried3/disordernet_v8
 export DISORDERNET_BOLTZ_ROOT=$HOME/scr4_sfried3/boltz
 export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
+
+# The a100 GPU partition requires a GPU QOS (qos_gpu) which lives on a GPU account
+# (usually <group>_gpu, e.g. sfried3_gpu). Auto-discover the account that has qos_gpu:
+export DISORDERNET_GPU_ACCOUNT=$(sacctmgr -nP show assoc user=$USER format=account,qos | awk -F'|' '/qos_gpu/{print $1; exit}')
+export DISORDERNET_GPU_QOS=qos_gpu
+echo "GPU account: ${DISORDERNET_GPU_ACCOUNT:-<none found — ask your PI for GPU access>}  QOS: $DISORDERNET_GPU_QOS"
 
 # ── 1 · Tests (compute node, ~2 min) ──────────────────────────────────────
 srun -A sfried3 -p shared -c 4 --mem=8G -t 00:20:00 \
@@ -151,16 +157,22 @@ DISORDERNET_HOME=$DISORDERNET_V8_DIR python fetch_disprot.py
 python rockfish/prefetch_esm.py
 
 # ── 2 · v8 multi-scale ensemble (honest CPU numbers + calibration/conformal) ─
-EMBED=$(sbatch --parsable -A sfried3 rockfish/slurm/v8_extract_embeddings.sbatch)
+# GPU extract needs the GPU account + qos_gpu; the CPU pipeline stays on sfried3/shared.
+EMBED=$(sbatch --parsable -A "$DISORDERNET_GPU_ACCOUNT" --qos="$DISORDERNET_GPU_QOS" \
+  rockfish/slurm/v8_extract_embeddings.sbatch)
+echo "embed job: $EMBED"
 sbatch -A sfried3 --dependency=afterok:$EMBED rockfish/slurm/v8_pipeline.sbatch
 
 # ── 3 · 650M publishable bundle (ultra -> ultra_clean -> package) ──────────
-sbatch -A sfried3 --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_BOLTZ_ROOT,BOLTZ_MODE=auto \
+# GPU jobs use the GPU account + qos_gpu; the CPU package job auto-uses sfried3.
+sbatch -A "$DISORDERNET_GPU_ACCOUNT" --qos="$DISORDERNET_GPU_QOS" \
+  --export=ALL,DISORDERNET_BOLTZ_ROOT,BOLTZ_MODE=auto \
   rockfish/slurm/boltz_batch.sbatch          # optional but recommended (go/no-go artifact)
-bash rockfish/slurm/submit_publish_650m.sh
+bash rockfish/slurm/submit_publish_650m.sh --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
 
 # ── 4 · 3B publishable bundle (optional) ──────────────────────────────────
-bash rockfish/slurm/submit_publish_3b.sh     # add: --partition ica100  if OOM on 40GB A100
+bash rockfish/slurm/submit_publish_3b.sh --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
+#   add: --partition ica100  if OOM on 40GB A100
 
 # ── 5 · Monitor ───────────────────────────────────────────────────────────
 squeue -u $USER
