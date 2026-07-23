@@ -114,3 +114,62 @@ The fine-tuned SOTA path is separate and already has full Rockfish support — s
 [`rockfish/README.md`](README.md) (`submit_publish_650m.sh` / `submit_publish_3b.sh`).
 Its `run_cross_validation` now auto-attaches the same calibrated + conformal
 confidence report to the CV summary.
+
+---
+
+## Full publishable run — exact order (tests + v8 + 650M + 3B)
+
+Copy-paste, top to bottom, **on the Rockfish login node** (steps run on compute
+nodes via `srun`/`sbatch`). Budget: 650M (ultra+clean) ≈ 50–100 GPU-h, 3B ≈ 60–120
+GPU-h, v8 extract ≈ 2 GPU-h — comfortably within a 15k GPU-h / 150k CPU-h allocation.
+
+```bash
+# ── 0 · One-time setup ────────────────────────────────────────────────────
+git clone https://github.com/Tommaso-R-Marena/DisorderNet.git ~/DisorderNet 2>/dev/null || true
+cd ~/DisorderNet && git checkout master && git pull
+bash rockfish/setup_env.sh
+source ~/venvs/disordernet/bin/activate
+pip install -r requirements-dev.txt          # adds pytest/ruff (torch already installed)
+mkdir -p logs
+export DISORDERNET_ACCOUNT=sfried3
+export DISORDERNET_V8_DIR=$HOME/scr4_sfried3/disordernet_v8
+export DISORDERNET_BOLTZ_ROOT=$HOME/scr4_sfried3/boltz
+export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
+
+# ── 1 · Tests (compute node, ~2 min) ──────────────────────────────────────
+srun -A sfried3 -p shared -c 4 --mem=8G -t 00:20:00 \
+  bash -lc 'cd ~/DisorderNet && source ~/venvs/disordernet/bin/activate && ruff check . && pytest tests/ -q'
+
+# ── 2 · v8 multi-scale ensemble (honest CPU numbers + calibration/conformal) ─
+EMBED=$(sbatch --parsable -A sfried3 rockfish/slurm/v8_extract_embeddings.sbatch)
+sbatch -A sfried3 --dependency=afterok:$EMBED rockfish/slurm/v8_pipeline.sbatch
+
+# ── 3 · 650M publishable bundle (ultra -> ultra_clean -> package) ──────────
+sbatch -A sfried3 --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_BOLTZ_ROOT,BOLTZ_MODE=auto \
+  rockfish/slurm/boltz_batch.sbatch          # optional but recommended (go/no-go artifact)
+bash rockfish/slurm/submit_publish_650m.sh
+
+# ── 4 · 3B publishable bundle (optional) ──────────────────────────────────
+bash rockfish/slurm/submit_publish_3b.sh     # add: --partition ica100  if OOM on 40GB A100
+
+# ── 5 · Monitor ───────────────────────────────────────────────────────────
+squeue -u $USER
+
+# ── 6 · Inspect (after jobs finish) ───────────────────────────────────────
+cat  $DISORDERNET_V8_DIR/ensemble/results_v8/metrics.json
+cat  $DISORDERNET_V8_DIR/ensemble_hom/results_v8/metrics.json
+less ~/disordernet_runs/publish_650m_*/publish_package/PACKAGE_README.md
+cat  ~/disordernet_runs/publish_650m_*/publish_package/comparison.json
+```
+
+```bash
+# ── 7 · Pull results to your laptop (run in a LOCAL terminal, not Rockfish) ─
+scp -r rockfish:disordernet_runs/publish_650m_*           ./publish_650m
+scp -r rockfish:disordernet_runs/publish_3b_*             ./publish_3b
+scp -r rockfish:scr4_sfried3/disordernet_v8/ensemble      ./dn_v8_ensemble
+scp -r rockfish:scr4_sfried3/disordernet_v8/ensemble_hom  ./dn_v8_ensemble_hom
+```
+
+To halve GPU cost, add `--no-clean` to the publish scripts (drops the
+contamination-clean companion — but that ablation is part of the strict go/no-go).
+
