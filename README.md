@@ -159,11 +159,25 @@ mkdir -p logs
 scancel <EMBED_JOB_ID> <PIPELINE_JOB_ID>    # e.g. scancel 28766644 28766650
 squeue -u $USER                             # should be empty (or only healthy jobs)
 
-export DISORDERNET_ACCOUNT=sfried3
-export DISORDERNET_GPU_ACCOUNT=$(sacctmgr -nP show assoc user=$USER format=account,qos \
-  | awk -F'|' '/qos_gpu/{print $1; exit}')
-export DISORDERNET_GPU_QOS=qos_gpu
 export DISORDERNET_V8_DIR=$HOME/scr4_sfried3/disordernet_v8
+# Preferred (always sets qos_gpu; never submits --qos= empty):
+bash rockfish/slurm/submit_v8.sh
+```
+
+If you submit by hand, **you must** pass a non-empty QOS. This fails:
+
+```bash
+# BAD — DISORDERNET_GPU_QOS unset → --qos="" → "Invalid qos specification"
+sbatch -A sfried3_gpu --qos="$DISORDERNET_GPU_QOS" rockfish/slurm/v8_extract_embeddings.sbatch
+```
+
+This works:
+
+```bash
+export DISORDERNET_GPU_ACCOUNT=sfried3_gpu   # or discover via sacctmgr
+sbatch -A "$DISORDERNET_GPU_ACCOUNT" --qos=qos_gpu \
+  --export=ALL,DISORDERNET_V8_DIR \
+  rockfish/slurm/v8_extract_embeddings.sbatch
 ```
 
 #### Exact command ladder (recommended order)
@@ -171,15 +185,23 @@ export DISORDERNET_V8_DIR=$HOME/scr4_sfried3/disordernet_v8
 **A — v8 multi-scale (honest CPU ensemble ~0.857 / homology ~0.853)** — start here; cheapest publishable number.
 
 ```bash
+export DISORDERNET_V8_DIR=$HOME/scr4_sfried3/disordernet_v8
+bash rockfish/slurm/submit_v8.sh
+# prints embed + pipeline job ids; then: squeue -u $USER
+```
+
+Manual equivalent (literal `qos_gpu` — do not rely on an unset env var):
+
+```bash
 # GPU extract (~1–2 h wall once scheduled; 1× A100)
 EMBED=$(sbatch --parsable \
-  -A "$DISORDERNET_GPU_ACCOUNT" --qos="$DISORDERNET_GPU_QOS" \
+  -A sfried3_gpu --qos=qos_gpu \
   --export=ALL,DISORDERNET_V8_DIR \
   rockfish/slurm/v8_extract_embeddings.sbatch)
 echo "embed job: $EMBED"
 
 # CPU pipeline (~6–12 h wall; starts only after embed succeeds)
-sbatch -A "$DISORDERNET_ACCOUNT" \
+sbatch -A sfried3 \
   --dependency=afterok:$EMBED \
   --export=ALL,DISORDERNET_V8_DIR \
   rockfish/slurm/v8_pipeline.sbatch
@@ -190,7 +212,7 @@ sbatch -A "$DISORDERNET_ACCOUNT" \
 ```bash
 export DISORDERNET_BOLTZ_ROOT=${DISORDERNET_BOLTZ_ROOT:-$HOME/scr4_sfried3/boltz}
 export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
-sbatch -A "$DISORDERNET_GPU_ACCOUNT" --qos="$DISORDERNET_GPU_QOS" \
+sbatch -A sfried3_gpu --qos=qos_gpu \
   --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_BOLTZ_ROOT,BOLTZ_MODE=auto \
   rockfish/slurm/boltz_batch.sbatch
 ```
@@ -199,7 +221,7 @@ sbatch -A "$DISORDERNET_GPU_ACCOUNT" --qos="$DISORDERNET_GPU_QOS" \
 
 ```bash
 bash rockfish/slurm/submit_publish_650m.sh \
-  --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
+  --account sfried3_gpu --qos qos_gpu
 # Workdir printed + also in ~/disordernet_runs/publish_650m_*/submit_summary.json
 ```
 
@@ -207,7 +229,7 @@ bash rockfish/slurm/submit_publish_650m.sh \
 
 ```bash
 bash rockfish/slurm/submit_publish_3b.sh \
-  --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
+  --account sfried3_gpu --qos qos_gpu
 # If OOM on 40GB: add --partition ica100
 ```
 
@@ -416,13 +438,14 @@ mkdir -p logs
 export DISORDERNET_ACCOUNT=sfried3          # CPU / shared
 export DISORDERNET_GPU_ACCOUNT=$(sacctmgr -nP show assoc user=$USER format=account,qos \
   | awk -F'|' '/qos_gpu/{print $1; exit}')  # usually sfried3_gpu
-export DISORDERNET_GPU_QOS=qos_gpu
 
-# v8 first (hours), then optional publish bundles (days):
-#   see Path C command ladder A → C → D
+# v8 first (hours) — helper always sets --qos=qos_gpu:
+bash rockfish/slurm/submit_v8.sh
+
+# then optional publish bundles (days):
 bash rockfish/slurm/submit_publish_650m.sh \
-  --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
-# optional: bash rockfish/slurm/submit_publish_3b.sh --account … --qos … [--partition ica100]
+  --account "${DISORDERNET_GPU_ACCOUNT:-sfried3_gpu}" --qos qos_gpu
+# optional: bash rockfish/slurm/submit_publish_3b.sh --account … --qos qos_gpu [--partition ica100]
 ```
 
 **How you know it’s done:** `squeue -u $USER` empty + `sacct -j <id> … COMPLETED|0:0`, then open  

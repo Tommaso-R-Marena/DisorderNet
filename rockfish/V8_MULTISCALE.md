@@ -65,22 +65,24 @@ export DISORDERNET_V8_DIR=$HOME/scr4_sfried3/disordernet_v8
 ```bash
 cd ~/DisorderNet && git pull && source ~/venvs/disordernet/bin/activate
 export DISORDERNET_V8_DIR=$HOME/scr4_sfried3/disordernet_v8
-export DISORDERNET_GPU_ACCOUNT=$(sacctmgr -nP show assoc user=$USER format=account,qos \
-  | awk -F'|' '/qos_gpu/{print $1; exit}')
-export DISORDERNET_GPU_QOS=qos_gpu
-echo "GPU account: $DISORDERNET_GPU_ACCOUNT"   # expect sfried3_gpu (or similar)
 
+# Preferred — discovers sfried3_gpu and always passes --qos=qos_gpu
+# (avoids "Invalid qos specification" from an empty --qos="$DISORDERNET_GPU_QOS")
+bash rockfish/slurm/submit_v8.sh
+```
+
+Manual equivalent:
+
+```bash
 # If a previous pair is stuck Pending (QOS / Dependency), cancel first:
 #   scancel <EMBED_ID> <PIPELINE_ID>
 
-# (a) GPU embedding extraction — MUST use GPU account + qos_gpu
 EMBED_ID=$(sbatch --parsable \
-  -A "$DISORDERNET_GPU_ACCOUNT" --qos="$DISORDERNET_GPU_QOS" \
+  -A sfried3_gpu --qos=qos_gpu \
   --export=ALL,DISORDERNET_V8_DIR \
   rockfish/slurm/v8_extract_embeddings.sbatch)
 echo "embedding job: $EMBED_ID"
 
-# (b) CPU pipeline — starts automatically after (a) COMPLETED successfully
 sbatch -A sfried3 \
   --dependency=afterok:$EMBED_ID \
   --export=ALL,DISORDERNET_V8_DIR \
@@ -90,8 +92,8 @@ sbatch -A sfried3 \
 Want just one backbone (faster) or to skip the homology pass?
 
 ```bash
-# only 650M extract (still needs GPU account + qos_gpu)
-sbatch -A "$DISORDERNET_GPU_ACCOUNT" --qos="$DISORDERNET_GPU_QOS" \
+# only 650M extract (still needs GPU account + literal qos_gpu)
+sbatch -A sfried3_gpu --qos=qos_gpu \
   --export=ALL,DISORDERNET_V8_DIR,DISORDERNET_BACKBONES=esm2_t33_650M_UR50D \
   rockfish/slurm/v8_extract_embeddings.sbatch
 # then pipeline with RUN_HOMOLOGY=0 if desired
@@ -184,21 +186,21 @@ DISORDERNET_HOME=$DISORDERNET_V8_DIR python fetch_disprot.py
 python rockfish/prefetch_esm.py
 
 # ── 2 · v8 multi-scale ensemble (honest CPU numbers + calibration/conformal) ─
-# GPU extract needs the GPU account + qos_gpu; the CPU pipeline stays on sfried3/shared.
-EMBED=$(sbatch --parsable -A "$DISORDERNET_GPU_ACCOUNT" --qos="$DISORDERNET_GPU_QOS" \
-  rockfish/slurm/v8_extract_embeddings.sbatch)
-echo "embed job: $EMBED"
-sbatch -A sfried3 --dependency=afterok:$EMBED rockfish/slurm/v8_pipeline.sbatch
+# Prefer the helper (never submits an empty --qos):
+bash rockfish/slurm/submit_v8.sh
+# Manual: GPU extract needs -A sfried3_gpu --qos=qos_gpu; CPU pipeline stays on sfried3/shared.
+# EMBED=$(sbatch --parsable -A sfried3_gpu --qos=qos_gpu rockfish/slurm/v8_extract_embeddings.sbatch)
+# sbatch -A sfried3 --dependency=afterok:$EMBED rockfish/slurm/v8_pipeline.sbatch
 
 # ── 3 · 650M publishable bundle (ultra -> ultra_clean -> package) ──────────
 # GPU jobs use the GPU account + qos_gpu; the CPU package job auto-uses sfried3.
-sbatch -A "$DISORDERNET_GPU_ACCOUNT" --qos="$DISORDERNET_GPU_QOS" \
+sbatch -A "$DISORDERNET_GPU_ACCOUNT" --qos=qos_gpu \
   --export=ALL,DISORDERNET_BOLTZ_ROOT,BOLTZ_MODE=auto \
   rockfish/slurm/boltz_batch.sbatch          # optional but recommended (go/no-go artifact)
-bash rockfish/slurm/submit_publish_650m.sh --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
+bash rockfish/slurm/submit_publish_650m.sh --account "$DISORDERNET_GPU_ACCOUNT" --qos qos_gpu
 
 # ── 4 · 3B publishable bundle (optional) ──────────────────────────────────
-bash rockfish/slurm/submit_publish_3b.sh --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
+bash rockfish/slurm/submit_publish_3b.sh --account "$DISORDERNET_GPU_ACCOUNT" --qos qos_gpu
 #   add: --partition ica100  if OOM on 40GB A100
 
 # ── 5 · Monitor ───────────────────────────────────────────────────────────
