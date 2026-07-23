@@ -68,6 +68,7 @@ def _submit_gpu_chain(
     the non-GPU account (``account`` with a trailing ``_gpu`` stripped), since GPU
     QOS/accounts are not valid there.
     """
+    qos = (qos or "").strip() or "qos_gpu"
     defaults = env_defaults()
     cpu_account = os.environ.get("DISORDERNET_CPU_ACCOUNT") or account.replace("_gpu", "")
     base_env = {
@@ -299,9 +300,10 @@ def build_parser() -> argparse.ArgumentParser:
         )
         sp.add_argument(
             "--qos",
-            default=os.environ.get("DISORDERNET_GPU_QOS", "qos_gpu"),
+            default=os.environ.get("DISORDERNET_GPU_QOS") or "qos_gpu",
             help="GPU QOS for a100 jobs (default: qos_gpu; a100 rejects the 'normal' "
-                 "QOS). The CPU package job uses the default QOS.",
+                 "QOS). Empty env values fall back to qos_gpu. The CPU package job "
+                 "uses the default QOS.",
         )
         sp.add_argument("--root-workdir", default=None, help="Bundle parent directory")
         sp.add_argument("--package-dir", default=None, help="Output publish_package dir")
