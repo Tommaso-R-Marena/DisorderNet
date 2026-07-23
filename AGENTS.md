@@ -14,14 +14,18 @@ GPU/Colab/Rockfish paths are not runnable in this CPU-only cloud environment).
 - Activate it before running anything: `source .venv/bin/activate`.
 
 ### Tests (fast, self-contained)
-- Run: `pytest tests/ -v` (config in `pytest.ini`; also mirrored in
-  `.github/workflows/test.yml`).
+- Run: `pytest tests/ -v` (config in `pytest.ini`; CI in `.github/workflows/test.yml`).
 - The suite mocks ESM (`tests/conftest.py`) and uses synthetic fixtures — no
   network, GPU, or model downloads needed. `gpu`-marked tests are skipped on CPU.
+- The full suite imports `lightgbm`/`xgboost`/`fair-esm`, so install BOTH
+  `requirements-dev.txt` and `requirements-cpu.txt` (the update script/CI do this).
+- Coverage: `pytest tests/ --cov=. --cov-report=term-missing`.
 
-### Linting
-- There is no lint tooling or config in this repo; CI only runs pytest. Do not
-  invent a linter.
+### Linting / CI
+- `ruff` is configured in `ruff.toml` (critical-error rules only: syntax + undefined
+  names; notebooks excluded). Run `ruff check .`.
+- CI (`.github/workflows/test.yml`) has three jobs: ruff lint, import-smoke, and a
+  pytest+coverage matrix on Python 3.11/3.12.
 
 ### Running the CPU pipeline (the "application")
 The end-to-end CPU model lives in the top-level scripts. Paths are centralized in
