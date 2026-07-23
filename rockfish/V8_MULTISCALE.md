@@ -145,8 +145,10 @@ srun -A sfried3 -p shared -c 4 --mem=8G -t 00:20:00 \
 # ── 1b · Prefetch DisProt + ESM weights on the LOGIN node (has internet) ───
 # Downloads once into the shared home cache so the compute-node jobs never need
 # internet (and never re-download). ~2.5 GB for 650M; a few minutes.
+# NB: use prefetch_esm.py (streams the .pt files to disk) — do NOT instantiate the
+# models on the login node, that gets OOM-killed.
 DISORDERNET_HOME=$DISORDERNET_V8_DIR python fetch_disprot.py
-python -c "import esm; [getattr(esm.pretrained,m)() for m in ['esm2_t12_35M_UR50D','esm2_t30_150M_UR50D','esm2_t33_650M_UR50D']]"
+python rockfish/prefetch_esm.py
 
 # ── 2 · v8 multi-scale ensemble (honest CPU numbers + calibration/conformal) ─
 EMBED=$(sbatch --parsable -A sfried3 rockfish/slurm/v8_extract_embeddings.sbatch)
