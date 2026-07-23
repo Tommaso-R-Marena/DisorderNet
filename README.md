@@ -116,64 +116,159 @@ For 3B: **A100 40GB + High RAM**; do **not** use T4. `!pip install -q lightgbm x
 
 ---
 
-### Path C — Rockfish from scratch → publish package (paper path)
+### Path C — Rockfish ops guide (what you know, what to run, when you’re done)
 
-Do this on a Rockfish **login node** (not a compute node). Full flags and layouts: [rockfish/README.md — Publish path](rockfish/README.md#publish-path-exact-usage).
+Everything below runs on a Rockfish **login node** (submit only — never train/extract on login).  
+Deep flags/layouts: [rockfish/README.md](rockfish/README.md) · v8 copy-paste: [rockfish/V8_MULTISCALE.md](rockfish/V8_MULTISCALE.md).
 
-**1. Clone + env (once)**
+#### What you know (accounts)
+
+| Job type | Partition | Account | QOS | Examples |
+|----------|-----------|---------|-----|----------|
+| **GPU** | `a100` | **GPU account** (usually `sfried3_gpu`) | **`qos_gpu`** | v8 embed extract, ultra train, Boltz GPU |
+| **CPU** | `shared` | **CPU account** (`sfried3`) | default (omit `--qos`) | v8 CV/ensemble, strict `publish_package` |
+
+`a100` rejects QOS `normal` (“QOSMax… / not permitted”). `qos_gpu` lives on the **GPU** account, not on `sfried3`. Discover once:
 
 ```bash
-git clone https://github.com/Tommaso-R-Marena/DisorderNet.git ~/DisorderNet
-cd ~/DisorderNet
-git checkout master
+export DISORDERNET_ACCOUNT=sfried3   # CPU / shared
+export DISORDERNET_GPU_ACCOUNT=$(sacctmgr -nP show assoc user=$USER format=account,qos \
+  | awk -F'|' '/qos_gpu/{print $1; exit}')
+export DISORDERNET_GPU_QOS=qos_gpu
+echo "CPU=$DISORDERNET_ACCOUNT  GPU=$DISORDERNET_GPU_ACCOUNT  QOS=$DISORDERNET_GPU_QOS"
+# Expect something like: CPU=sfried3  GPU=sfried3_gpu  QOS=qos_gpu
+```
 
-bash rockfish/setup_env.sh
+#### What you already finished (typical after first Rockfish session)
+
+If you already did these, **do not redo** them — just `git pull` and resubmit jobs:
+
+1. Clone + `bash rockfish/setup_env.sh` + venv activate  
+2. `pytest` / `ruff` green on a `shared` node  
+3. DisProt download under `$DISORDERNET_V8_DIR/data/`  
+4. `python rockfish/prefetch_esm.py` (ESM weights cached — login-safe; do **not** `load_model` on login)
+
+#### Stuck jobs? Cancel, pull, resubmit (do this first if `squeue` shows PD + QOS error)
+
+```bash
+cd ~/DisorderNet && git checkout master && git pull
 source ~/venvs/disordernet/bin/activate
 mkdir -p logs
 
-export DISORDERNET_ACCOUNT=sfried3          # your Rockfish account
-export DISORDERNET_BOLTZ_ROOT=$HOME/boltz   # recommended
-export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
+# Cancel anything stuck Pending with QOS / DependencyNeverSatisfied
+scancel <EMBED_JOB_ID> <PIPELINE_JOB_ID>    # e.g. scancel 28766644 28766650
+squeue -u $USER                             # should be empty (or only healthy jobs)
+
+export DISORDERNET_ACCOUNT=sfried3
+export DISORDERNET_GPU_ACCOUNT=$(sacctmgr -nP show assoc user=$USER format=account,qos \
+  | awk -F'|' '/qos_gpu/{print $1; exit}')
+export DISORDERNET_GPU_QOS=qos_gpu
+export DISORDERNET_V8_DIR=$HOME/scr4_sfried3/disordernet_v8
 ```
 
-**2. Optional — Boltz structure warm-up** (if you do not already have Boltz outputs)
+#### Exact command ladder (recommended order)
+
+**A — v8 multi-scale (honest CPU ensemble ~0.857 / homology ~0.853)** — start here; cheapest publishable number.
 
 ```bash
-sbatch --account=$DISORDERNET_ACCOUNT \
+# GPU extract (~1–2 h wall once scheduled; 1× A100)
+EMBED=$(sbatch --parsable \
+  -A "$DISORDERNET_GPU_ACCOUNT" --qos="$DISORDERNET_GPU_QOS" \
+  --export=ALL,DISORDERNET_V8_DIR \
+  rockfish/slurm/v8_extract_embeddings.sbatch)
+echo "embed job: $EMBED"
+
+# CPU pipeline (~6–12 h wall; starts only after embed succeeds)
+sbatch -A "$DISORDERNET_ACCOUNT" \
+  --dependency=afterok:$EMBED \
+  --export=ALL,DISORDERNET_V8_DIR \
+  rockfish/slurm/v8_pipeline.sbatch
+```
+
+**B — Optional Boltz warm-up** (structure-distrust artifacts; hours–days depending on queue/cache)
+
+```bash
+export DISORDERNET_BOLTZ_ROOT=${DISORDERNET_BOLTZ_ROOT:-$HOME/scr4_sfried3/boltz}
+export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
+sbatch -A "$DISORDERNET_GPU_ACCOUNT" --qos="$DISORDERNET_GPU_QOS" \
   --export=ALL,DISORDERNET_ACCOUNT,DISORDERNET_BOLTZ_ROOT,BOLTZ_MODE=auto \
   rockfish/slurm/boltz_batch.sbatch
 ```
 
-**3. Submit publish bundle(s)** — each chains GPU jobs then a strict CPU package job
+**C — 650M LoRA publish bundle** (ultra + clean → strict package; multi-day GPU chain)
 
 ```bash
-# Script 1 — ESM-2 650M ultra + contamination-clean companion + publish_package/
-bash rockfish/slurm/submit_publish_650m.sh
-
-# Script 2 — ESM-2 3B (optional; use --partition ica100 if OOM on 40GB A100)
-bash rockfish/slurm/submit_publish_3b.sh
-# e.g. bash rockfish/slurm/submit_publish_3b.sh --partition ica100
+bash rockfish/slurm/submit_publish_650m.sh \
+  --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
+# Workdir printed + also in ~/disordernet_runs/publish_650m_*/submit_summary.json
 ```
 
-CLI equivalents: `python rockfish/publish_submit.py submit-650m|submit-3b --account "$DISORDERNET_ACCOUNT"`.  
-Dry-run first if you want: `bash rockfish/slurm/submit_publish_650m.sh --dry-run`.
+**D — Optional 3B publish bundle** (only after 650M screen/ultra looks ≥~0.87)
 
-**4. Monitor**
+```bash
+bash rockfish/slurm/submit_publish_3b.sh \
+  --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
+# If OOM on 40GB: add --partition ica100
+```
+
+Do **not** start C/D until A’s embed job is **Running or completed** (or you accept separate GPU queue contention). A and C can share the cluster, but one A100 at a time is the courteous default.
+
+#### How you know it’s finished
+
+| Signal | Meaning |
+|--------|---------|
+| `squeue -u $USER` empty (or job gone) | Slurm no longer holding the job |
+| `sacct -j <JOBID> --format=JobID,State,ExitCode,Elapsed -P` → `COMPLETED\|0:0` | Success |
+| Same → `FAILED` / `TIMEOUT` / `CANCELLED` / `OUT_OF_MEMORY` | Stop; read `logs/*.err` before resubmitting |
+| Dependent job stays `PD` forever with reason `Dependency` | Parent never reached `COMPLETED` — `scancel` child, fix parent, resubmit both |
+| Log stops growing + metrics file exists | Safe to inspect results (below) |
+
+Monitor while waiting:
 
 ```bash
 squeue -u $USER
-# Job ids + paths are also in ~/disordernet_runs/publish_*_*/submit_summary.json
+# ST: PD=pending, R=running. Reason column shows QOSMax… / Dependency / Resources.
+tail -f ~/DisorderNet/logs/dn-v8-embed_*.out     # embed progress
+tail -f ~/DisorderNet/logs/dn-v8-cv_*.out        # v8 CV / ensemble
+tail -f ~/DisorderNet/logs/dn-*ultra*.out        # publish GPU train (name varies)
 ```
 
-**5. After jobs finish — inspect package + decide go/no-go**
+Email is off by default in the sbatch headers; uncomment `#SBATCH --mail-*` if you want END/FAIL mail.
+
+#### Expected wall time (once the job actually starts)
+
+| Stage | Partition | Typical wall | Notes |
+|-------|-----------|--------------|-------|
+| Queue wait | — | minutes → many hours | Not in your control |
+| Prefetch DisProt + ESM (login) | login | ~5–15 min | Already done if cache present |
+| v8 GPU extract (3 backbones) | `a100` | **~1–2 h** | Weights must be prefetched |
+| v8 CPU pipeline (3× v7 + homology + ensemble) | `shared` | **~6–12 h** | No GPU held |
+| Boltz batch | `a100` | hours–days | Optional |
+| Publish 650M ultra + clean + package | `a100`→`shared` | **~2–4+ days** | ~50–100 GPU-h class |
+| Publish 3B ultra + clean + package | `a100`/`ica100`→`shared` | **~3–5+ days** | ~60–120 GPU-h class |
+
+#### What you get (artifacts to open)
+
+**After v8 pipeline completes:**
 
 ```bash
-less ~/disordernet_runs/publish_650m_*/publish_package/PACKAGE_README.md
-ls ~/disordernet_runs/publish_650m_*/publish_package/
-# Fill docs/METHODS_CHECKLIST.md from MANIFEST.json / comparison.json / per-run reports
+export DISORDERNET_V8_DIR=$HOME/scr4_sfried3/disordernet_v8
+cat $DISORDERNET_V8_DIR/ensemble/results_v8/metrics.json       # expect AUC ~0.85–0.86
+cat $DISORDERNET_V8_DIR/ensemble_hom/results_v8/metrics.json   # homology; slightly lower
+ls  $DISORDERNET_V8_DIR/650m/results_v7/                       # per-backbone OOF + metrics
+# Also: calibrated probs + conformal intervals under those result dirs
 ```
 
-Re-package without re-training (strict by default):
+**After publish 650M/3B package job completes:**
+
+```bash
+ls ~/disordernet_runs/publish_650m_*/publish_package/
+less ~/disordernet_runs/publish_650m_*/publish_package/PACKAGE_README.md
+cat  ~/disordernet_runs/publish_650m_*/publish_package/comparison.json
+# Required go/no-go: sota_postprocess_report.json, structure_distrust_benchmark.json
+```
+
+Re-package without re-training (if package job failed but train finished):
 
 ```bash
 python rockfish/publish_submit.py package \
@@ -181,7 +276,24 @@ python rockfish/publish_submit.py package \
   --kind 650m --strict
 ```
 
-**Success:** `publish_package/` with `PACKAGE_README.md`, `MANIFEST.json`, `comparison.json`, and per-run report folders; required go/no-go files include `sota_postprocess_report.json` and `structure_distrust_benchmark.json`. Packaging fails loudly if they are missing (`PACKAGE_STRICT=1`).
+Then fill [`docs/METHODS_CHECKLIST.md`](docs/METHODS_CHECKLIST.md) from the package.
+
+**Pull to your laptop** (run locally, not on Rockfish):
+
+```bash
+scp -r rockfish:scr4_sfried3/disordernet_v8/ensemble ./dn_v8_ensemble
+scp -r rockfish:scr4_sfried3/disordernet_v8/ensemble_hom ./dn_v8_ensemble_hom
+scp -r rockfish:disordernet_runs/publish_650m_* ./publish_650m
+```
+
+#### When to run the “rest” of the commands
+
+| Just finished… | Run next… | Why |
+|----------------|-----------|-----|
+| Prefetch + env only | **A** (v8 embed → pipeline) | Fastest honest numbers |
+| v8 `metrics.json` present | Inspect AUC; optionally **B** then **C** | Paper LoRA / distrust track |
+| `publish_650m_*/publish_package/` present | Checklist + go/no-go; only then **D** (3B) | 3B is expensive |
+| Package missing required JSON | `publish_submit.py package --strict` | No need to retrain |
 
 ---
 
@@ -289,38 +401,40 @@ Breaking **0.90+ consistently** on DisProt likely needs **ESM-2 3B** (`ultra3b`)
 
 ### Rockfish / Slurm (recommended for production)
 
-If you have access to JHU Rockfish (or any Slurm cluster with A100s), use the HPC pipeline instead of Colab for 3B runs and multi-day jobs. **Full usage instructions** (setup, publish path, artifacts, go/no-go, env vars, Boltz/AF3) live in **[rockfish/README.md](rockfish/README.md)**.
+If you have access to JHU Rockfish (or any Slurm cluster with A100s), use the HPC pipeline instead of Colab for 3B runs and multi-day jobs.
+
+**Operator source of truth (finish signals, timelines, artifacts, stuck-job recovery):**  
+**[Path C — Rockfish ops guide](#path-c--rockfish-ops-guide-what-you-know-what-to-run-when-youre-done)** in this README.  
+Canonical flags/layouts: **[rockfish/README.md](rockfish/README.md)**.  
+v8 copy-paste: **[rockfish/V8_MULTISCALE.md](rockfish/V8_MULTISCALE.md)**.
 
 ```bash
-git clone https://github.com/Tommaso-R-Marena/DisorderNet.git ~/DisorderNet
-cd ~/DisorderNet
-git checkout master
-bash rockfish/setup_env.sh && source ~/venvs/disordernet/bin/activate
+cd ~/DisorderNet && git checkout master && git pull
+source ~/venvs/disordernet/bin/activate
 mkdir -p logs
-export DISORDERNET_ACCOUNT=sfried3
-export DISORDERNET_BOLTZ_ROOT=$HOME/boltz
-export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
 
-# Script 1 — ESM-2 650M (+ clean) → publish_package/
-bash rockfish/slurm/submit_publish_650m.sh
+export DISORDERNET_ACCOUNT=sfried3          # CPU / shared
+export DISORDERNET_GPU_ACCOUNT=$(sacctmgr -nP show assoc user=$USER format=account,qos \
+  | awk -F'|' '/qos_gpu/{print $1; exit}')  # usually sfried3_gpu
+export DISORDERNET_GPU_QOS=qos_gpu
 
-# Script 2 — ESM-2 3B (+ clean) → publish_package/  (optional; try --partition ica100 if OOM)
-bash rockfish/slurm/submit_publish_3b.sh
+# v8 first (hours), then optional publish bundles (days):
+#   see Path C command ladder A → C → D
+bash rockfish/slurm/submit_publish_650m.sh \
+  --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
+# optional: bash rockfish/slurm/submit_publish_3b.sh --account … --qos … [--partition ica100]
 ```
 
-Exact flags and layouts: **[rockfish/README.md — Publish path](rockfish/README.md#publish-path-exact-usage)**.  
-CLI: `python rockfish/publish_submit.py submit-650m|submit-3b --account $DISORDERNET_ACCOUNT`.
-
-**v8 multi-scale ensemble on Rockfish** (GPU extract + CPU CV, no GPU held for the
-trees): step-by-step copy-paste commands are in **[rockfish/V8_MULTISCALE.md](rockfish/V8_MULTISCALE.md)**
-(`sbatch rockfish/slurm/v8_extract_embeddings.sbatch` then `v8_pipeline.sbatch`).
+**How you know it’s done:** `squeue -u $USER` empty + `sacct -j <id> … COMPLETED|0:0`, then open  
+`$DISORDERNET_V8_DIR/ensemble/results_v8/metrics.json` and/or  
+`~/disordernet_runs/publish_650m_*/publish_package/PACKAGE_README.md`.
 
 Ultra on Rockfish uses **homology-safe CV**, optional **train-time pLDDT** (disabled in clean companions), and **CAID3** scoring for fair comparison vs ESMDisPred (0.895).
 
 ## Documentation
 
 All project documentation lives under `docs/` and `rockfish/README.md`.  
-**Operators:** start at **[From scratch](#from-scratch-start-here)**. Then:
+**Operators:** start at **[From scratch](#from-scratch-start-here)** → **[Path C ops guide](#path-c--rockfish-ops-guide-what-you-know-what-to-run-when-youre-done)**. Then:
 
 | Document | What it covers |
 |----------|----------------|
@@ -366,8 +480,11 @@ Ultra defaults to homology-aware grouping (`split_method="homology"`, ~40% ident
 
 ### Publish path (Rockfish)
 
+See **[Path C](#path-c--rockfish-ops-guide-what-you-know-what-to-run-when-youre-done)** for accounts, monitoring, and finish signals.
+
 ```bash
-bash rockfish/slurm/submit_publish_650m.sh   # and/or submit_publish_3b.sh
+bash rockfish/slurm/submit_publish_650m.sh \
+  --account "$DISORDERNET_GPU_ACCOUNT" --qos "$DISORDERNET_GPU_QOS"
 # then open publish_package/ → METHODS_CHECKLIST → go/no-go on numbers
 python rockfish/publish_submit.py package --root-workdir … --kind 650m --strict
 ```
