@@ -9,23 +9,84 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  lint:
+    name: Lint (ruff)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
+          python-version: "3.12"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Ruff check (critical errors)
+        run: ruff check .
 
+  import-smoke:
+    name: Import smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            requirements-cpu.txt
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          pip install -r requirements-dev.txt -r requirements-cpu.txt
+      - name: Import core modules
+        run: |
+          python - <<'PY'
+          import importlib
+          mods = [
+              "disordernet_paths", "confidence", "predictor", "features",
+              "features_fast", "fetch_disprot", "run_v7", "run_v8_multiscale",
+              "generate_figures_v6", "predict_disorder", "train_predictor",
+              "colab.confidence_layer", "colab.cv_splits", "colab.homology_splits",
+          ]
+          for m in mods:
+              importlib.import_module(m)
+              print("ok:", m)
+          PY
 
-      - name: Run pytest
-        run: python -m pytest tests/ -v --tb=short
+  test:
+    name: Tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            requirements-cpu.txt
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt -r requirements-cpu.txt pytest-cov
+      - name: Run pytest with coverage
+        run: |
+          python -m pytest tests/ -v --tb=short \
+            --cov=. --cov-report=term-missing --cov-report=xml
+      - name: Upload coverage
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: ignore
