@@ -1,7 +1,6 @@
 #!/bin/bash -ue
 #SBATCH --job-name="dn-package"
 #SBATCH --partition=shared
-#SBATCH --qos=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
