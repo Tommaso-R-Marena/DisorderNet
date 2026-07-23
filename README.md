@@ -305,6 +305,10 @@ bash rockfish/slurm/submit_publish_3b.sh
 Exact flags and layouts: **[rockfish/README.md — Publish path](rockfish/README.md#publish-path-exact-usage)**.  
 CLI: `python rockfish/publish_submit.py submit-650m|submit-3b --account $DISORDERNET_ACCOUNT`.
 
+**v8 multi-scale ensemble on Rockfish** (GPU extract + CPU CV, no GPU held for the
+trees): step-by-step copy-paste commands are in **[rockfish/V8_MULTISCALE.md](rockfish/V8_MULTISCALE.md)**
+(`sbatch rockfish/slurm/v8_extract_embeddings.sbatch` then `v8_pipeline.sbatch`).
+
 Ultra on Rockfish uses **homology-safe CV**, optional **train-time pLDDT** (disabled in clean companions), and **CAID3** scoring for fair comparison vs ESMDisPred (0.895).
 
 ## Documentation
@@ -576,8 +580,12 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 
 | File | Description |
 |------|-------------|
+| `colab/DisorderNet_Colab_v8_MultiScale.ipynb` | **v8 multi-scale ensemble (GPU)**: multi-backbone extraction → v7 CV → v8 ensemble → calibration/conformal → predictor — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_v8_MultiScale.ipynb) |
 | `colab/DisorderNet_Colab_QuickScreen.ipynb` | **Quick breakthrough screen** (mini-ultra `screen_plus` go/no-go before full CV) — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_QuickScreen.ipynb) |
-| `colab/DisorderNet_Colab_Pro.ipynb` | Full GPU notebook (ESM-2 650M + LoRA) — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb) |
+| `colab/DisorderNet_Colab_Pro.ipynb` | Full GPU notebook (ESM-2 650M + LoRA; now auto-reports calibrated conformal confidence) — [Open in Colab](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb) |
+| `rockfish/V8_MULTISCALE.md` | **Exact Rockfish runbook** for the v8 ensemble (GPU extract + CPU CV) |
+| `rockfish/slurm/v8_extract_embeddings.sbatch` | GPU embedding extraction for v8 (`a100`) |
+| `rockfish/slurm/v8_pipeline.sbatch` | CPU v7×backbones → v8 ensemble → predictor (`shared`) |
 | `colab/quick_screen.py` | Quick screen logic (stratified subsample, verdict tiers) |
 | `colab/esm_backbone.py` | ESM-2 backbone registry (650M → 3B) + VRAM batch presets |
 | `rockfish/run_disordernet.py` | HPC CLI: screen / cv / stack / postprocess / full / pipeline / eval / atlas / idr-layer |
