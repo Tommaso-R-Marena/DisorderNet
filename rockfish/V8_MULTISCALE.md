@@ -5,15 +5,15 @@ calibrated + conformal) on JHU Rockfish. GPU is used only for the fast embedding
 extraction; the GBDT training runs on CPU (`shared` partition) so we never hold a
 GPU idle.
 
-Two Slurm scripts, matched to the lab's conventions (`account=sfried3`, GPU on
-`a100` GPU, CPU on `shared`) and modeled on the group's APBS array job. They do
-**not** hardcode a `--qos` (Slurm uses the partition/account default; add
-`--qos=<name>` to the `sbatch` command only if your cluster requires a specific one):
+Two Slurm scripts, matched to the lab's conventions: **GPU jobs** need the GPU
+account + `qos_gpu` (e.g. `-A sfried3_gpu --qos=qos_gpu`); **CPU jobs** stay on
+`-A sfried3` / `shared`. The `#SBATCH --account=` line inside the scripts is only a
+default — always override on the `sbatch` command line.
 
-| Script | Partition | Purpose | Typical time |
-|--------|-----------|---------|--------------|
-| `rockfish/slurm/v8_extract_embeddings.sbatch` | `a100` (1 GPU) | extract 35M/150M/650M embeddings | ~1–2 h |
-| `rockfish/slurm/v8_pipeline.sbatch` | `shared` (8 CPU) | v7 CV ×3 backbones (+ homology) → v8 ensemble → predictor | ~6–12 h |
+| Script | Partition | Account / QOS | Purpose | Typical wall |
+|--------|-----------|---------------|---------|--------------|
+| `rockfish/slurm/v8_extract_embeddings.sbatch` | `a100` (1 GPU) | **GPU account + `qos_gpu`** | extract 35M/150M/650M embeddings | ~1–2 h once started |
+| `rockfish/slurm/v8_pipeline.sbatch` | `shared` (8 CPU) | **CPU account `sfried3`** (no qos) | v7 CV ×3 (+ homology) → v8 ensemble | ~6–12 h once started |
 
 > **Courteous allocation notes.** These request the minimum that fits: one A100 for a
 > few hours (GPU is scarce), and a single `shared` CPU slot for the trees. Please keep
@@ -63,16 +63,25 @@ export DISORDERNET_V8_DIR=$HOME/scr4_sfried3/disordernet_v8
 ## 2 · Submit the jobs (on Rockfish)
 
 ```bash
-cd ~/DisorderNet
+cd ~/DisorderNet && git pull && source ~/venvs/disordernet/bin/activate
+export DISORDERNET_V8_DIR=$HOME/scr4_sfried3/disordernet_v8
+export DISORDERNET_GPU_ACCOUNT=$(sacctmgr -nP show assoc user=$USER format=account,qos \
+  | awk -F'|' '/qos_gpu/{print $1; exit}')
+export DISORDERNET_GPU_QOS=qos_gpu
+echo "GPU account: $DISORDERNET_GPU_ACCOUNT"   # expect sfried3_gpu (or similar)
 
-# (a) GPU embedding extraction
-EMBED_ID=$(sbatch --parsable --account=sfried3 \
+# If a previous pair is stuck Pending (QOS / Dependency), cancel first:
+#   scancel <EMBED_ID> <PIPELINE_ID>
+
+# (a) GPU embedding extraction — MUST use GPU account + qos_gpu
+EMBED_ID=$(sbatch --parsable \
+  -A "$DISORDERNET_GPU_ACCOUNT" --qos="$DISORDERNET_GPU_QOS" \
   --export=ALL,DISORDERNET_V8_DIR \
   rockfish/slurm/v8_extract_embeddings.sbatch)
 echo "embedding job: $EMBED_ID"
 
-# (b) CPU pipeline — starts automatically after (a) succeeds
-sbatch --account=sfried3 \
+# (b) CPU pipeline — starts automatically after (a) COMPLETED successfully
+sbatch -A sfried3 \
   --dependency=afterok:$EMBED_ID \
   --export=ALL,DISORDERNET_V8_DIR \
   rockfish/slurm/v8_pipeline.sbatch
@@ -81,26 +90,41 @@ sbatch --account=sfried3 \
 Want just one backbone (faster) or to skip the homology pass?
 
 ```bash
-# only 650M, random split only
-sbatch --account=sfried3 \
-  --export=ALL,DISORDERNET_V8_DIR,DISORDERNET_BACKBONES=esm2_t33_650M_UR50D,RUN_HOMOLOGY=0 \
+# only 650M extract (still needs GPU account + qos_gpu)
+sbatch -A "$DISORDERNET_GPU_ACCOUNT" --qos="$DISORDERNET_GPU_QOS" \
+  --export=ALL,DISORDERNET_V8_DIR,DISORDERNET_BACKBONES=esm2_t33_650M_UR50D \
   rockfish/slurm/v8_extract_embeddings.sbatch
+# then pipeline with RUN_HOMOLOGY=0 if desired
 ```
 
-## 3 · Monitor (on Rockfish)
+## 3 · Monitor — how you know it’s finished
 
 ```bash
 squeue -u $USER
-tail -f logs/dn-v8-embed_*.out    # extraction progress
-tail -f logs/dn-v8-cv_*.out       # CV + ensemble progress
+# PD = waiting, R = running. Empty queue (job gone) = Slurm released it.
+sacct -j $EMBED_ID --format=JobID,State,ExitCode,Elapsed -P
+# Success looks like: COMPLETED|0:0
+
+tail -f logs/dn-v8-embed_*.out    # extraction progress (~1–2 h once R)
+tail -f logs/dn-v8-cv_*.out       # CV + ensemble (~6–12 h once R)
 ```
 
-## 4 · Results
+| State / symptom | What it means | What to do |
+|-----------------|---------------|------------|
+| Embed `R`, pipeline `PD (Dependency)` | Normal — wait for embed | `tail -f` embed log |
+| Embed `PD` reason mentions **QOS** | Wrong account/qos | `scancel` both; resubmit with GPU account + `qos_gpu` |
+| Embed `COMPLETED`, pipeline `R` | Normal | `tail -f` cv log |
+| Both gone + `metrics.json` exists | **Done** | Open results (§4) |
+| Pipeline `PD (Dependency)` forever | Embed never succeeded | `sacct` embed; fix; resubmit both |
+
+## 4 · Results (what you get + how to see them)
+
+**Done when** these files exist and `sacct` shows the pipeline job `COMPLETED|0:0`:
 
 ```bash
-cat $DISORDERNET_V8_DIR/ensemble/results_v8/metrics.json        # random-split ensemble
-cat $DISORDERNET_V8_DIR/ensemble_hom/results_v8/metrics.json    # homology-split ensemble
-ls  $DISORDERNET_V8_DIR/35m/results_v7/                         # per-backbone metrics + OOF
+cat $DISORDERNET_V8_DIR/ensemble/results_v8/metrics.json        # expect AUC ~0.85–0.86
+cat $DISORDERNET_V8_DIR/ensemble_hom/results_v8/metrics.json    # homology; slightly lower
+ls  $DISORDERNET_V8_DIR/{35m,150m,650m}/results_v7/             # per-backbone metrics + OOF
 ```
 
 Pull them to your laptop (run this **on your Ubuntu laptop**, not Rockfish):
@@ -109,6 +133,9 @@ Pull them to your laptop (run this **on your Ubuntu laptop**, not Rockfish):
 scp -r rockfish:scr4_sfried3/disordernet_v8/ensemble ./dn_v8_ensemble
 scp -r rockfish:scr4_sfried3/disordernet_v8/ensemble_hom ./dn_v8_ensemble_hom
 ```
+
+**Then** (only if you want the LoRA / paper package track) run the publish scripts in
+§ “Full publishable run” below — do **not** start those until v8 results look sane.
 
 ## GPU LoRA path (targets ≥0.88)
 

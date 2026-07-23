@@ -18,8 +18,10 @@
 # Extracts 35M/150M/650M into per-backbone homes under a scratch working dir, then
 # the CPU pipeline job (v8_pipeline.sbatch) trains v7 per backbone and ensembles.
 #
-# Submit (from the repo root, after rockfish/setup_env.sh):
-#   sbatch --account=sfried3 rockfish/slurm/v8_extract_embeddings.sbatch
+# Submit (from the repo root, after rockfish/setup_env.sh + prefetch_esm.py):
+#   export DISORDERNET_GPU_ACCOUNT=$(sacctmgr -nP show assoc user=$USER format=account,qos \
+#     | awk -F'|' '/qos_gpu/{print $1; exit}')
+#   sbatch -A "$DISORDERNET_GPU_ACCOUNT" --qos=qos_gpu rockfish/slurm/v8_extract_embeddings.sbatch
 #
 # Override via env before sbatch (see also --export):
 #   DISORDERNET_REPO, DISORDERNET_VENV, DISORDERNET_V8_DIR, DISORDERNET_BACKBONES
