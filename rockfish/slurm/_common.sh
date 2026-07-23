@@ -33,7 +33,8 @@ export DISORDERNET_RESULTS="${RESULTS_DIR}"
 
 : "${DISORDERNET_ACCOUNT:=sfried3}"
 : "${DISORDERNET_PARTITION:=a100}"
-: "${DISORDERNET_QOS:=qos_gpu}"
+# No default --qos: Slurm assigns the partition/account default QOS. Set an explicit
+# one only if your cluster requires it (add `--qos=<name>` to the sbatch command).
 
 : "${PROFILE:=ultra}"
 : "${BACKBONE:=650M}"

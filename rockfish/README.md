@@ -65,7 +65,8 @@ All `rockfish/slurm/*.sbatch` files follow the lab Rockfish style:
 #!/bin/bash -ue
 #SBATCH --job-name="dn-…"
 #SBATCH --partition=a100          # or shared for CPU jobs
-#SBATCH --qos=qos_gpu             # GPU jobs
+# (no --qos: Slurm uses the partition/account default. Add --qos=<name> only if
+#  your cluster rejects the default with "Invalid qos specification".)
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=…
@@ -89,7 +90,7 @@ Shared runtime logic lives in `rockfish/slurm/_common.sh` (`ml` modules + venv a
 
 ## Prerequisites
 
-1. **GPU allocation** — your PI must have a Rockfish `_gpu` account (e.g. `jsmith123_gpu`) and `qos_gpu`. Request via [ARCH support](https://docs.arch.jhu.edu/) if needed.
+1. **GPU allocation** — your account (e.g. `sfried3`) must be able to submit to a GPU partition (`a100`). The sbatch files do not hardcode a `--qos`, so Slurm uses the partition/account default; if your cluster rejects it with "Invalid qos specification", find your allowed QOS with `sacctmgr -p show assoc user=$USER format=account,partition,qos` and add `--qos=<name>` to the `sbatch` command. Request access via [ARCH support](https://docs.arch.jhu.edu/) if needed.
 2. **Clone the repo** on Rockfish login node:
    ```bash
    git clone https://github.com/Tommaso-R-Marena/DisorderNet.git ~/DisorderNet
@@ -599,7 +600,7 @@ sbatch --account=$DISORDERNET_ACCOUNT --array=0-7 \
 
 Interactive debug (salloc GPU node):
 ```bash
-salloc --partition=a100 --qos=qos_gpu --account=$DISORDERNET_ACCOUNT \
+salloc --partition=a100 --account=$DISORDERNET_ACCOUNT \
   --gres=gpu:1 --cpus-per-task=8 --mem=64G --time=2:00:00
 source ~/venvs/disordernet/bin/activate
 cd ~/DisorderNet

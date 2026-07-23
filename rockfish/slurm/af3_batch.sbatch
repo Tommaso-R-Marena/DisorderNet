@@ -1,7 +1,6 @@
 #!/bin/bash -ue
 #SBATCH --job-name="dn-af3"
 #SBATCH --partition=a100
-#SBATCH --qos=qos_gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
