@@ -18,6 +18,10 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+# Ensure the repo root is importable when run as a script (`python rockfish/publish_submit.py`),
+# where sys.path[0] is the rockfish/ dir, not the repo root.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from rockfish.package_publish_results import (  # noqa: E402
     PackageIncompleteError,
     assemble_publish_package,
@@ -55,13 +59,21 @@ def _submit_gpu_chain(
     package_id: str,
     dry_run: bool,
     strict_package: bool,
+    qos: Optional[str] = None,
 ) -> dict:
-    """Submit main (+ optional clean) GPU jobs, then CPU package with dependencies."""
+    """Submit main (+ optional clean) GPU jobs, then CPU package with dependencies.
+
+    GPU jobs (a100) are submitted with ``--qos`` (Rockfish a100 requires a GPU QOS
+    such as ``qos_gpu``). The CPU package job runs on the default partition and uses
+    the non-GPU account (``account`` with a trailing ``_gpu`` stripped), since GPU
+    QOS/accounts are not valid there.
+    """
     defaults = env_defaults()
+    cpu_account = os.environ.get("DISORDERNET_CPU_ACCOUNT") or account.replace("_gpu", "")
     base_env = {
         **defaults,
         "DISORDERNET_ACCOUNT": account,
-        "DISORDERNET_CPU_ACCOUNT": os.environ.get("DISORDERNET_CPU_ACCOUNT") or account,
+        "DISORDERNET_CPU_ACCOUNT": cpu_account,
         "DISORDERNET_PUBLISH_ROOT": str(root),
         "DISORDERNET_PACKAGE_DIR": str(package_dir),
         "PACKAGE_ID": package_id,
@@ -99,6 +111,7 @@ def _submit_gpu_chain(
             job_name=f"dn-pub-{kind}-{label}"[:50],
             export=sbatch_export_keys(),
             partition=partition,
+            qos=qos,
             dependency=dep,
             dry_run=dry_run,
             env=job_env,
@@ -194,6 +207,7 @@ def cmd_submit_650m(args: argparse.Namespace) -> int:
         package_id=package_id,
         dry_run=args.dry_run,
         strict_package=not args.no_strict_package,
+        qos=args.qos,
     )
     return 0
 
@@ -224,6 +238,7 @@ def cmd_submit_3b(args: argparse.Namespace) -> int:
         package_id=package_id,
         dry_run=args.dry_run,
         strict_package=not args.no_strict_package,
+        qos=args.qos,
     )
     return 0
 
@@ -281,6 +296,12 @@ def build_parser() -> argparse.ArgumentParser:
             "--partition",
             default=None,
             help="GPU partition (default: a100; try ica100 for 3B OOM)",
+        )
+        sp.add_argument(
+            "--qos",
+            default=os.environ.get("DISORDERNET_GPU_QOS", "qos_gpu"),
+            help="GPU QOS for a100 jobs (default: qos_gpu; a100 rejects the 'normal' "
+                 "QOS). The CPU package job uses the default QOS.",
         )
         sp.add_argument("--root-workdir", default=None, help="Bundle parent directory")
         sp.add_argument("--package-dir", default=None, help="Output publish_package dir")
