@@ -35,3 +35,8 @@ v6_oof_probs_cache.json
 # Generated experiment outputs
 experiments/out/
 results_v7/
+
+# Coverage artifacts
+.coverage
+coverage.xml
+htmlcov/
