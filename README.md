@@ -6,9 +6,39 @@
 
 ## Overview
 
-**DisorderNet** is a protein language model-enhanced ensemble for predicting intrinsically disordered regions (IDRs) in proteins. On our DisProt 5-fold CV, the CPU model (v6) reaches **0.831 AUC-ROC**; the GPU Colab path (ESM-2 650M + LoRA) targets **≥0.88** pending a full benchmark run.
+**DisorderNet** is a protein language model (PLM)-enhanced ensemble for predicting
+intrinsically disordered regions (IDRs) in proteins, with **trustworthy per-residue
+uncertainty** — calibrated probabilities and conformal "confident / abstain"
+decisions that most disorder predictors do not provide.
 
-Compared to **literature reference points** (different protocols — not head-to-head), dedicated disorder predictors substantially outperform using AlphaFold pLDDT as a disorder proxy: AF3-pLDDT scores **0.747** on CAID3 (rank 13), while current disorder SOTA (ESMDisPred) reaches **0.895**. DisorderNet's distinctive contribution is the **post-structure IDR biology layer**: quantifying AlphaFold/Boltz hallucinations in IDRs and (with `ultra_fun`) assigning functional roles those structure models cannot represent.
+### Headline results (honest, leakage-free 5-fold DisProt CV)
+
+All numbers below fit PCA on the **train fold only** (no leakage) and are pooled
+per-residue AUC-ROC. "Homology split" clusters proteins at ≥40% identity so
+homologs never cross folds (CAID-credible).
+
+| Model | random split | homology split | notes |
+|-------|-------------:|---------------:|-------|
+| v6 baseline (ESM-2 8M + GBDT) | 0.8397 | — | prior release |
+| v7 (ESM-2 35M) | 0.8479 | 0.8396 | rich features + LGB/XGB/HistGBM blend + smoothing |
+| v7 (ESM-2 150M) | 0.8498 | 0.8457 | |
+| v7 (ESM-2 650M) | 0.8505 | 0.8487 | |
+| **v8 multi-scale ensemble (35M+150M+650M)** | **0.8568** | **0.8525** | best honest CPU result |
+
+The v8 ensemble is also the best-**calibrated** config: isotonic calibration lowers
+Expected Calibration Error from ~0.041 to **~0.0025** (ranking preserved), and the
+split-conformal layer holds its coverage guarantee (empirical coverage ~0.90–0.91 at
+α=0.1) with ~0.86 selective accuracy on the residues it is confident about. The GPU
+LoRA path (ESM-2 650M/3B) targets **≥0.88** and now inherits the same calibrated +
+conformal confidence layer.
+
+Compared to **literature reference points** (different protocols — not head-to-head),
+dedicated disorder predictors substantially outperform using AlphaFold pLDDT as a
+disorder proxy: AF3-pLDDT scores **0.747** on CAID3 (rank 13), while current disorder
+SOTA (ESMDisPred) reaches **0.895**. DisorderNet's distinctive contributions are
+(1) the **multi-scale PLM ensemble**, (2) a **calibrated + conformal confidence
+layer** shared by the CPU and GPU paths, and (3) the **post-structure IDR biology
+layer** quantifying AlphaFold/Boltz hallucinations in IDRs.
 
 AlphaFold 3's diffusion architecture hallucinates structure in genuinely disordered regions — [22% of residues are hallucinations](https://arxiv.org/abs/2510.15939). AF3-pLDDT [ranks 13th on CAID3](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/), *worse* than AF2 (rank 11th). DisorderNet exploits this fundamental weakness.
 
@@ -45,11 +75,20 @@ pip install -r requirements-cpu.txt
 
 python fetch_disprot.py             # DisProt JSON download (needs network) → ./data
 python extract_esm_embeddings.py    # ESM-2 embeddings (first run downloads weights) → ./data/embeddings
-python run_v6_mem.py                # 5-fold CV → metrics (~0.83 AUC target) → ./results_v6
+python run_v6_mem.py                # v6 5-fold CV → metrics (~0.84 AUC) → ./results_v6
 python generate_figures_v6.py       # ROC/PR + figures → ./results_v6
+
+# Optimized model (v7) + honest homology-split option + deployable predictor:
+python run_v7.py                    # v7 leakage-free CV (~0.848 AUC, ESM-2 35M) → ./results_v7
+DISORDERNET_SPLIT=homology python run_v7.py   # CAID-credible homology-split CV
+python train_predictor.py           # save a deployable bundle → ./results_v7/predictor_bundle.joblib
+python predict_disorder.py --seq MDVFMKGLSKAKEGVV...   # per-residue calibrated + conformal output
 ```
 
-**Success:** `results_v6/metrics.json` with pooled AUC ≈ 0.83, plus figures under `results_v6/`.
+**Success:** `results_v6/metrics.json` (v6, ~0.84) and/or `results_v7/metrics.json`
+(v7, ~0.848 with calibration/conformal), plus figures under `results_v6/`. For the
+best CPU number (0.857), extract multiple backbones and run `run_v8_multiscale.py`
+(see [Optimized model + per-sequence predictor](#optimized-model--per-sequence-predictor-v7)).
 
 ---
 
@@ -176,8 +215,11 @@ pytest tests/ -v
 
 | Method | AUC-ROC | AP | Status |
 |--------|---------|-----|--------|
-| DisorderNet v6 (ESM-2 8M + GBDT) | 0.831 | 0.537 | Verified (`results_v6/metrics.json`) |
-| DisorderNet GPU (ESM-2 650M + LoRA) | 0.817 | — | Verified Colab A100 (`disordernet_gpu_results_*.json`) |
+| DisorderNet v6 (ESM-2 8M + GBDT) | 0.831–0.840 | 0.537 | Verified (`results_v6/metrics.json`) |
+| DisorderNet v7 (ESM-2 35M, train-only PCA) | 0.848 | 0.558 | Verified (`run_v7.py`, leakage-free) |
+| DisorderNet v7 (ESM-2 650M) | 0.851 | 0.569 | Verified (`run_v7.py`) |
+| **DisorderNet v8 (multi-scale ensemble)** | **0.857** | 0.578 | Verified (`run_v8_multiscale.py`); homology split 0.853 |
+| DisorderNet GPU (ESM-2 650M + LoRA) | 0.817 | — | Verified Colab A100 (`disordernet_gpu_results_*.json`); ultra targets ≥0.88 |
 
 #### Legacy combined view (reference only)
 
@@ -202,7 +244,9 @@ pytest tests/ -v
 |---------|-----|----------|-------------|
 | v4 | 0.794 | 118 | Multi-scale physicochemical features |
 | v5 | 0.823 | 214 | + ESM-2 8M embeddings (PCA-32) |
-| v6 | 0.831 | 406 | + PCA-48, ESM variance/context features |
+| v6 | 0.831–0.840 | 406 | + PCA-48, ESM variance/context features |
+| v7 | 0.848–0.850 | ~855 | PCA-96 + global pooling, LGB+XGB+HistGBM blend, smoothing, train-only PCA, calibration + conformal |
+| **v8** | **0.857 (0.853 homology)** | ensemble | multi-scale PLM ensemble (35M+150M+650M OOF, equal weights) |
 | GPU (Colab) | 0.817 (0.831 AF-fusion subset) | 1280+phys | ESM-2 650M + LoRA + segment-aware ES + v6 ensemble |
 | GPU SOTA track (`sota` profile) | target ≥0.88–0.90 | — | Transformer head, Dice+EMA, 3-way stack, compact ckpt |
 | GPU ULTRA track (`ultra` profile) | target 0.88–0.92 | — | Rich features, FFN LoRA, v6-pro meta-stack, MC-dropout TTA |
@@ -583,18 +627,46 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 | `colab/inference_fusion.py` | Post-CV AF pLDDT fusion (α-blend; AF2+AF3 combined map) |
 | `colab/downstream_refresh.py` | Refresh CAID/bio/benchmark after fusion updates |
 | `run_v6_mem.py` | CPU version with ESM-2 8M + GBDT ensemble |
+| `run_v7.py` | **v7** optimized CPU model (train-only PCA, LGB+XGB+HistGBM, smoothing, calibration + conformal); `DISORDERNET_SPLIT=homology` and `DISORDERNET_PCA_DIM` supported |
+| `run_v8_multiscale.py` | **v8** multi-scale PLM ensemble over per-backbone OOF (equal weights, leakage-free) |
+| `confidence.py` | Isotonic calibration + ECE + split-conformal prediction sets (shared CPU/GPU) |
+| `colab/confidence_layer.py` | Wires calibration + conformal into the GPU `run_cross_validation` fold results |
+| `predictor.py` / `train_predictor.py` / `predict_disorder.py` | Deployable predictor bundle + train/predict CLIs (FASTA or raw sequence) |
+| `disordernet_paths.py` | Portable, env-overridable data/results paths (`DISORDERNET_HOME`, …) |
 | `run_v5_esm.py` | v5 with PCA-32 ESM features |
-| `extract_esm_embeddings.py` | ESM-2 embedding extraction |
+| `extract_esm_embeddings.py` | ESM-2 embedding extraction (35M) |
+| `experiments/extract_esm_150m.py`, `experiments/extract_esm_650m.py` | Larger-backbone embedding extraction for v8 |
+| `experiments/optimize_cpu.py` | Leakage-free feature/model/smoothing sweep |
 | `fetch_disprot.py` | DisProt database downloader |
-| `generate_figures_v6.py` | Publication figure generator |
+| `generate_figures_v6.py` | Publication figure generator (importable `generate()`) |
 | `results_v6/` | v6 metrics, predictions, figures |
+
+## Testing & CI
+
+The repository has an extensive pytest suite (**330+ tests**) covering the CPU
+pipeline helpers, the confidence layer (calibration + conformal, incl. empirical
+coverage-guarantee checks), the deployable predictor, the multi-scale ensemble,
+fold alignment, homology/CV splits, feature engineering, figure generation, and the
+GPU pipeline modules (with a mock ESM so no download/GPU is needed).
+
+```bash
+pip install -r requirements-dev.txt -r requirements-cpu.txt
+pytest tests/ -v                       # full suite
+pytest tests/ --cov=. --cov-report=term-missing   # with coverage
+```
+
+GitHub Actions (`.github/workflows/test.yml`) runs three jobs on every push/PR:
+
+- **Lint** — `ruff` (critical error rules: syntax + undefined names).
+- **Import smoke** — imports every core module to catch breakage early.
+- **Tests** — full pytest suite with coverage on a **Python 3.11 + 3.12** matrix.
 
 ## Pipeline phases (Colab / Rockfish)
 
 ### Running tests
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements-dev.txt -r requirements-cpu.txt
 pytest tests/ -v
 ```
 
