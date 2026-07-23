@@ -6,7 +6,9 @@ extraction; the GBDT training runs on CPU (`shared` partition) so we never hold 
 GPU idle.
 
 Two Slurm scripts, matched to the lab's conventions (`account=sfried3`, GPU on
-`a100` + `qos_gpu`, CPU on `shared`) and modeled on the group's APBS array job:
+`a100` GPU, CPU on `shared`) and modeled on the group's APBS array job. They do
+**not** hardcode a `--qos` (Slurm uses the partition/account default; add
+`--qos=<name>` to the `sbatch` command only if your cluster requires a specific one):
 
 | Script | Partition | Purpose | Typical time |
 |--------|-----------|---------|--------------|
@@ -139,6 +141,12 @@ export BOLTZ_CACHE=$DISORDERNET_BOLTZ_ROOT/cache
 # ── 1 · Tests (compute node, ~2 min) ──────────────────────────────────────
 srun -A sfried3 -p shared -c 4 --mem=8G -t 00:20:00 \
   bash -lc 'cd ~/DisorderNet && source ~/venvs/disordernet/bin/activate && ruff check . && pytest tests/ -q'
+
+# ── 1b · Prefetch DisProt + ESM weights on the LOGIN node (has internet) ───
+# Downloads once into the shared home cache so the compute-node jobs never need
+# internet (and never re-download). ~2.5 GB for 650M; a few minutes.
+DISORDERNET_HOME=$DISORDERNET_V8_DIR python fetch_disprot.py
+python -c "import esm; [getattr(esm.pretrained,m)() for m in ['esm2_t12_35M_UR50D','esm2_t30_150M_UR50D','esm2_t33_650M_UR50D']]"
 
 # ── 2 · v8 multi-scale ensemble (honest CPU numbers + calibration/conformal) ─
 EMBED=$(sbatch --parsable -A sfried3 rockfish/slurm/v8_extract_embeddings.sbatch)
