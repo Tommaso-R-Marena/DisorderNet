@@ -32,6 +32,9 @@ def _write_ckpt(ckpt: Path, *, auc: float, delta: float, clean: bool = False) ->
     (ckpt / "caid3_eval_report.json").write_text(
         json.dumps({"pooled": {"auc": auc - 0.01}, "n_scored": 100})
     )
+    (ckpt / "caid_leakage_audit.json").write_text(
+        json.dumps({"leak_free": True, "n_id_overlap": 0, "n_homology_hits": 0})
+    )
     (ckpt / "structure_distrust_benchmark.json").write_text(
         json.dumps(
             {
