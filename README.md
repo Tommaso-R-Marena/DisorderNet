@@ -235,6 +235,28 @@ bash rockfish/slurm/submit_publish_3b.sh \
 
 Do **not** start C/D until A’s embed job is **Running or completed** (or you accept separate GPU queue contention). A and C can share the cluster, but one A100 at a time is the courteous default.
 
+#### Full publication campaign (650M → 3B, auto-resume) — preferred paper path
+
+Rockfish GPU max walltime is **72 h** (not 48 h); shared CPU ≈ **36 h** ([ARCH partitions](https://docs.arch.jhu.edu/en/latest/1_Clusters/Rockfish/3_Slurm/Partitions.html)).
+Jobs resume from `cv_progress.json` folds; a login-node watchdog resubmits after TIMEOUT until both packages exist. Details: **[rockfish/PUBLISH_FULL.md](rockfish/PUBLISH_FULL.md)**.
+
+```bash
+cd ~/DisorderNet && git pull && source ~/venvs/disordernet/bin/activate
+export DISORDERNET_MAIL_USER=marenatommaso@gmail.com
+export DISORDERNET_RESULTS=$HOME/disordernet_runs
+bash rockfish/slurm/submit_publish_full.sh
+# optional: --partition-3b ica100
+squeue -u $USER
+python rockfish/publish_campaign.py status --campaign "$(ls -t ~/disordernet_runs/campaign_*.json | head -1)"
+```
+
+**Done when** status is `"done"` and both exist:
+
+```bash
+ls ~/disordernet_runs/publish_650m_*/publish_package/PACKAGE_README.md
+ls ~/disordernet_runs/publish_3b_*/publish_package/PACKAGE_README.md
+```
+
 #### How you know it’s finished
 
 | Signal | Meaning |
@@ -461,6 +483,7 @@ All project documentation lives under `docs/` and `rockfish/README.md`.
 
 | Document | What it covers |
 |----------|----------------|
+| **[rockfish/PUBLISH_FULL.md](rockfish/PUBLISH_FULL.md)** | 650M→3B campaign + watchdog resume, mail, Rockfish 72h limits, operator commands |
 | **[rockfish/README.md](rockfish/README.md)** | Canonical Rockfish/Slurm usage: setup, publish path (`submit_publish_650m` / `submit_publish_3b`), packaging (`--kind` / `--strict`), artifacts, go/no-go, env vars, Boltz/AF3 |
 | **[docs/ROCKFISH_PUBLISH_RUNBOOK.md](docs/ROCKFISH_PUBLISH_RUNBOOK.md)** | Short operator pointer to the publish path + re-package CLI |
 | **[docs/METHODS_CHECKLIST.md](docs/METHODS_CHECKLIST.md)** | Preprint freeze checklist (credibility floor, labeled distrust, contamination, atlas, non-claims) |

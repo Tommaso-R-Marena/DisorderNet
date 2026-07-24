@@ -1319,9 +1319,27 @@ def run_pipeline(args) -> int:
             )
 
     elif args.stage == "pipeline":
-        fold_results, cv_summary = stage_cv(
-            args, cfg, proteins, model, converter, disprot_meta,
-        )
+        # Fold-level resume already lives inside stage_cv. If all folds finished
+        # before a walltime kill, skip re-training and continue post-CV stages.
+        progress_path = os.path.join(cfg.checkpoint_dir, "cv_progress.json")
+        summary_path = os.path.join(cfg.checkpoint_dir, "cv_summary.json")
+        n_done = 0
+        if os.path.isfile(progress_path):
+            try:
+                with open(progress_path) as f:
+                    n_done = len(json.load(f).get("fold_results", []))
+            except Exception:
+                n_done = 0
+        if n_done >= int(getattr(cfg, "n_folds", 5)) and os.path.isfile(summary_path):
+            print(
+                f"CV already complete ({n_done} folds) — resuming pipeline from stack "
+                f"({cfg.checkpoint_dir})"
+            )
+            fold_results, cv_summary = _load_fold_results(cfg.checkpoint_dir)
+        else:
+            fold_results, cv_summary = stage_cv(
+                args, cfg, proteins, model, converter, disprot_meta,
+            )
         fold_results, cv_summary = stage_stack(args, cfg, proteins, fold_results, cv_summary)
         stage_postprocess(args, cfg, proteins, fold_results, model, converter)
         stage_eval(args, cfg, proteins, fold_results, cv_summary)

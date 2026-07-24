@@ -26,7 +26,12 @@ import lightgbm as lgb
 import xgboost as xgb
 
 from run_v6_mem import phys, wavg, wvar
-from confidence import fit_calibrator, apply_calibrator, conformal_quantile, conformal_sets
+from confidence import (
+    annotate_confidence,
+    apply_calibrator,
+    conformal_quantile,
+    fit_calibrator,
+)
 
 SEED = 42
 PCA_DIM = 96
@@ -150,12 +155,14 @@ def predict_from_embeddings(bundle: dict, phys_feats: np.ndarray, emb: np.ndarra
     raw = _blend(bundle["lgb"], bundle["xgb"], bundle["hgb"], X)
     smoothed = _smooth(raw, bundle.get("smooth_window", SMOOTH_WINDOW))
     calibrated = apply_calibrator(bundle["isotonic"], smoothed)
-    decision = conformal_sets(calibrated, bundle["conformal_q"])["decision"]
+    ann = annotate_confidence(calibrated, bundle["conformal_q"])
     return {
         "p_raw": raw.astype(np.float32),
         "p_smoothed": smoothed.astype(np.float32),
-        "p_calibrated": calibrated.astype(np.float32),
-        "decision": decision,
+        "p_calibrated": ann["p_calibrated"],
+        "decision": ann["decision"],
+        "y_hat_forced": ann["y_hat_forced"],
+        "confidence_pct": ann["confidence_pct"],
     }
 
 
