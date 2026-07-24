@@ -13,25 +13,24 @@ export DISORDERNET_ACCOUNT=sfried3
 export DISORDERNET_GPU_ACCOUNT=$(sacctmgr -nP show assoc user=$USER format=account,qos \
   | awk -F'|' '/qos_gpu/{print $1; exit}')
 export DISORDERNET_GPU_QOS=qos_gpu
+export DISORDERNET_MAIL_USER=marenatommaso@gmail.com
 
-# Script 1 — 650M
+# Preferred: full 650M→3B campaign with TIMEOUT auto-resume (see rockfish/PUBLISH_FULL.md)
+bash rockfish/slurm/submit_publish_full.sh
+# optional: --partition-3b ica100
+
+# Or one-shot bundles:
 bash rockfish/slurm/submit_publish_650m.sh \
   --account "$DISORDERNET_GPU_ACCOUNT" --qos qos_gpu
-
-# Script 2 — 3B
 bash rockfish/slurm/submit_publish_3b.sh \
-  --account "$DISORDERNET_GPU_ACCOUNT" --qos qos_gpu
-
-# CLI equivalents
-python rockfish/publish_submit.py submit-650m \
-  --account "$DISORDERNET_GPU_ACCOUNT" --qos qos_gpu
-python rockfish/publish_submit.py submit-3b \
   --account "$DISORDERNET_GPU_ACCOUNT" --qos qos_gpu
 ```
 
 **v8 first (cheaper):** `bash rockfish/slurm/submit_v8.sh` (always sets `--qos=qos_gpu`).
 
-**Done when:** `squeue -u $USER` no longer lists the chain, `sacct` shows `COMPLETED|0:0` for the package job, and `~/disordernet_runs/publish_*/publish_package/PACKAGE_README.md` exists.
+**Rockfish limits:** GPU a100 = **72 h** max (not 48 h); shared ≈ 36 h.
+
+**Done when:** campaign status `done`, or `squeue` empty + both `publish_*/publish_package/PACKAGE_README.md` exist.
 
 Related: [`METHODS_CHECKLIST.md`](METHODS_CHECKLIST.md),
 [`STRUCTURE_DISTRUST_ATLAS.md`](STRUCTURE_DISTRUST_ATLAS.md),
