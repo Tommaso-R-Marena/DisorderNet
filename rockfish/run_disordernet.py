@@ -57,11 +57,42 @@ def _resolve_workdir(path: Optional[str]) -> str:
     return os.getcwd()
 
 
-def _load_proteins(data_cache: str, cfg) -> tuple[list, dict]:
+def _load_proteins(data_cache: str, cfg, args=None) -> tuple[list, dict]:
     from colab.disordernet_gpu import fetch_disprot, get_disprot_cache_meta, process_disprot
 
     entries = fetch_disprot(cache_path=data_cache)
     proteins, disprot_meta = process_disprot(entries, cfg)
+
+    # Leak-free CAID training: drop DisProt proteins that ID/homology-hit CAID refs.
+    if args is not None and getattr(args, "caid_leak_free_train", False):
+        from colab.caid_challenge import resolve_caid3_references
+        from colab.caid_leakage import (
+            audit_train_vs_caid,
+            filter_train_proteins,
+            load_caid_refs_for_audit,
+            save_leakage_audit,
+        )
+
+        ckpt = cfg.checkpoint_dir
+        os.makedirs(ckpt, exist_ok=True)
+        refs = resolve_caid3_references(ckpt, getattr(args, "caid3_reference", None))
+        caid_prots = load_caid_refs_for_audit(list(refs.values()))
+        if caid_prots:
+            audit = audit_train_vs_caid(
+                proteins,
+                caid_prots,
+                min_identity=float(getattr(args, "caid_leak_identity", 0.40)),
+            )
+            proteins, filt = filter_train_proteins(proteins, audit)
+            audit["filter"] = filt
+            audit["applied_before_cv"] = True
+            save_leakage_audit(audit, os.path.join(ckpt, "caid_leakage_audit.json"))
+            disprot_meta = dict(disprot_meta or {})
+            disprot_meta["caid_leak_free_train"] = filt
+            print(
+                f"  CAID leak-free train: removed {filt['n_removed']} / {filt['n_before']} "
+                f"proteins (identity≥{getattr(args, 'caid_leak_identity', 0.40)})"
+            )
     return proteins, disprot_meta
 
 
@@ -89,6 +120,11 @@ def _build_cfg(args, workdir: str):
         overrides["use_hallucination_weighting"] = False
     if getattr(args, "no_plddt_features", False):
         overrides["use_plddt_features"] = False
+    # Adaptive OOM retries set these env vars from the publish campaign.
+    if os.environ.get("DISORDERNET_BATCH_SIZE"):
+        overrides["batch_size"] = max(1, int(os.environ["DISORDERNET_BATCH_SIZE"]))
+    if os.environ.get("DISORDERNET_ACCUM_STEPS"):
+        overrides["accum_steps"] = max(1, int(os.environ["DISORDERNET_ACCUM_STEPS"]))
     cfg = TrainConfig.from_profile(args.profile, **overrides)
     cfg = setup_environment(cfg)
     cfg = apply_backbone_to_config(cfg, args.backbone)
@@ -1150,49 +1186,36 @@ def stage_multi_seed_blend(args, cfg, proteins) -> tuple[list, dict]:
 
 
 def stage_caid3_eval(args, cfg, proteins, fold_results, model, converter) -> dict:
-    """Score fold-soup model on CAID3 Disorder-PDB reference (fair vs ESMDisPred)."""
-    from colab.caid3_eval import (
-        evaluate_caid_predictions,
-        export_caid_predictions_dir,
-        fetch_caid3_reference,
-        parse_caid_reference_fasta,
-        print_caid3_eval_report,
-        save_caid3_eval_report,
-    )
+    """CAID3 (+ optional CAID4) suite with leakage audit and efficiency stats."""
+    from colab.caid_challenge import run_caid_challenge_suite
     from colab.predict_batch import predict_fasta_batch
 
-    ref_path = args.caid3_reference or fetch_caid3_reference(
-        os.path.join(cfg.checkpoint_dir, "caid3_disorder_pdb.fasta"),
-    )
-    ref_proteins = parse_caid_reference_fasta(ref_path)
+    def preds_factory(fasta_path: str):
+        preds_by_id = predict_fasta_batch(
+            fasta_path=fasta_path,
+            esm_backbone=model,
+            batch_converter=converter,
+            cfg=cfg,
+            checkpoint_dir=cfg.checkpoint_dir,
+            use_tta=not args.skip_tta,
+            n_folds=cfg.n_folds,
+            return_function=False,
+        )
+        if isinstance(preds_by_id, tuple):
+            preds_by_id = preds_by_id[0]
+        return preds_by_id
 
-    # Write temp FASTA for predict_batch
-    tmp_fasta = os.path.join(cfg.checkpoint_dir, "_caid3_query.fasta")
-    with open(tmp_fasta, "w") as f:
-        for p in ref_proteins:
-            f.write(f">{p['id']}\n{p['sequence']}\n")
-
-    preds_by_id = predict_fasta_batch(
-        fasta_path=tmp_fasta,
-        esm_backbone=model,
-        batch_converter=converter,
-        cfg=cfg,
+    report = run_caid_challenge_suite(
         checkpoint_dir=cfg.checkpoint_dir,
-        use_tta=not args.skip_tta,
-        n_folds=cfg.n_folds,
-        return_function=False,
+        train_proteins=proteins,
+        preds_factory=preds_factory,
+        caid3_reference=getattr(args, "caid3_reference", None),
+        caid4_targets=getattr(args, "caid4_targets", None),
+        leak_free_min_identity=float(getattr(args, "caid_leak_identity", 0.40)),
+        skip_tta=bool(getattr(args, "skip_tta", False)),
     )
-    if isinstance(preds_by_id, tuple):
-        preds_by_id = preds_by_id[0]
 
-    out_dir = os.path.join(cfg.checkpoint_dir, "caid3_submission")
-    export_caid_predictions_dir(ref_proteins, preds_by_id, out_dir)
-
-    report = evaluate_caid_predictions(ref_proteins, preds_by_id)
-    print_caid3_eval_report(report)
-    save_caid3_eval_report(report, os.path.join(cfg.checkpoint_dir, "caid3_eval_report.json"))
-
-    # Eval typically runs before CAID3; patch the distrust benchmark in-place.
+    # Patch distrust benchmark with CAID3 credibility floor when available.
     try:
         from colab.hallucination_benchmark import finalize_distrust_benchmark_with_caid3
 
@@ -1205,6 +1228,7 @@ def stage_caid3_eval(args, cfg, proteins, fold_results, model, converter) -> dic
             print("  Attached CAID3 credibility floor → structure_distrust_benchmark.json")
     except Exception as exc:
         print(f"  Warning: could not finalize distrust benchmark with CAID3: {exc}")
+    print(f"  CAID suite report: {report.get('path')}")
     return report
 
 
@@ -1216,7 +1240,7 @@ def run_pipeline(args) -> int:
     print(f"Stage: {args.stage}  profile={args.profile}  backbone={args.backbone}")
 
     cfg = _build_cfg(args, workdir)
-    proteins, disprot_meta = _load_proteins(cfg.data_cache, cfg)
+    proteins, disprot_meta = _load_proteins(cfg.data_cache, cfg, args=args)
     print(f"Proteins: {len(proteins):,}  residues: {sum(p['length'] for p in proteins):,}")
 
     needs_esm = args.stage in (
@@ -1346,7 +1370,7 @@ def run_pipeline(args) -> int:
         # Default product export: IDR biology layer (disable with --no-idr-layer)
         if getattr(args, "run_idr_layer", True) and not getattr(args, "no_idr_layer", False):
             stage_idr_layer(args, cfg, proteins, fold_results)
-        if args.run_caid3_eval:
+        if args.run_caid3_eval or getattr(args, "run_caid_challenge", False) or os.environ.get("RUN_CAID3", "0") == "1":
             stage_caid3_eval(args, cfg, proteins, fold_results, model, converter)
             # Defense in depth: re-finalize after CAID3 even if stage helper skipped.
             try:
@@ -1432,8 +1456,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--soup-mode", default="held_out", choices=["held_out", "full_soup"])
 
-    # Eval / CAID3
-    p.add_argument("--run-caid3-eval", action="store_true", help="pipeline: also run CAID3 benchmark")
+    # Eval / CAID3 / CAID4
+    p.add_argument("--run-caid3-eval", action="store_true", help="pipeline: run CAID3(+CAID4) challenge suite")
+    p.add_argument(
+        "--run-caid-challenge",
+        action="store_true",
+        help="alias for full CAID3+CAID4 suite (leakage audit + efficiency)",
+    )
+    p.add_argument(
+        "--caid-leak-free-train",
+        action="store_true",
+        help="exclude DisProt proteins that ID/homology-hit CAID refs before CV",
+    )
+    p.add_argument(
+        "--caid-leak-identity",
+        type=float,
+        default=0.40,
+        help="min SequenceMatcher identity to flag train↔CAID homology",
+    )
+    p.add_argument("--caid4-targets", default=None, help="CAID4 blind target FASTA (sequences)")
     p.add_argument(
         "--run-idr-layer", action="store_true", default=True,
         help="pipeline: export IDR biology layer (default on)",

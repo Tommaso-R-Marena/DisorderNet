@@ -112,6 +112,18 @@ disordernet_slurm_run() {
   if [[ "${RUN_CAID3:-0}" == "1" ]]; then
     EXTRA_ARGS+=(--run-caid3-eval)
   fi
+  if [[ "${RUN_CAID_CHALLENGE:-0}" == "1" ]]; then
+    EXTRA_ARGS+=(--run-caid-challenge)
+  fi
+  if [[ "${CAID_LEAK_FREE_TRAIN:-1}" == "1" ]]; then
+    EXTRA_ARGS+=(--caid-leak-free-train)
+  fi
+  if [[ -n "${CAID4_TARGETS:-}" ]]; then
+    EXTRA_ARGS+=(--caid4-targets "${CAID4_TARGETS}")
+  fi
+  if [[ -n "${CAID3_REFERENCE:-}" ]]; then
+    EXTRA_ARGS+=(--caid3-reference "${CAID3_REFERENCE}")
+  fi
   if [[ "${RUN_NO_HALLUC_WEIGHT:-0}" == "1" ]]; then
     EXTRA_ARGS+=(--no-hallucination-weighting)
   fi

@@ -31,6 +31,8 @@ ARTIFACT_FILES: tuple[str, ...] = (
     "gpu_v6_ensemble_report.json",
     "eval_summary.json",
     "caid3_eval_report.json",
+    "caid_leakage_audit.json",
+    "caid_challenge_report.json",
     "phase3_integrated_report.json",
     "statistical_validation_report.json",
     "af_rescue_report.json",
@@ -70,6 +72,8 @@ ARTIFACT_GLOBS: tuple[str, ...] = ARTIFACT_REPORT_GLOBS + ARTIFACT_WEIGHT_GLOBS
 REQUIRED_ARTIFACTS_STRICT: tuple[str, ...] = (
     "sota_postprocess_report.json",
     "structure_distrust_benchmark.json",
+    "caid3_eval_report.json",
+    "caid_leakage_audit.json",
 )
 
 # Surfaced in package run summaries (presence flags; not all required)
@@ -77,6 +81,8 @@ ARTIFACTS_PRESENT_KEYS: tuple[str, ...] = (
     "sota_postprocess_report.json",
     "structure_distrust_benchmark.json",
     "caid3_eval_report.json",
+    "caid_leakage_audit.json",
+    "caid_challenge_report.json",
     "structure_distrust_atlas_report.json",
 )
 
@@ -147,18 +153,21 @@ def env_defaults() -> dict[str, str]:
             "DISORDERNET_VENV", str(Path.home() / "venvs" / "disordernet")
         ),
         "DISORDERNET_RESULTS": str(default_results_root()),
-        "DISORDERNET_PARTITION": os.environ.get("DISORDERNET_PARTITION", "a100"),
+        "DISORDERNET_PARTITION": os.environ.get("DISORDERNET_PARTITION", "a100") or "a100",
         "DISORDERNET_CPU_ACCOUNT": os.environ.get(
             "DISORDERNET_CPU_ACCOUNT",
             os.environ.get("DISORDERNET_ACCOUNT", "sfried3"),
         ),
         "STAGE": "pipeline",
         "RUN_CAID3": os.environ.get("RUN_CAID3", "1"),
+        "RUN_CAID_CHALLENGE": os.environ.get("RUN_CAID_CHALLENGE", "1"),
+        "CAID_LEAK_FREE_TRAIN": os.environ.get("CAID_LEAK_FREE_TRAIN", "1"),
         "PREFETCH_AF": os.environ.get("PREFETCH_AF", "1"),
         "BOLTZ_MODE": os.environ.get("BOLTZ_MODE", "ingest"),
         "STRUCTURE_BACKEND": os.environ.get("STRUCTURE_BACKEND", "boltz"),
         "SEED": os.environ.get("SEED", "42"),
         "NUM_WORKERS": os.environ.get("NUM_WORKERS", "4"),
+        "DISORDERNET_BATCH_SCALE": os.environ.get("DISORDERNET_BATCH_SCALE", "1"),
     }
 
 
@@ -197,6 +206,14 @@ def sbatch_export_keys(extra: Sequence[str] = ()) -> str:
         "CHECKPOINT_SUBDIR",
         "STAGE",
         "RUN_CAID3",
+        "RUN_CAID_CHALLENGE",
+        "CAID_LEAK_FREE_TRAIN",
+        "CAID4_TARGETS",
+        "CAID3_REFERENCE",
+        "DISORDERNET_BATCH_SCALE",
+        "DISORDERNET_BATCH_SIZE",
+        "DISORDERNET_ACCUM_STEPS",
+        "DISORDERNET_PARTITION",
         "PREFETCH_AF",
         "BOLTZ_MODE",
         "STRUCTURE_BACKEND",
