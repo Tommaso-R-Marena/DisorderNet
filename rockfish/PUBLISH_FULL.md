@@ -45,6 +45,21 @@ No command change required — same `submit_publish_full.sh`.
 
 ---
 
+## If a job emails FAILED with Run time 00:00:00
+
+That is almost always a **Slurm start abort** (not training). Diagnose:
+
+```bash
+sacct -j <JOBID> --format=JobID,State,ExitCode,DerivedExitCode,Reason,Elapsed -P
+ls -la ~/DisorderNet/logs/*<JOBID>*
+cat ~/DisorderNet/logs/*<JOBID>*.err
+cat ~/DisorderNet/logs/publish_watchdog_*.out | tail -50
+```
+
+Common causes we harden against: requesting full `192G` on 192GB nodes, relative `logs/` path when cwd ≠ repo, exporting unset optional env vars. After `git pull`, resubmit with `submit_publish_full.sh` (cancel the old campaign jobs first).
+
+---
+
 ## Fresh shell — exact commands
 
 ```bash

@@ -194,6 +194,11 @@ def mirror_glob_patterns() -> list[str]:
 
 
 def sbatch_export_keys(extra: Sequence[str] = ()) -> str:
+    """Build --export= list. Optional keys are included only when set in the env.
+
+    Listing unset names in --export can clear variables or confuse bash ``set -u``
+    consumers; keep the required publish keys, gate the rest.
+    """
     keys = [
         "ALL",
         "DISORDERNET_ACCOUNT",
@@ -208,12 +213,6 @@ def sbatch_export_keys(extra: Sequence[str] = ()) -> str:
         "RUN_CAID3",
         "RUN_CAID_CHALLENGE",
         "CAID_LEAK_FREE_TRAIN",
-        "CAID4_TARGETS",
-        "CAID3_REFERENCE",
-        "DISORDERNET_BATCH_SCALE",
-        "DISORDERNET_BATCH_SIZE",
-        "DISORDERNET_ACCUM_STEPS",
-        "DISORDERNET_PARTITION",
         "PREFETCH_AF",
         "BOLTZ_MODE",
         "STRUCTURE_BACKEND",
@@ -228,10 +227,20 @@ def sbatch_export_keys(extra: Sequence[str] = ()) -> str:
         "NUM_WORKERS",
         "PACKAGE_STRICT",
     ]
-    if os.environ.get("DISORDERNET_BOLTZ_ROOT"):
-        keys.append("DISORDERNET_BOLTZ_ROOT")
-    if os.environ.get("BOLTZ_CACHE"):
-        keys.append("BOLTZ_CACHE")
+    optional = (
+        "CAID4_TARGETS",
+        "CAID3_REFERENCE",
+        "DISORDERNET_BATCH_SCALE",
+        "DISORDERNET_BATCH_SIZE",
+        "DISORDERNET_ACCUM_STEPS",
+        "DISORDERNET_PARTITION",
+        "DISORDERNET_BOLTZ_ROOT",
+        "BOLTZ_CACHE",
+        "DISORDERNET_MAIL_USER",
+    )
+    for k in optional:
+        if os.environ.get(k):
+            keys.append(k)
     keys.extend(extra)
     seen: set[str] = set()
     out: list[str] = []
@@ -365,14 +374,22 @@ def submit_sbatch(
     dry_run: bool = False,
     extra_args: Sequence[str] = (),
     env: Optional[dict[str, str]] = None,
+    mem: Optional[str] = None,
 ) -> str:
     """
     Submit a Slurm script. Returns job id (or DRY_RUN placeholder).
     Raises RuntimeError / CalledProcessError on failure.
+
+    ``mem`` overrides ``#SBATCH --mem`` when set (use e.g. ``180G`` for a100 GPU
+    jobs — full 192G often aborts at start). Leave None for CPU package jobs.
     """
     script = Path(script)
     if not script.is_file() and not dry_run:
         raise RuntimeError(f"sbatch script not found: {script}")
+
+    repo = Path(os.environ.get("DISORDERNET_REPO", str(REPO_ROOT))).resolve()
+    logs = repo / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
 
     cmd = [
         "sbatch",
@@ -380,7 +397,12 @@ def submit_sbatch(
         f"--account={account}",
         f"--job-name={job_name}",
         f"--export={export}",
+        f"--chdir={repo}",
+        f"--output={logs}/{job_name}_%j.out",
+        f"--error={logs}/{job_name}_%j.err",
     ]
+    if mem:
+        cmd.append(f"--mem={mem}")
     if partition:
         cmd.append(f"--partition={partition}")
     if qos:
@@ -388,7 +410,7 @@ def submit_sbatch(
     if dependency:
         cmd.append(f"--dependency={dependency}")
     cmd.extend(extra_args)
-    cmd.append(str(script))
+    cmd.append(str(script.resolve() if script.is_file() else script))
 
     if dry_run:
         print("[dry-run]", " ".join(cmd))
@@ -402,9 +424,10 @@ def submit_sbatch(
     run_env = os.environ.copy()
     if env:
         run_env.update({k: str(v) for k, v in env.items() if v is not None})
+    run_env.setdefault("DISORDERNET_REPO", str(repo))
 
     result = subprocess.run(
-        cmd, check=True, capture_output=True, text=True, env=run_env,
+        cmd, check=True, capture_output=True, text=True, env=run_env, cwd=str(repo),
     )
     jid = (result.stdout or "").strip().split(";")[0].strip()
     if not jid:
