@@ -119,6 +119,7 @@ def _submit_gpu_chain(
             dry_run=dry_run,
             env=job_env,
             extra_args=mail_args,
+            mem="180G",
         )
         job_ids[label] = jid
         print(

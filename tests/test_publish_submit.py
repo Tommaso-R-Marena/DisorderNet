@@ -44,12 +44,41 @@ class TestUtils:
         except ValueError:
             pass
 
-    def test_export_keys_include_all(self):
+    def test_export_keys_include_all(self, monkeypatch):
+        monkeypatch.delenv("CAID4_TARGETS", raising=False)
+        monkeypatch.delenv("DISORDERNET_BATCH_SIZE", raising=False)
         keys = sbatch_export_keys()
         assert keys.startswith("ALL,")
         assert "PROFILE" in keys
         assert "BUNDLE_KIND" in keys
         assert "PACKAGE_STRICT" in keys
+        assert "CAID4_TARGETS" not in keys  # optional — only when set
+
+    def test_export_keys_optional_when_set(self, monkeypatch):
+        monkeypatch.setenv("CAID4_TARGETS", "/tmp/caid4.fasta")
+        keys = sbatch_export_keys()
+        assert "CAID4_TARGETS" in keys
+
+    def test_submit_sbatch_dry_run_uses_safe_mem_and_chdir(self, tmp_path, monkeypatch, capsys):
+        from rockfish.utils import submit_sbatch, PHASE_SBATCH
+
+        monkeypatch.setenv("DISORDERNET_REPO", str(tmp_path))
+        (tmp_path / "logs").mkdir()
+        jid = submit_sbatch(
+            PHASE_SBATCH,
+            account="sfried3_gpu",
+            job_name="dn-test",
+            export="ALL",
+            partition="a100",
+            qos="qos_gpu",
+            dry_run=True,
+            mem="180G",
+        )
+        assert jid.startswith("DRYRUN_")
+        out = capsys.readouterr().out
+        assert "--mem=180G" in out
+        assert f"--chdir={tmp_path.resolve()}" in out
+        assert "--output=" in out
 
     def test_default_publish_root(self, monkeypatch, tmp_path):
         monkeypatch.setenv("DISORDERNET_RESULTS", str(tmp_path))

@@ -5,9 +5,10 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=12
 #SBATCH --gres=gpu:1
-#SBATCH --mem=192G
+#SBATCH --mem=180G
 #SBATCH --time=03-00:00:00
-#SBATCH --account=sfried3
+#SBATCH --account=sfried3_gpu
+#SBATCH --qos=qos_gpu
 #SBATCH --export=ALL
 #SBATCH --output=logs/dn-phase_%j.out
 #SBATCH --error=logs/dn-phase_%j.err
@@ -16,6 +17,10 @@
 # Generic GPU pipeline phase. Configure via env (PROFILE, BACKBONE, STAGE,
 # DISORDERNET_WORKDIR, CHECKPOINT_SUBDIR, RUN_CAID3, clean flags, …).
 # Prefer: bash rockfish/slurm/submit_publish_650m.sh | submit_publish_3b.sh
+#
+# NOTE: --mem=180G (not 192G) leaves headroom on 192GB a100 nodes; requesting the
+# full node RAM often fails at start with Run time 00:00:00. CLI --account/--qos
+# from publish_submit override the defaults above when needed.
 
 : "${PROFILE:=ultra}"
 : "${BACKBONE:=650M}"
