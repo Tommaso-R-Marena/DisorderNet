@@ -238,14 +238,15 @@ Do **not** start C/D until A’s embed job is **Running or completed** (or you a
 #### Full publication campaign (650M → 3B, auto-resume) — preferred paper path
 
 Rockfish GPU max walltime is **72 h** (not 48 h); shared CPU ≈ **36 h** ([ARCH partitions](https://docs.arch.jhu.edu/en/latest/1_Clusters/Rockfish/3_Slurm/Partitions.html)).
-Jobs resume from `cv_progress.json` folds; a login-node watchdog resubmits after TIMEOUT until both packages exist. Details: **[rockfish/PUBLISH_FULL.md](rockfish/PUBLISH_FULL.md)**.
+Jobs resume from `cv_progress.json` folds; a login-node watchdog resubmits after TIMEOUT until both packages exist, and **auto-escalates OOM** (half batch → `ica100` → smaller batch).  
+CAID rigor: leak-free train filter + CAID3 scoring (+ CAID4 blind submission if targets present). Details: **[rockfish/PUBLISH_FULL.md](rockfish/PUBLISH_FULL.md)**.
 
 ```bash
 cd ~/DisorderNet && git pull && source ~/venvs/disordernet/bin/activate
 export DISORDERNET_MAIL_USER=marenatommaso@gmail.com
 export DISORDERNET_RESULTS=$HOME/disordernet_runs
+# optional: export CAID4_TARGETS=$HOME/DisorderNet/data/caid4_targets.fasta
 bash rockfish/slurm/submit_publish_full.sh
-# optional: --partition-3b ica100
 squeue -u $USER
 python rockfish/publish_campaign.py status --campaign "$(ls -t ~/disordernet_runs/campaign_*.json | head -1)"
 ```
