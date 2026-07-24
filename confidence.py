@@ -121,7 +121,6 @@ def conformal_report(prob, true, q) -> dict:
     decision = sets["decision"]
 
     covered = np.where(true == 1, has_disorder, has_order)
-    confident = decision != -1  # singleton or empty; abstain excluded
     singleton = np.isin(decision, (0, 1))
 
     out = {
@@ -134,10 +133,55 @@ def conformal_report(prob, true, q) -> dict:
     if singleton.any():
         pred = decision[singleton]
         out["selective_accuracy"] = float((pred == true[singleton]).mean())
-        # class-conditional coverage
+    forced = forced_prediction(prob)
+    out["forced_accuracy"] = float((forced["y_hat"] == true).mean())
+    out["mean_confidence_pct"] = float(forced["confidence_pct"].mean())
     for c, name in ((1, "disorder"), (0, "order")):
         m = true == c
         if m.any():
             cov_c = (has_disorder[m] if c == 1 else has_order[m]).mean()
             out[f"coverage_{name}"] = float(cov_c)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Forced / always-on confidence (honest best-guess + %)
+# ---------------------------------------------------------------------------
+def forced_prediction(prob) -> dict:
+    """Always emit a best-guess label + percent confidence (no abstain).
+
+    This does **not** weaken the conformal guarantee: the selective ``decision``
+    gate remains available separately. Forced mode answers "if I must call every
+    residue, what is my best calibrated guess and how sure am I?"
+
+    ``confidence_pct`` is ``100 * max(p, 1-p)`` on the calibrated probability —
+    so 50% means coin-flip and 95% means the calibrated model is very sure.
+    """
+    prob = np.asarray(prob, dtype=np.float64)
+    y_hat = (prob >= 0.5).astype(np.int64)
+    conf = np.maximum(prob, 1.0 - prob)
+    return {
+        "y_hat": y_hat,
+        "y_hat_labels": np.where(y_hat == 1, "disorder", "order"),
+        "confidence_pct": (100.0 * conf).astype(np.float32),
+        "p_calibrated": prob.astype(np.float32),
+    }
+
+
+def annotate_confidence(prob, q) -> dict:
+    """Combine selective conformal decisions with forced best-guess confidence."""
+    prob = np.asarray(prob, dtype=np.float64)
+    sets = conformal_sets(prob, q)
+    forced = forced_prediction(prob)
+    decision = sets["decision"]
+    # On confident singleton calls, confidence_pct still reflects calibrated mass
+    # on the predicted class; on abstain, it is the best-guess margin.
+    return {
+        "p_calibrated": forced["p_calibrated"],
+        "decision": decision,
+        "has_order": sets["has_order"],
+        "has_disorder": sets["has_disorder"],
+        "y_hat_forced": forced["y_hat"],
+        "confidence_pct": forced["confidence_pct"],
+        "mode": "selective+forced",
+    }

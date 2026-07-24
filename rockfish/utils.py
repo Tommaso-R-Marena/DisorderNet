@@ -317,6 +317,21 @@ def ensure_bundle_dirs(root: Path, specs: Sequence[RunSpec]) -> None:
     (root / "publish_package").mkdir(parents=True, exist_ok=True)
 
 
+def mail_sbatch_args(mail_user: Optional[str] = None) -> list[str]:
+    """Slurm mail flags. Default notify address for publish campaigns."""
+    user = (
+        mail_user
+        or os.environ.get("DISORDERNET_MAIL_USER")
+        or "marenatommaso@gmail.com"
+    ).strip()
+    if not user or user.lower() in {"none", "off", "0"}:
+        return []
+    return [
+        f"--mail-user={user}",
+        "--mail-type=END,FAIL,INVALID_DEPEND,TIME_LIMIT,REQUEUE",
+    ]
+
+
 def which_sbatch() -> Optional[str]:
     return shutil.which("sbatch")
 
