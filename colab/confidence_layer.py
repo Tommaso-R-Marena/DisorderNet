@@ -23,12 +23,13 @@ from typing import Optional
 import numpy as np
 
 from confidence import (
+    annotate_confidence,
     apply_calibrator,
     conformal_quantile,
     conformal_report,
-    conformal_sets,
     expected_calibration_error,
     fit_calibrator,
+    forced_prediction,
 )
 from sklearn.metrics import roc_auc_score
 
@@ -62,13 +63,17 @@ def add_confidence_to_fold_results(fold_results: list, alpha: float = 0.10,
                                alpha=alpha, class_conditional=class_conditional)
         fr = fold_results[k]
         cp = apply_calibrator(iso, np.asarray(fr["val_probs"], dtype=np.float64))
-        fr["val_probs_calibrated"] = cp
-        fr["val_conformal_decision"] = conformal_sets(cp, q)["decision"]
+        ann = annotate_confidence(cp, q)
+        fr["val_probs_calibrated"] = ann["p_calibrated"]
+        fr["val_conformal_decision"] = ann["decision"]
+        fr["val_y_hat_forced"] = ann["y_hat_forced"]
+        fr["val_confidence_pct"] = ann["confidence_pct"]
 
     y = _pool(fold_results, "val_labels").astype(np.int64)
     p_raw = _pool(fold_results, "val_probs")
     p_cal = _pool(fold_results, "val_probs_calibrated")
     decision = np.concatenate([np.asarray(fr["val_conformal_decision"]) for fr in fold_results])
+    forced = forced_prediction(p_cal)
 
     rep = conformal_report(p_cal, y, conformal_quantile(p_cal, y, alpha=alpha,
                                                         class_conditional=class_conditional))
@@ -87,6 +92,8 @@ def add_confidence_to_fold_results(fold_results: list, alpha: float = 0.10,
         "selective_accuracy": (float((decision[np.isin(decision, (0, 1))] ==
                                       y[np.isin(decision, (0, 1))]).mean())
                                if np.isin(decision, (0, 1)).any() else float("nan")),
+        "forced_accuracy": float((forced["y_hat"] == y).mean()),
+        "mean_confidence_pct": float(forced["confidence_pct"].mean()),
         "pooled_report": rep,
     }
 
@@ -104,9 +111,11 @@ def fit_confidence(fold_results: list, alpha: float = 0.10, class_conditional: b
 def apply_confidence(confidence: dict, probs) -> dict:
     """Apply a fitted confidence bundle to raw model probabilities for a new protein."""
     cp = apply_calibrator(confidence["calibrator"], np.asarray(probs, dtype=np.float64))
-    dec = conformal_sets(cp, confidence["conformal_q"])["decision"]
+    ann = annotate_confidence(cp, confidence["conformal_q"])
     return {
-        "p_calibrated": cp.astype(np.float32),
-        "decision": dec,
-        "decision_labels": [DECISION_LABEL[int(d)] for d in dec],
+        "p_calibrated": ann["p_calibrated"],
+        "decision": ann["decision"],
+        "decision_labels": [DECISION_LABEL[int(d)] for d in ann["decision"]],
+        "y_hat_forced": ann["y_hat_forced"],
+        "confidence_pct": ann["confidence_pct"],
     }
