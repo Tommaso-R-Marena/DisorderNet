@@ -41,10 +41,20 @@ from rockfish.utils import (  # noqa: E402
 ensure_repo_on_path()
 
 DEFAULT_MAIL = "marenatommaso@gmail.com"
-CAMPAIGN_VERSION = 1
+CAMPAIGN_VERSION = 2
 TERMINAL_OK = {"COMPLETED"}
 TERMINAL_BAD = {"FAILED", "TIMEOUT", "CANCELLED", "NODE_FAIL", "OUT_OF_MEMORY", "BOOT_FAIL"}
 ACTIVE = {"PENDING", "RUNNING", "CONFIGURING", "COMPLETING", "SUSPENDED"}
+
+# Dynamic OOM / resource escalation: batch scale → ica100 → smaller batch.
+# Applied automatically on OUT_OF_MEMORY or CUDA OOM log signatures.
+OOM_ESCALATION: list[dict] = [
+    {"batch_scale": 1.0, "partition": None, "label": "baseline"},
+    {"batch_scale": 0.5, "partition": None, "label": "half_batch"},
+    {"batch_scale": 0.5, "partition": "ica100", "label": "ica100_half_batch"},
+    {"batch_scale": 0.25, "partition": "ica100", "label": "ica100_quarter_batch"},
+    {"batch_scale": 0.125, "partition": "ica100", "label": "ica100_min_batch"},
+]
 
 
 @dataclass
@@ -246,8 +256,78 @@ def load_campaign(path: Path) -> dict:
     return json.loads(path.read_text())
 
 
+def logs_suggest_oom(repo_logs: Path, job_ids: list[str]) -> bool:
+    """Scan Slurm .err/.out for CUDA OOM signatures."""
+    needles = (
+        "out of memory",
+        "cuda out of memory",
+        "cublas_status_alloc_failed",
+        "cudnn_status_alloc_failed",
+        "oom-kill",
+    )
+    for jid in job_ids:
+        for pattern in (f"*{jid}*.err", f"*{jid}*.out", f"*_{jid}.err", f"*_{jid}.out"):
+            for path in repo_logs.glob(pattern):
+                try:
+                    text = path.read_text(errors="ignore").lower()
+                except Exception:
+                    continue
+                if any(n in text for n in needles):
+                    return True
+    return False
+
+
+def phase_failed_oom(states: dict[str, JobState], phase: dict, repo_root: Optional[Path] = None) -> bool:
+    for st in states.values():
+        if st.state == "OUT_OF_MEMORY":
+            return True
+    if repo_root is None:
+        repo_root = Path(os.environ.get("DISORDERNET_REPO", str(Path.home() / "DisorderNet")))
+    logs = repo_root / "logs"
+    if logs.is_dir() and logs_suggest_oom(logs, [str(j) for j in phase.get("job_ids", {}).values()]):
+        # Only treat as OOM if something actually failed/timed out
+        if any(st.bad or st.state == "TIMEOUT" for st in states.values()):
+            return True
+    return False
+
+
+def apply_oom_escalation(campaign: dict, phase: dict) -> dict:
+    """Bump OOM level and export env for the next submit."""
+    level = int(phase.get("oom_level", 0)) + 1
+    if level >= len(OOM_ESCALATION):
+        level = len(OOM_ESCALATION) - 1
+    phase["oom_level"] = level
+    step = OOM_ESCALATION[level]
+    phase["oom_step"] = step
+    os.environ["DISORDERNET_BATCH_SCALE"] = str(step["batch_scale"])
+    # Prefer explicit tiny batches on last rungs
+    if step["batch_scale"] <= 0.25:
+        os.environ["DISORDERNET_BATCH_SIZE"] = "1"
+        os.environ["DISORDERNET_ACCUM_STEPS"] = "16"
+    elif step["batch_scale"] <= 0.5:
+        os.environ.pop("DISORDERNET_BATCH_SIZE", None)
+        os.environ.pop("DISORDERNET_ACCUM_STEPS", None)
+    part = step.get("partition") or campaign.get("partition_3b")
+    if part:
+        os.environ["DISORDERNET_PARTITION"] = part
+        phase["force_partition"] = part
+        if phase["kind"] == "3b":
+            campaign["partition_3b"] = part
+        else:
+            campaign["partition_650m"] = part
+    return step
+
+
 def _submit_kind(campaign: dict, phase: dict, *, dry_run: bool = False) -> dict:
     kind = phase["kind"]
+    partition = (
+        phase.get("force_partition")
+        or (campaign.get("partition_3b") if kind == "3b" else campaign.get("partition_650m"))
+        or None
+    )
+    # Empty string → None
+    if not partition:
+        partition = None
     ns = argparse.Namespace(
         account=campaign["gpu_account"],
         qos=campaign.get("qos") or "qos_gpu",
@@ -258,10 +338,12 @@ def _submit_kind(campaign: dict, phase: dict, *, dry_run: bool = False) -> dict:
         no_clean=not campaign.get("include_clean", True),
         no_strict_package=False,
         dry_run=dry_run,
-        partition=campaign.get("partition_3b") if kind == "3b" else None,
+        partition=partition,
     )
     os.environ["DISORDERNET_MAIL_USER"] = campaign.get("mail_user") or DEFAULT_MAIL
-    # publish_submit reads mail via mail_sbatch_args in submit path after our patch
+    os.environ.setdefault("RUN_CAID3", "1")
+    os.environ.setdefault("RUN_CAID_CHALLENGE", "1")
+    os.environ.setdefault("CAID_LEAK_FREE_TRAIN", "1")
     if kind == "650m":
         cmd_submit_650m(ns)
     else:
@@ -328,6 +410,12 @@ def advance_campaign(
                 return campaign
             if phase.get("job_ids"):
                 campaign["resubmit_count"] += 1
+                if phase_failed_oom(states, phase):
+                    step = apply_oom_escalation(campaign, phase)
+                    print(
+                        f"[oom-escalate] phase={phase['kind']} → {step['label']} "
+                        f"batch_scale={step['batch_scale']} partition={step.get('partition')}"
+                    )
             _submit_kind(campaign, phase, dry_run=dry_run)
             campaign["status"] = "running"
             return campaign

@@ -166,6 +166,8 @@ class TestPublishCLI:
             ckpt = Path(spec["checkpoint_dir"])
             ckpt.mkdir(parents=True)
             (ckpt / "sota_postprocess_report.json").write_text('{"pooled_auc": 0.9}')
+            (ckpt / "caid3_eval_report.json").write_text('{"pooled":{"auc_roc":0.88}}')
+            (ckpt / "caid_leakage_audit.json").write_text('{"leak_free":true}')
             (ckpt / "structure_distrust_benchmark.json").write_text(
                 '{"matched_baselines":{"delta_auc_dn_minus_plddt":0.1},'
                 '"training_contamination":{"risk_tier":"low"},'
