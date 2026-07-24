@@ -19,6 +19,32 @@ If a GPU job hits `TIMEOUT`, fold progress in `checkpoints/cv_progress.json` is 
 4. Emails **marenatommaso@gmail.com** on END / FAIL / TIME_LIMIT (override with `DISORDERNET_MAIL_USER`)
 5. tqdm progress in the watchdog log (fold fraction + ETA heuristic)
 
+## CAID3 / CAID4 rigor (leak-free)
+
+Publish jobs default to:
+
+- `RUN_CAID3=1` / `RUN_CAID_CHALLENGE=1` — full challenge suite after pipeline
+- `CAID_LEAK_FREE_TRAIN=1` — drop DisProt train proteins that ID/homology-hit CAID3 refs (≥40% SequenceMatcher) **before** CV
+- Strict package requires `caid3_eval_report.json` + `caid_leakage_audit.json`
+
+**CAID4** is a blind challenge until ~Dec 2026. If you place organizer targets at
+`~/DisorderNet/data/caid4_targets.fasta` (or set `CAID4_TARGETS`), the suite writes
+`caid4_submission/disorder/*.caid` + `timings.csv` and efficiency stats. Scoring runs
+automatically if/when labels appear in that FASTA.
+
+## Adaptive OOM retries
+
+On `OUT_OF_MEMORY` (or CUDA OOM in logs), the watchdog escalates automatically:
+
+1. half batch  
+2. `ica100` + half batch  
+3. `ica100` + quarter batch  
+4. `ica100` + min batch (`batch=1`, `accum=16`)
+
+No command change required — same `submit_publish_full.sh`.
+
+---
+
 ## Fresh shell — exact commands
 
 ```bash
@@ -26,20 +52,22 @@ ssh rockfish
 cd ~/DisorderNet
 git checkout master && git pull
 source ~/venvs/disordernet/bin/activate
-mkdir -p logs ~/disordernet_runs
+mkdir -p logs ~/disordernet_runs data
 
-# Optional: Boltz warm-up once (structure-distrust artifacts)
-export DISORDERNET_GPU_ACCOUNT=$(sacctmgr -nP show assoc user=$USER format=account,qos \
-  | awk -F'|' '/qos_gpu/{print $1; exit}')
-export DISORDERNET_GPU_QOS=qos_gpu
+# Optional CAID4 blind targets (when you have the organizer FASTA):
+#   cp /path/to/caid4_targets.fasta ~/DisorderNet/data/caid4_targets.fasta
+#   export CAID4_TARGETS=$HOME/DisorderNet/data/caid4_targets.fasta
+
 export DISORDERNET_MAIL_USER=marenatommaso@gmail.com
 export DISORDERNET_RESULTS=$HOME/disordernet_runs
+export DISORDERNET_GPU_ACCOUNT=$(sacctmgr -nP show assoc user=$USER format=account,qos \
+  | awk -F'|' '/qos_gpu/{print $1; exit}')
 
-# Start 650M→3B campaign + detached watchdog
 bash rockfish/slurm/submit_publish_full.sh
-# For 3B on 80GB nodes if 40GB OOMs:
-#   bash rockfish/slurm/submit_publish_full.sh --partition-3b ica100
 ```
+
+**Commands are unchanged** from the previous campaign launch (still one script).
+New defaults (CAID leak-free + OOM escalate) activate automatically after `git pull`.
 
 Expected immediately:
 

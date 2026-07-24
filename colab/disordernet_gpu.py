@@ -649,6 +649,16 @@ def setup_environment(cfg: TrainConfig) -> TrainConfig:
         cfg.batch_size = bs
         cfg.accum_steps = accum
 
+    # HPC OOM retries may set DISORDERNET_BATCH_SCALE / explicit batch size.
+    if os.environ.get("DISORDERNET_BATCH_SIZE"):
+        cfg.batch_size = max(1, int(os.environ["DISORDERNET_BATCH_SIZE"]))
+    if os.environ.get("DISORDERNET_ACCUM_STEPS"):
+        cfg.accum_steps = max(1, int(os.environ["DISORDERNET_ACCUM_STEPS"]))
+    scale = float(os.environ.get("DISORDERNET_BATCH_SCALE", "1") or "1")
+    if scale != 1.0 and not os.environ.get("DISORDERNET_BATCH_SIZE"):
+        cfg.batch_size = max(1, int(round(cfg.batch_size * scale)))
+        print(f"  DISORDERNET_BATCH_SCALE={scale} → batch_size={cfg.batch_size}")
+
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
     if cfg.deterministic:
