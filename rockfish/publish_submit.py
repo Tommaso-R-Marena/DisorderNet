@@ -37,6 +37,7 @@ from rockfish.utils import (  # noqa: E402
     ensure_repo_on_path,
     env_defaults,
     git_revision,
+    mail_sbatch_args,
     require_account,
     run_specs_3b,
     run_specs_650m,
@@ -85,6 +86,7 @@ def _submit_gpu_chain(
     # Keep os.environ updated for nested sbatch --export=ALL consumers
     os.environ.update(base_env)
     ensure_bundle_dirs(root, specs)
+    mail_args = mail_sbatch_args(os.environ.get("DISORDERNET_MAIL_USER"))
 
     job_ids: dict[str, str] = {}
     main_jid: Optional[str] = None
@@ -116,6 +118,7 @@ def _submit_gpu_chain(
             dependency=dep,
             dry_run=dry_run,
             env=job_env,
+            extra_args=mail_args,
         )
         job_ids[label] = jid
         print(
@@ -146,6 +149,7 @@ def _submit_gpu_chain(
         dependency=after,
         dry_run=dry_run,
         env=pkg_env,
+        extra_args=mail_args,
     )
     job_ids["package"] = pkg_jid
     print(f"Submitted package → job {pkg_jid}  (after {after})")

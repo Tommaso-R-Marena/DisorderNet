@@ -77,13 +77,17 @@ def main():
         dec = out["decision"]
         pct_dis = float((out["p_calibrated"] >= 0.5).mean())
         confident = float(np.isin(dec, (0, 1)).mean())
+        mean_conf = float(out["confidence_pct"].mean())
         print(f"\n>{name}  len={L}")
         print(f"  predicted disordered residues: {100*pct_dis:.1f}%")
         print(f"  confident (non-abstain) residues @ alpha={bundle['alpha']}: {100*confident:.1f}%")
         print(f"  mean calibrated p(disorder): {out['p_calibrated'].mean():.3f}")
+        print(f"  mean forced confidence %: {mean_conf:.1f}")
         results[name] = {
             "length": L,
             "p_calibrated": out["p_calibrated"].round(4).tolist(),
+            "confidence_pct": out["confidence_pct"].round(2).tolist(),
+            "y_hat_forced": out["y_hat_forced"].tolist(),
             "decision": dec.tolist(),
             "decision_labels": [DECISION_LABEL[int(d)] for d in dec],
         }

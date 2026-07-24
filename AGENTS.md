@@ -51,14 +51,20 @@ Notes:
 ### Rockfish publish path (HPC)
 - Operator ops guide (finish signals, timelines, stuck QOS recovery): root
   `README.md` § **Path C**. Also `rockfish/README.md` § From scratch,
-  `rockfish/V8_MULTISCALE.md` for the cheaper v8 path.
+  `rockfish/V8_MULTISCALE.md` for the cheaper v8 path,
+  `rockfish/PUBLISH_FULL.md` for **650M→3B auto-resume campaign**.
 - **Accounts:** GPU/`a100` jobs need `-A <gpu_account> --qos=qos_gpu`
   (usually `sfried3_gpu`); CPU/`shared` stays `-A sfried3` with no qos.
   Prefer `bash rockfish/slurm/submit_v8.sh` (never submits an empty `--qos`).
   Discover GPU account via `sacctmgr … | awk … /qos_gpu/`.
+- **Walltime:** Rockfish a100 max is **72 h** (not 48 h); shared ≈ 36 h.
+  Fold resume via `cv_progress.json`; campaign watchdog:
+  `bash rockfish/slurm/submit_publish_full.sh`.
 - Use the two publish submitters (not the retired all-in-one):
   `bash rockfish/slurm/submit_publish_650m.sh --account sfried3_gpu --qos qos_gpu`
   (and/or `submit_publish_3b.sh` the same way).
+  Prefer full campaign: `submit_publish_full.sh` (mail default
+  `marenatommaso@gmail.com`).
 - Prefer `python rockfish/publish_submit.py submit-650m|submit-3b|package --kind …`.
 - Packaging is **strict by default** (`PACKAGE_STRICT=1` / `--strict`): missing
   go/no-go artifacts fail the job. Use `--no-strict` / `--no-strict-package` only

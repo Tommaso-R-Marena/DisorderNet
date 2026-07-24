@@ -7,6 +7,7 @@ Run the full SOTA pipeline on Rockfish instead of Colab: longer wall times (72 h
 | Document | Role |
 |----------|------|
 | **This file** | Canonical Rockfish setup, publish path, artifacts, go/no-go, env vars |
+| [`PUBLISH_FULL.md`](PUBLISH_FULL.md) | **650M→3B full campaign** + walltime auto-resume watchdog + mail |
 | [`docs/ROCKFISH_PUBLISH_RUNBOOK.md`](../docs/ROCKFISH_PUBLISH_RUNBOOK.md) | Short publish-path pointer |
 | [`docs/METHODS_CHECKLIST.md`](../docs/METHODS_CHECKLIST.md) | Preprint freeze checklist |
 | [`docs/STRUCTURE_DISTRUST_ATLAS.md`](../docs/STRUCTURE_DISTRUST_ATLAS.md) | Structure-distrust claim + eval artifacts |
