@@ -1,8 +1,25 @@
-"""
-Optimized feature engineering using vectorized numpy operations.
+"""Optimized feature engineering using vectorized numpy operations.
+
+Layout (per residue, for the default three windows) is 162 columns:
+
+    one-hot (20) | per-residue properties (8) | position (2)
+    | per window: composition (20), mean properties (8), property variance (8),
+      [entropy, disorder frac, order frac, net charge, |charge|, complexity] (6)
+    | local Pro/Gly enrichment (2) | low-complexity flag (1) | global (3)
+
+Every windowed block is a prefix-sum difference (see :mod:`window_stats`), so
+the cost is O(L * n_scales) numpy work rather than the O(L * window) Python
+loops this module used to run despite its name.
 """
 import numpy as np
-from collections import Counter
+
+from window_stats import (
+    SymbolWindows,
+    build_index_table,
+    encode_sequence,
+    moving_average,
+    moving_variance,
+)
 
 AMINO_ACIDS = list("ACDEFGHIKLMNPQRSTVWY")
 AA_TO_IDX = {aa: i for i, aa in enumerate(AMINO_ACIDS)}
@@ -26,140 +43,122 @@ _MW = np.array([89.1, 121.2, 133.1, 147.1, 165.2, 75.0, 155.2, 131.2, 146.2, 131
                 149.2, 132.1, 115.1, 146.1, 174.2, 105.1, 119.1, 117.1, 204.2, 181.2])
 
 ALL_PROPS = np.stack([_HYDRO, _CHARGE, _FLEX, _DISPROP, _BETA, _ALPHA, _BULK, _MW])  # (8, 20)
+_PROPS_T = ALL_PROPS.T.astype(np.float32)  # (20, 8), one row per amino acid
 
 # Disorder/order promoting sets
 _DISORDER_PROMOTING = set("AEGKPQRS")
 _ORDER_PROMOTING = set("CFILMVWY")
 
+DEFAULT_WINDOWS = (7, 15, 31)
+
+# Hard-coded scales for the trailing blocks (kept for layout compatibility).
+_PG_HALF = 10
+_LOW_COMPLEXITY_HALF = 15
+_LOW_COMPLEXITY_MAX_UNIQUE = 8
+
+# Unknown residues map to -1 so they contribute nothing to one-hot/composition.
+_AA_LUT = build_index_table("".join(AMINO_ACIDS), default=-1, dtype=np.int32)
+
+# Fixed-size blocks: one-hot(20) + props(8) + position(2) + pg(2) + lc(1) + global(3)
+_STATIC_DIM = 36
+_PER_WINDOW_DIM = 42
+
+
+def n_features(windows=DEFAULT_WINDOWS) -> int:
+    """Number of columns produced by :func:`compute_features_fast`."""
+    return _STATIC_DIM + _PER_WINDOW_DIM * len(tuple(windows))
+
 
 def seq_to_indices(sequence):
     """Convert sequence to index array. Unknown = -1 mapped to all zeros."""
-    indices = np.array([AA_TO_IDX.get(aa, -1) for aa in sequence], dtype=np.int32)
-    return indices
+    return encode_sequence(sequence, _AA_LUT)
 
 
-def compute_features_fast(sequence, windows=[7, 15, 31]):
+def compute_features_fast(sequence, windows=DEFAULT_WINDOWS):
     """Vectorized feature computation. Returns (seq_len, n_features) array."""
+    windows = tuple(windows)
     L = len(sequence)
+    if L == 0:
+        return np.zeros((0, n_features(windows)), dtype=np.float32)
+
     idx = seq_to_indices(sequence)
     valid = idx >= 0
-    
+    sym = SymbolWindows(sequence)
     features_list = []
-    
+
     # 1. One-hot encoding (20)
     onehot = np.zeros((L, 20), dtype=np.float32)
-    for i in range(L):
-        if valid[i]:
-            onehot[i, idx[i]] = 1.0
+    rows = np.flatnonzero(valid)
+    onehot[rows, idx[rows]] = 1.0
     features_list.append(onehot)
-    
-    # 2. Per-residue properties (8)
+
+    # 2. Per-residue properties (8) — unknown residues stay all-zero
     props = np.zeros((L, 8), dtype=np.float32)
-    for i in range(L):
-        if valid[i]:
-            props[i] = ALL_PROPS[:, idx[i]]
+    props[rows] = _PROPS_T[idx[rows]]
     features_list.append(props)
-    
+
     # 3. Position features (2)
     positions = np.arange(L, dtype=np.float32)
-    rel_pos = positions / max(L - 1, 1)
-    dist_term = np.minimum(positions, L - 1 - positions) / max(L - 1, 1)
-    features_list.append(np.stack([rel_pos, dist_term], axis=1))
-    
-    # 4. Multi-scale windowed features (using convolution-like operations)
+    denom = np.float32(max(L - 1, 1))
+    features_list.append(
+        np.stack([positions / denom, np.minimum(positions, (L - 1) - positions) / denom], axis=1)
+    )
+
+    # Per-residue charge (0 for unknown residues), shared by every window scale.
+    charge = props[:, 1]
+    abs_charge = np.abs(charge)
+    disorder_mask = np.isin(idx, [AA_TO_IDX[c] for c in sorted(_DISORDER_PROMOTING)])
+    order_mask = np.isin(idx, [AA_TO_IDX[c] for c in sorted(_ORDER_PROMOTING)])
+    extras = np.stack([disorder_mask, order_mask], axis=1).astype(np.float32)
+    charges = np.stack([charge, abs_charge], axis=1)
+
+    # 4. Multi-scale windowed features
     for w in windows:
         half = w // 2
-        
-        # 4a. Windowed composition (20 per window)
-        # Use cumsum for efficient windowed counting
-        comp = np.zeros((L, 20), dtype=np.float32)
-        for i in range(L):
-            s, e = max(0, i - half), min(L, i + half + 1)
-            window_idx = idx[s:e]
-            window_valid = valid[s:e]
-            wlen = e - s
-            for j in range(len(window_idx)):
-                if window_valid[j]:
-                    comp[i, window_idx[j]] += 1.0 / wlen
-        features_list.append(comp)
-        
-        # 4b. Windowed average properties (8 per window)
-        avg_props = np.zeros((L, 8), dtype=np.float32)
-        var_props = np.zeros((L, 8), dtype=np.float32)
-        for i in range(L):
-            s, e = max(0, i - half), min(L, i + half + 1)
-            window_props = props[s:e]
-            avg_props[i] = window_props.mean(axis=0)
-            var_props[i] = window_props.var(axis=0)
-        features_list.append(avg_props)
-        features_list.append(var_props)
-        
-        # 4c. Windowed entropy + complexity + disorder/order fracs + charge (6 per window)
-        extra = np.zeros((L, 6), dtype=np.float32)
-        for i in range(L):
-            s, e = max(0, i - half), min(L, i + half + 1)
-            window_seq = sequence[s:e]
-            wlen = len(window_seq)
-            
-            # Entropy
-            counts = Counter(window_seq)
-            entropy = 0.0
-            for c in counts.values():
-                p = c / wlen
-                if p > 0:
-                    entropy -= p * np.log2(p)
-            extra[i, 0] = entropy
-            
-            # Disorder/order promoting fractions
-            dp = sum(1 for c in window_seq if c in _DISORDER_PROMOTING) / wlen
-            op = sum(1 for c in window_seq if c in _ORDER_PROMOTING) / wlen
-            extra[i, 1] = dp
-            extra[i, 2] = op
-            
-            # Net charge and charge asymmetry
-            charges = np.array([_CHARGE[AA_TO_IDX[c]] if c in AA_TO_IDX else 0 for c in window_seq])
-            extra[i, 3] = charges.mean()
-            extra[i, 4] = np.abs(charges).mean()
-            
-            # Complexity
-            unique = len(set(window_seq))
-            extra[i, 5] = unique / min(wlen, 20)
-        
-        features_list.append(extra)
-    
+        win_len = sym.window_lengths(half)
+
+        # 4a. Windowed composition (20)
+        features_list.append(moving_average(onehot, half))
+
+        # 4b. Windowed mean / variance of properties (8 + 8)
+        features_list.append(moving_average(props, half))
+        features_list.append(moving_variance(props, half))
+
+        # 4c. entropy, disorder frac, order frac, net charge, |charge|, complexity (6)
+        frac = moving_average(extras, half)
+        charge_stats = moving_average(charges, half)
+        complexity = sym.distinct(half) / np.minimum(win_len, 20.0)
+        features_list.append(
+            np.stack([
+                sym.entropy(half),
+                frac[:, 0], frac[:, 1],
+                charge_stats[:, 0], charge_stats[:, 1],
+                complexity,
+            ], axis=1)
+        )
+
     # 5. Proline/Glycine enrichment (2)
-    pg = np.zeros((L, 2), dtype=np.float32)
-    for i in range(L):
-        s, e = max(0, i - 10), min(L, i + 11)
-        window_seq = sequence[s:e]
-        wlen = len(window_seq)
-        pg[i, 0] = window_seq.count('P') / wlen
-        pg[i, 1] = window_seq.count('G') / wlen
-    features_list.append(pg)
-    
+    pg_len = sym.window_lengths(_PG_HALF)
+    features_list.append(
+        np.stack([
+            sym.char_counts("P", _PG_HALF) / pg_len,
+            sym.char_counts("G", _PG_HALF) / pg_len,
+        ], axis=1)
+    )
+
     # 6. Low complexity (1)
-    lc = np.zeros((L, 1), dtype=np.float32)
-    for i in range(L):
-        s, e = max(0, i - 15), min(L, i + 16)
-        unique = len(set(sequence[s:e]))
-        lc[i, 0] = 1.0 if unique <= 8 else 0.0
-    features_list.append(lc)
-    
+    lc = (sym.distinct(_LOW_COMPLEXITY_HALF) <= _LOW_COMPLEXITY_MAX_UNIQUE)
+    features_list.append(lc.astype(np.float32).reshape(-1, 1))
+
     # 7. Global features (3)
-    global_dp = sum(1 for c in sequence if c in _DISORDER_PROMOTING) / L
-    global_entropy = 0.0
-    gc = Counter(sequence)
-    for c in gc.values():
-        p = c / L
-        if p > 0:
-            global_entropy -= p * np.log2(p)
-    
-    global_feats = np.zeros((L, 3), dtype=np.float32)
+    global_dp = float(disorder_mask.sum()) / L
+    global_entropy = sym.total_entropy()
+    global_feats = np.empty((L, 3), dtype=np.float32)
     global_feats[:, 0] = global_dp
     global_feats[:, 1] = global_entropy / 4.32
     global_feats[:, 2] = np.log(L) / 10.0
     features_list.append(global_feats)
-    
+
     return np.concatenate(features_list, axis=1)
 
 
