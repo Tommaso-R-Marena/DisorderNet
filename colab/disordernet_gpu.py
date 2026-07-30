@@ -120,13 +120,16 @@ def _label_boundary_mask(labels: list[int], radius: int = 2) -> list[float]:
     if n == 0:
         return []
     lab = np.asarray(labels, dtype=np.int8)
-    core = np.zeros(n, dtype=np.bool_)
-    for i in range(1, n):
-        if lab[i] != lab[i - 1]:
-            lo = max(0, i - radius)
-            hi = min(n, i + radius)
-            core[lo:hi] = True
-    return core.astype(np.float32).tolist()
+    # Each label change at i marks [i - radius, i + radius); accumulate the
+    # interval starts/ends and take a running sum instead of slicing per change.
+    changes = np.flatnonzero(lab[1:] != lab[:-1]) + 1
+    core = np.zeros(n, dtype=np.float32)
+    if changes.size:
+        deltas = np.zeros(n + 1, dtype=np.int32)
+        np.add.at(deltas, np.maximum(changes - radius, 0), 1)
+        np.add.at(deltas, np.minimum(changes + radius, n), -1)
+        core[np.cumsum(deltas[:n]) > 0] = 1.0
+    return core.tolist()
 
 
 def _hallucination_weight_mask(
@@ -139,15 +142,13 @@ def _hallucination_weight_mask(
     if not cfg.use_hallucination_weighting or plddt is None or len(plddt) != n:
         return [1.0] * n
 
-    weights: list[float] = []
-    threshold = cfg.high_plddt_threshold
-    hall_w = cfg.hallucination_weight
-    for i, lab in enumerate(labels):
-        if lab == 1 and not np.isnan(plddt[i]) and plddt[i] >= threshold:
-            weights.append(hall_w)
-        else:
-            weights.append(1.0)
-    return weights
+    lab = np.asarray(labels)
+    scores = np.asarray(plddt, dtype=np.float64)
+    with np.errstate(invalid="ignore"):  # NaN pLDDT compares False, as intended
+        hallucinated = (lab == 1) & ~np.isnan(scores) & (scores >= cfg.high_plddt_threshold)
+    weights = np.ones(n, dtype=np.float64)
+    weights[hallucinated] = cfg.hallucination_weight
+    return weights.tolist()
 
 
 def _load_plddt_for_protein(protein: dict, cache_dir: str) -> Optional[np.ndarray]:
@@ -1044,6 +1045,19 @@ class PhysicoFeatureEncoder(nn.Module):
         return self.net(x).permute(0, 2, 1)
 
 
+def _as_layer_list(layers) -> list[torch.Tensor]:
+    """Accept either a list of (B, L, D) tensors or a stacked (B, L, D, N) tensor.
+
+    Callers pass the list form: materialising the stack costs an extra
+    B*L*D*N tensor that autograd then holds for the whole backward pass, which
+    on a 650M/3B run with 8–12 fused layers is hundreds of MB of VRAM for no
+    numerical benefit.
+    """
+    if isinstance(layers, torch.Tensor):
+        return [layers[..., i] for i in range(layers.shape[-1])]
+    return list(layers)
+
+
 class ESMLayerFusion(nn.Module):
     """Learned fusion of the last N ESM layer representations."""
 
@@ -1052,10 +1066,13 @@ class ESMLayerFusion(nn.Module):
         self.weights = nn.Parameter(torch.zeros(n_layers))
         self.norm = nn.LayerNorm(dim)
 
-    def forward(self, layer_stack: torch.Tensor) -> torch.Tensor:
-        """layer_stack: (B, L, D, N_layers)."""
+    def forward(self, layers) -> torch.Tensor:
+        """layers: list of N (B, L, D) tensors, or a stacked (B, L, D, N) tensor."""
+        layers = _as_layer_list(layers)
         w = torch.softmax(self.weights, dim=0)
-        fused = (layer_stack * w.view(1, 1, 1, -1)).sum(dim=-1)
+        fused = layers[0] * w[0]
+        for i in range(1, len(layers)):
+            fused = fused + layers[i] * w[i]
         return self.norm(fused)
 
 
@@ -1072,12 +1089,14 @@ class ESMAttentionFusion(nn.Module):
         )
         self.norm = nn.LayerNorm(dim)
 
-    def forward(self, layer_stack: torch.Tensor) -> torch.Tensor:
-        """layer_stack: (B, L, D, N_layers)."""
-        context = layer_stack[..., -1]
-        scores = self.gate(context)
-        w = torch.softmax(scores, dim=-1)
-        fused = (layer_stack * w.unsqueeze(-2)).sum(dim=-1)
+    def forward(self, layers) -> torch.Tensor:
+        """layers: list of N (B, L, D) tensors, or a stacked (B, L, D, N) tensor."""
+        layers = _as_layer_list(layers)
+        scores = self.gate(layers[-1])          # context = final fused layer
+        w = torch.softmax(scores, dim=-1)       # (B, L, N)
+        fused = layers[0] * w[..., 0:1]
+        for i in range(1, len(layers)):
+            fused = fused + layers[i] * w[..., i:i + 1]
         return self.norm(fused)
 
 
@@ -1338,8 +1357,7 @@ class DisorderNetGPU(nn.Module):
         layer_hiddens = [
             out["representations"][i][:, 1:-1, :] for i in self._fusion_layer_ids
         ]
-        stack = torch.stack(layer_hiddens, dim=-1)
-        embeddings = self.layer_fusion(stack)
+        embeddings = self.layer_fusion(layer_hiddens)
 
         if self.rich_encoder is not None:
             if rich_feats is None:
@@ -1437,25 +1455,32 @@ class DisProtDataset(Dataset):
                 else:
                     _, _, tokens = batch_converter([(p["id"], p["sequence"])])
                 labels = p["labels"]
-                boundary = _label_boundary_mask(labels, radius=self.boundary_radius)
-                trans = p.get("transition_mask") or [0] * len(labels)
-                is_boundary = [
-                    1.0 if (boundary[i] or trans[i]) else 0.0 for i in range(len(labels))
-                ]
+                n_res = len(labels)
+                boundary = np.asarray(
+                    _label_boundary_mask(labels, radius=self.boundary_radius),
+                    dtype=np.float64,
+                )
+                trans = p.get("transition_mask")
+                is_boundary = boundary != 0.0
+                if trans:
+                    # Tolerate a transition mask that does not cover every residue.
+                    flags = np.zeros(n_res, dtype=bool)
+                    usable = min(n_res, len(trans))
+                    flags[:usable] = np.asarray(trans[:usable], dtype=np.float64) != 0.0
+                    is_boundary |= flags
 
                 plddt = self.plddt_by_id.get(p["id"])
                 if plddt is None and self.cfg is not None:
                     plddt = _load_plddt_for_protein(p, self.cfg.af_plddt_cache_dir)
 
                 hall_weights = (
-                    _hallucination_weight_mask(labels, plddt, self.cfg)
-                    if self.cfg is not None else [1.0] * len(labels)
+                    np.asarray(_hallucination_weight_mask(labels, plddt, self.cfg))
+                    if self.cfg is not None else np.ones(n_res)
                 )
                 boundary_weight = self.cfg.boundary_weight if self.cfg is not None else 1.0
-                sample_weight = [
-                    (1.0 + (boundary_weight - 1.0) * is_boundary[i]) * hall_weights[i]
-                    for i in range(len(labels))
-                ]
+                sample_weight = (
+                    1.0 + (boundary_weight - 1.0) * is_boundary
+                ) * hall_weights
 
                 if "aa_idx" in cached:
                     aa_tensor = cached["aa_idx"]
@@ -1698,6 +1723,7 @@ def eval_epoch(
             else:
                 logits, fn_logits = out, None
 
+        fn_labels = None
         if cfg is not None:
             loss = _disorder_loss(
                 logits, labels, pos_weight, sample_weight, cfg, mask=mask,
@@ -1727,16 +1753,22 @@ def eval_epoch(
         all_labels.append(labels[mask].cpu().numpy())
 
         if use_fn and fn_logits is not None and proteins_by_id is not None:
-            from colab.function_predict import stack_batch_function_labels
-            fn_labels, _fn_sup = stack_batch_function_labels(
-                list(batch_ids), proteins_by_id, mask.shape[1], device,
-                disordered_only=cfg.function_on_disordered_only,
-            )
+            if fn_labels is None:  # cfg was None, so the loss branch never built them
+                from colab.function_predict import stack_batch_function_labels
+                fn_labels, _fn_sup = stack_batch_function_labels(
+                    list(batch_ids), proteins_by_id, mask.shape[1], device,
+                    disordered_only=cfg.function_on_disordered_only,
+                )
             # Same residue stream as disorder OOF (pad mask) — enables IDR-layer align.
             # Loss still uses supervise mask above; this export is accuracy-neutral.
             all_fn_probs.append(torch.sigmoid(fn_logits)[mask].float().cpu().numpy())
             all_fn_labels.append(fn_labels[mask].cpu().numpy())
 
+    if not all_probs:
+        raise ValueError(
+            "eval_epoch received no residues — the validation loader is empty "
+            "(check the fold split and the min/max length filters)"
+        )
     all_probs = np.concatenate(all_probs)
     all_labels = np.concatenate(all_labels)
     preds = (all_probs >= 0.5).astype(int)

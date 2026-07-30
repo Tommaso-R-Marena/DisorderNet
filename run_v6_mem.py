@@ -13,6 +13,8 @@ import xgboost as xgb
 warnings.filterwarnings('ignore')
 
 from disordernet_paths import DISPROT_JSON as DATA_PATH, EMB_DIR, results_dir
+from window_stats import (SymbolWindows, build_index_table, encode_sequence,
+                          moving_average, moving_variance)
 
 RESULTS_DIR = results_dir("results_v6", create=True)
 
@@ -32,34 +34,50 @@ ORD_MASK=np.array([1 if a in "CFILMVWY" else 0 for a in AA],dtype=np.float32)
 PROPS=np.stack([HYDRO,FLEX,DISPROP,CHARGE,BETA,ALPHA,BULK])
 KEY_DIS=[AA_IDX[a] for a in "PEKSQG"]; KEY_ORD=[AA_IDX[a] for a in "WCFIYV"]
 
-def wavg(v,hw):
-    L=len(v); cs=np.cumsum(v,0); s=np.maximum(np.arange(L)-hw,0); e=np.minimum(np.arange(L)+hw,L-1)
-    ln=(e-s+1).astype(np.float32)
-    return (cs[e]-np.where(s>0,cs[s-1],0))/ln if v.ndim==1 else (cs[e]-np.where(s[:,None]>0,cs[s-1],0))/ln[:,None]
+KEY_AA=np.array(KEY_DIS+KEY_ORD,dtype=np.int32)
+AA_LUT=build_index_table(AA,default=0,dtype=np.int32)  # unknown residues -> 'A', as before
+PHYS_DIM=118  # per-residue width of phys(); trained bundles depend on this layout
 
-def wvar(v,hw): return wavg(v**2 if v.ndim==1 else v**2,hw)-wavg(v,hw)**2
+# Windowed statistics live in window_stats so the three featurisers in this
+# repo (features.py, features_fast.py, this module) share one implementation.
+# wavg/wvar are re-exported under their historical names: predictor.py, run_v7.py
+# and experiments/ import them from here.
+wavg = moving_average
+wvar = moving_variance
+
 
 def phys(seq):
-    L=len(seq); idx=np.array([AA_IDX.get(c,0) for c in seq],dtype=np.int32); f=[]
-    pr=PROPS[:,idx].T; f.append(pr)
-    f.append(np.stack([np.arange(L,dtype=np.float32)/max(L-1,1),np.minimum(np.arange(L),np.arange(L-1,-1,-1)).astype(np.float32)/max(L-1,1)],1))
-    dv=DIS_MASK[idx]; ov=ORD_MASK[idx]; f.append(np.stack([dv,ov],1))
-    for hw in [3,7,15,30,50]:
-        f.append(wavg(pr,hw)); f.append(wavg(np.stack([dv,ov],1),hw))
-        ch=CHARGE[idx]; f.append(np.stack([wavg(ch,hw),wavg(np.abs(ch),hw)],1))
-    for hw in [5,15,30]: f.append(np.stack([wvar(HYDRO[idx],hw),wvar(DISPROP[idx],hw)],1))
-    for hw in [5,15,35]:
-        for ai in KEY_DIS: f.append(wavg((idx==ai).astype(np.float32),hw).reshape(-1,1))
-        for ai in KEY_ORD: f.append(wavg((idx==ai).astype(np.float32),hw).reshape(-1,1))
-    f.append(wavg((idx==AA_IDX['P']).astype(np.float32),10).reshape(-1,1))
-    f.append(wavg((idx==AA_IDX['G']).astype(np.float32),10).reshape(-1,1))
-    for hw in [10,25]:
-        uc=np.zeros(L,dtype=np.float32)
-        for i in range(L): s2,e2=max(0,i-hw),min(L,i+hw+1); uc[i]=len(set(seq[s2:e2]))/min(e2-s2,20)
-        f.append(uc.reshape(-1,1))
-    for hw in [5,15]: f.append(wvar(HYDRO[idx],hw).reshape(-1,1))
-    f.append((wavg(DISPROP[idx],5)-wavg(DISPROP[idx],30)).reshape(-1,1))
-    f.append(np.full((L,3),[DIS_MASK[idx].mean(),len(set(seq))/20,np.log(L)/10],dtype=np.float32))
+    """118-dim per-residue physicochemical features.
+
+    Column layout is identical to the original per-scale implementation; the
+    windowed blocks are just batched so each half-width costs one prefix-sum
+    pass instead of one per scale.
+    """
+    L=len(seq)
+    if L==0: return np.zeros((0,PHYS_DIM),dtype=np.float32)
+    idx=encode_sequence(seq,AA_LUT); f=[]
+    sym=SymbolWindows(seq)
+    pr=PROPS[:,idx].T; f.append(pr)                                     # 7
+    pos=np.arange(L,dtype=np.float32); den=np.float32(max(L-1,1))
+    f.append(np.stack([pos/den,np.minimum(pos,(L-1)-pos)/den],1))       # 2
+    dv=DIS_MASK[idx]; ov=ORD_MASK[idx]; do=np.stack([dv,ov],1); f.append(do)  # 2
+    ch=CHARGE[idx]
+    ctx=np.concatenate([pr,do,np.stack([ch,np.abs(ch)],1)],1)          # (L, 11)
+    ctx_avg={hw:wavg(ctx,hw) for hw in (3,7,15,30,50)}
+    f.extend(ctx_avg[hw] for hw in (3,7,15,30,50))                      # 55
+    hd=np.stack([HYDRO[idx],DISPROP[idx]],1)
+    hd_var={hw:wvar(hd,hw) for hw in (5,15,30)}
+    f.extend(hd_var[hw] for hw in (5,15,30))                            # 6
+    key_oh=(idx[:,None]==KEY_AA[None,:]).astype(np.float32)             # (L, 12)
+    f.extend(wavg(key_oh,hw) for hw in (5,15,35))                       # 36
+    pg=np.stack([idx==AA_IDX['P'],idx==AA_IDX['G']],1).astype(np.float32)
+    f.append(wavg(pg,10))                                               # 2
+    f.extend((sym.distinct(hw)/np.minimum(sym.window_lengths(hw),20.0)).reshape(-1,1)
+             for hw in (10,25))                                         # 2
+    f.extend(hd_var[hw][:,:1] for hw in (5,15))                         # 2
+    # DISPROP is column 2 of PROPS, so its hw=30 average is already in ctx_avg.
+    f.append((wavg(DISPROP[idx],5)-ctx_avg[30][:,2]).reshape(-1,1))     # 1
+    f.append(np.full((L,3),[dv.mean(),len(set(seq))/20,np.log(L)/10],dtype=np.float32))  # 3
     return np.concatenate(f,1)
 
 def evaluate(yt,yp):

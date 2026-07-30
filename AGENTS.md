@@ -27,6 +27,16 @@ GPU/Colab/Rockfish paths are not runnable in this CPU-only cloud environment).
 - CI (`.github/workflows/test.yml`) has three jobs: ruff lint, import-smoke, and a
   pytest+coverage matrix on Python 3.11/3.12.
 
+### Feature computation
+All sliding-window statistics go through `window_stats.py` (`moving_average`,
+`moving_variance`, `SymbolWindows`, `build_index_table`/`encode_sequence`). The
+three featurisers — `features.py` (204-dim), `features_fast.py` (162-dim) and
+`run_v6_mem.phys` (118-dim, re-exported as `wavg`/`wvar` for `predictor.py`,
+`run_v7.py` and `experiments/`) — all build on it, so do not reintroduce local
+cumsum helpers. Two invariants matter: prefix sums accumulate in **float64**
+(a float32 cumsum over the bulkiness/MW scales loses the significant digits
+that `E[x^2]-E[x]^2` depends on) and moving variances are **clipped at 0**.
+
 ### Running the CPU pipeline (the "application")
 The end-to-end CPU model lives in the top-level scripts. Paths are centralized in
 `disordernet_paths.py` and default to **repo-local** dirs (`./data`, `./data/embeddings`,

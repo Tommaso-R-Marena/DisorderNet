@@ -31,20 +31,26 @@ from sklearn.isotonic import IsotonicRegression
 # ---------------------------------------------------------------------------
 def expected_calibration_error(y_true, y_prob, n_bins: int = 15) -> float:
     """Binned ECE: sum_b (n_b/N) * |acc_b - conf_b|."""
-    y_true = np.asarray(y_true, dtype=np.float64)
-    y_prob = np.asarray(y_prob, dtype=np.float64)
+    y_true = np.asarray(y_true, dtype=np.float64).ravel()
+    y_prob = np.asarray(y_prob, dtype=np.float64).ravel()
+    if y_true.shape != y_prob.shape:
+        raise ValueError(
+            f"y_true and y_prob must have the same length, got {y_true.shape[0]} and {y_prob.shape[0]}"
+        )
+    n = y_true.shape[0]
+    if n == 0:
+        return 0.0
+    if n_bins < 1:
+        raise ValueError(f"n_bins must be >= 1, got {n_bins}")
+
     bins = np.linspace(0.0, 1.0, n_bins + 1)
     idx = np.clip(np.digitize(y_prob, bins[1:-1]), 0, n_bins - 1)
-    ece = 0.0
-    n = len(y_true)
-    for b in range(n_bins):
-        mask = idx == b
-        if not mask.any():
-            continue
-        conf = y_prob[mask].mean()
-        acc = y_true[mask].mean()
-        ece += (mask.sum() / n) * abs(acc - conf)
-    return float(ece)
+    # (n_b/N)*|acc_b - conf_b| == |sum(y_true_b) - sum(y_prob_b)| / N, so the
+    # whole binned sum is two bincounts — no per-bin masking pass, and empty
+    # bins contribute zero on their own.
+    conf_sum = np.bincount(idx, weights=y_prob, minlength=n_bins)
+    acc_sum = np.bincount(idx, weights=y_true, minlength=n_bins)
+    return float(np.abs(acc_sum - conf_sum).sum() / n)
 
 
 def fit_calibrator(cal_prob, cal_true) -> IsotonicRegression:
@@ -70,6 +76,8 @@ def conformal_quantile(cal_prob, cal_true, alpha: float, class_conditional: bool
 
     class_conditional=True returns a dict {0: q_order, 1: q_disorder} (Mondrian).
     """
+    if not 0.0 < alpha < 1.0:
+        raise ValueError(f"alpha must lie in (0, 1), got {alpha}")
     cal_prob = np.asarray(cal_prob, dtype=np.float64)
     cal_true = np.asarray(cal_true, dtype=np.int64)
     s_true = np.where(cal_true == 1, cal_prob, 1.0 - cal_prob)

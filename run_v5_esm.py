@@ -23,6 +23,7 @@ import xgboost as xgb
 warnings.filterwarnings('ignore')
 
 from disordernet_paths import DISPROT_JSON as DATA_PATH, EMB_DIR, results_dir
+from window_stats import SymbolWindows, moving_average, moving_variance
 
 RESULTS_DIR = results_dir("results_v5", create=True)
 
@@ -47,21 +48,9 @@ KEY_DIS = [AA_IDX[a] for a in "PEKSQG"]
 KEY_ORD = [AA_IDX[a] for a in "WCFIYV"]
 
 
-def wavg(vals, hw):
-    L = len(vals)
-    cs = np.cumsum(vals, axis=0)
-    s = np.maximum(np.arange(L)-hw, 0)
-    e = np.minimum(np.arange(L)+hw, L-1)
-    ln = (e-s+1).astype(np.float32)
-    if vals.ndim == 1:
-        return (cs[e]-np.where(s>0,cs[s-1],0))/ln
-    return (cs[e]-np.where(s[:,None]>0,cs[s-1],0))/ln[:,None]
-
-
-def wvar(vals, hw):
-    avg = wavg(vals, hw)
-    avg_sq = wavg(vals**2 if vals.ndim==1 else vals**2, hw)
-    return avg_sq - avg**2 if vals.ndim==1 else avg_sq - avg**2
+# Shared float64-accumulated window statistics (see window_stats for why).
+wavg = moving_average
+wvar = moving_variance
 
 
 def physicochemical_features(seq):
@@ -90,11 +79,9 @@ def physicochemical_features(seq):
             f.append(wavg((idx==aa_i).astype(np.float32),hw).reshape(-1,1))
     f.append(wavg((idx==AA_IDX['P']).astype(np.float32),10).reshape(-1,1))
     f.append(wavg((idx==AA_IDX['G']).astype(np.float32),10).reshape(-1,1))
+    sym = SymbolWindows(seq)
     for hw in [10, 25]:
-        uc = np.zeros(L,dtype=np.float32)
-        for i in range(L):
-            s2,e2 = max(0,i-hw),min(L,i+hw+1)
-            uc[i] = len(set(seq[s2:e2]))/min(e2-s2,20)
+        uc = sym.distinct(hw)/np.minimum(sym.window_lengths(hw), 20.0)
         f.append(uc.reshape(-1,1))
     for hw in [5, 15]:
         f.append(wvar(HYDRO[idx],hw).reshape(-1,1))

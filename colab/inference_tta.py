@@ -7,8 +7,49 @@ stabilize predictions. Typically +0.003–0.015 AUC at ~N× inference cost.
 
 from __future__ import annotations
 
+import contextlib
+
 import torch
 import torch.nn as nn
+
+
+# Public dropout classes, resolved defensively so a torch version that drops or
+# renames one of them degrades to "skip it" rather than raising at import time.
+_DROPOUT_TYPES = tuple(
+    cls for cls in (
+        getattr(nn, name, None) for name in (
+            "Dropout", "Dropout1d", "Dropout2d", "Dropout3d",
+            "AlphaDropout", "FeatureAlphaDropout",
+        )
+    )
+    if isinstance(cls, type)
+)
+
+
+@contextlib.contextmanager
+def dropout_only_train_mode(model: nn.Module):
+    """Enable dropout for MC sampling while every other layer stays in eval mode.
+
+    A blanket ``model.train()`` would also switch the head's BatchNorm layers to
+    batch statistics *and* let them update their running mean/var — under
+    ``torch.no_grad()`` that still mutates the buffers, so a TTA inference pass
+    would silently corrupt the trained checkpoint. Only dropout modules need to
+    be stochastic here.
+    """
+    was_training = model.training
+    model.eval()
+    toggled = [
+        m for m in model.modules()
+        if isinstance(m, _DROPOUT_TYPES) and getattr(m, "p", 0.0) > 0
+    ]
+    for m in toggled:
+        m.train()
+    try:
+        yield
+    finally:
+        for m in toggled:
+            m.eval()
+        model.train(was_training)
 
 
 @torch.no_grad()
@@ -30,13 +71,11 @@ def mc_dropout_forward_logits(
     if n_passes <= 1:
         return forward_fn(model, tokens, aa_idx, mask, rich_feats=rich_feats, **forward_kw)
 
-    was_training = model.training
-    model.train()
     accum = None
-    for _ in range(n_passes):
-        logits = forward_fn(model, tokens, aa_idx, mask, rich_feats=rich_feats, **forward_kw)
-        accum = logits if accum is None else accum + logits
-    model.train(was_training)
+    with dropout_only_train_mode(model):
+        for _ in range(n_passes):
+            logits = forward_fn(model, tokens, aa_idx, mask, rich_feats=rich_feats, **forward_kw)
+            accum = logits if accum is None else accum + logits
     return accum / n_passes
 
 

@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from colab.inference_tta import mc_dropout_forward_logits
+from colab.inference_tta import dropout_only_train_mode, mc_dropout_forward_logits
 from colab.multi_seed_blend import average_fold_results_multi_seed
 from colab.calibration import calibrate_fold_results
 
@@ -21,18 +21,75 @@ class TinyHead(nn.Module):
         return self.drop(x).mean(dim=-1)
 
 
+class BatchNormHead(nn.Module):
+    """Stand-in for DisorderCNNHead, which carries BatchNorm1d layers."""
+
+    def __init__(self):
+        super().__init__()
+        self.bn = nn.BatchNorm1d(4)
+        self.drop = nn.Dropout(0.5)
+        self.conv = nn.Conv1d(4, 1, kernel_size=1)
+
+    def forward(self, x):
+        return self.conv(self.drop(self.bn(x))).squeeze(1)
+
+
+def _fwd(m, t, a, mk, rich_feats=None, **kw):
+    return m(t)
+
+
 class TestMCdropoutTTA:
     def test_averages_passes(self):
         model = TinyHead()
         tokens = torch.randn(2, 3, 4)
         mask = torch.ones(2, 3, dtype=torch.bool)
 
-        def fwd(m, t, a, mk, r=None, **kw):
-            return m(t)
-
-        out1 = mc_dropout_forward_logits(model, tokens, None, mask, None, 1, fwd)
-        out8 = mc_dropout_forward_logits(model, tokens, None, mask, None, 8, fwd)
+        out1 = mc_dropout_forward_logits(model, tokens, None, mask, None, 1, _fwd)
+        out8 = mc_dropout_forward_logits(model, tokens, None, mask, None, 8, _fwd)
         assert out1.shape == out8.shape
+
+    def test_does_not_mutate_batchnorm_running_stats(self):
+        """TTA must not update BatchNorm buffers — that would corrupt the checkpoint."""
+        model = BatchNormHead()
+        model.eval()
+        x = torch.randn(3, 4, 10)
+        mean_before = model.bn.running_mean.clone()
+        var_before = model.bn.running_var.clone()
+        tracked_before = model.bn.num_batches_tracked.clone()
+
+        mc_dropout_forward_logits(model, x, None, None, None, 6, _fwd)
+
+        assert torch.equal(model.bn.running_mean, mean_before)
+        assert torch.equal(model.bn.running_var, var_before)
+        assert torch.equal(model.bn.num_batches_tracked, tracked_before)
+
+    def test_restores_module_modes(self):
+        model = BatchNormHead()
+        model.eval()
+        mc_dropout_forward_logits(model, torch.randn(3, 4, 10), None, None, None, 3, _fwd)
+        assert not model.training and not model.drop.training and not model.bn.training
+
+        model.train()
+        mc_dropout_forward_logits(model, torch.randn(3, 4, 10), None, None, None, 3, _fwd)
+        assert model.training and model.drop.training
+
+    def test_dropout_is_active_during_sampling(self):
+        model = BatchNormHead()
+        model.eval()
+        with dropout_only_train_mode(model):
+            assert model.drop.training
+            assert not model.bn.training
+        assert not model.drop.training
+
+    def test_single_pass_short_circuits(self):
+        model = BatchNormHead()
+        model.eval()
+        torch.manual_seed(0)
+        x = torch.randn(3, 4, 10)
+        # n_passes <= 1 bypasses sampling entirely, so it must equal a plain eval forward
+        assert torch.allclose(
+            mc_dropout_forward_logits(model, x, None, None, None, 1, _fwd), model(x)
+        )
 
 
 class TestMultiSeedBlend:
