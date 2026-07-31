@@ -54,7 +54,12 @@ Rules of thumb:
   the same corpus. It has a genuine Bayes ceiling (part of the label is driven by
   a field the model never sees), so it does not saturate.
 - Re-run with only `model_seed` changed to get this benchmark's **noise floor**;
-  a claimed improvement has to beat it before it means anything.
+  a claimed improvement has to beat it before it means anything. Measured over
+  5 corpus seeds: noise floor ±0.0011 AUC; the float32→float64 featurizer
+  rewrite is −0.00017 (p=0.77, indistinguishable from noise); per-protein
+  smoothing is +0.00142 (p=0.0003, 5/5 seeds).
+- One seed is not enough. A single-seed featurizer comparison read −0.0016 on
+  5/5 folds and disappeared once the noise floor was measured.
 - `run_v6_mem.evaluate` picks its decision threshold with Youden's J **on the
   data being scored**, which inflates f1/mcc/precision/recall (AUC/AP are
   unaffected). Pass an explicit `threshold=` for an unbiased number — the bench

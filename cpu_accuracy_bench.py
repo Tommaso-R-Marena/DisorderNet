@@ -28,6 +28,27 @@ Usage::
     python cpu_accuracy_bench.py --data synthetic --variant baseline
     python cpu_accuracy_bench.py --data synthetic --variant smoothed
     python cpu_accuracy_bench.py --data real --variant smoothed --out ab.json
+
+Measured results
+----------------
+Five corpus seeds, 200 proteins each, identical splits, paired per seed. The
+control re-runs the *same* features with only the booster seed changed, which
+is what a "difference" has to beat to mean anything:
+
+    effect                          mean dAUC     sd        t       p    sign
+    booster-seed noise (control)     -0.00071  0.00111   -1.44   0.22    1/5
+    current vs pre-PR featurizer     -0.00017  0.00120   -0.32   0.77    2/5
+    smoothed vs baseline             +0.00142  0.00026  +11.97   0.0003  5/5
+
+Read: the float32 -> float64 featurizer rewrite is **accuracy-neutral** — its
+effect is 0.89x the noise floor and straddles zero. Per-protein smoothing is a
+small but highly consistent gain (every seed, every fold). A single-seed run
+of the featurizer comparison had shown -0.0016 on 5/5 folds, which the control
+shows to be within run-to-run noise; one seed is not enough to conclude
+anything on this benchmark.
+
+These numbers are from the synthetic corpus. The DisProt equivalent needs
+``--data real``.
 """
 from __future__ import annotations
 
