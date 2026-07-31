@@ -28,7 +28,8 @@ from cpu_accuracy_bench import (
     run_cv,
     smooth_per_protein,
 )
-from run_v6_mem import PHYS_DIM, evaluate, phys, wavg, wvar, youden_threshold
+from run_v6_mem import (PHYS_DIM, evaluate, phys, smooth_by_protein, wavg, wvar,
+                        youden_threshold)
 
 pytestmark = pytest.mark.filterwarnings("ignore::UserWarning")
 
@@ -140,6 +141,31 @@ def test_smoothing_suppresses_isolated_spikes():
 def test_smoothing_is_identity_on_a_constant_protein():
     probs = np.full(30, 0.42)
     assert np.allclose(smooth_per_protein(probs, [30], half_width=3), 0.42)
+
+
+def test_run_v6_smoothing_helper_matches_the_bench():
+    """run_v6_mem.smooth_by_protein and the bench's helper must not diverge."""
+    rng = np.random.RandomState(14)
+    lengths = [23, 41, 7]
+    probs = rng.rand(sum(lengths))
+    assert np.allclose(
+        smooth_by_protein(probs, lengths, 3),
+        smooth_per_protein(probs, lengths, half_width=3),
+    )
+
+
+def test_run_v6_smoothing_is_off_by_default_and_a_no_op_at_zero():
+    """The historical results_v6 numbers must stay reproducible out of the box."""
+    import run_v6_mem
+
+    assert run_v6_mem.SMOOTH_HW == 0
+    probs = np.linspace(0.0, 1.0, 25)
+    assert np.array_equal(smooth_by_protein(probs, [25], 0), probs)
+
+
+def test_run_v6_smoothing_rejects_mismatched_lengths():
+    with pytest.raises(ValueError):
+        smooth_by_protein(np.zeros(20), [10, 5], 3)
 
 
 # ---------------------------------------------------------------------------

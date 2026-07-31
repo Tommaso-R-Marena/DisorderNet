@@ -19,6 +19,8 @@ from window_stats import (SymbolWindows, build_index_table, encode_sequence,
 RESULTS_DIR = results_dir("results_v6", create=True)
 
 ESM_PCA = 48; SEED = 42; MAX_PROT = 1500; MAX_LEN = 800
+# Half-width for per-protein probability smoothing; 0 = off (historical default).
+SMOOTH_HW = int(os.environ.get("DISORDERNET_V6_SMOOTH", "0"))
 
 AA="ACDEFGHIKLMNPQRSTVWY"
 AA_IDX={a:i for i,a in enumerate(AA)}
@@ -79,6 +81,28 @@ def phys(seq):
     f.append((wavg(DISPROP[idx],5)-ctx_avg[30][:,2]).reshape(-1,1))     # 1
     f.append(np.full((L,3),[dv.mean(),len(set(seq))/20,np.log(L)/10],dtype=np.float32))  # 3
     return np.concatenate(f,1)
+
+def smooth_by_protein(probs,lengths,half_width):
+    """Moving-average per-residue probabilities *within* each protein.
+
+    Disorder is a segment property — neighbouring residues share a label far
+    more often than not — so averaging a short window suppresses isolated
+    single-residue spikes. Smoothing stops at protein boundaries; blurring
+    across them would mix unrelated chains.
+
+    ``run_v7.py``/``predictor.py`` already do this (window 7). Off by default
+    here so ``results_v6/metrics.json`` stays reproducible; enable with
+    ``DISORDERNET_V6_SMOOTH=3`` and confirm the gain with
+    ``python cpu_accuracy_bench.py --data real``.
+    """
+    probs=np.asarray(probs,dtype=np.float64)
+    if half_width<=0: return probs
+    if sum(lengths)!=len(probs):
+        raise ValueError(f"lengths sum to {sum(lengths)} but got {len(probs)} probabilities")
+    out=np.empty_like(probs); off=0
+    for L in lengths:
+        out[off:off+L]=wavg(probs[off:off+L],half_width); off+=L
+    return out
 
 def youden_threshold(yt,yp):
     """Threshold maximising Youden's J (tpr - fpr)."""
@@ -184,6 +208,8 @@ def main():
         xp=xm.predict(dvx); del dx,dvx,X_tr,y_tr; gc.collect()
         
         ep=0.55*lp+0.45*xp
+        if SMOOTH_HW>0:
+            ep=smooth_by_protein(ep,[proteins[i]["length"] for i in va_i],SMOOTH_HW)
         m=evaluate(y_val,ep); fm.append(m); ayt.append(y_val); ayp.append(ep)
         print(f"  AUC={m['auc_roc']:.4f} AP={m['avg_precision']:.4f} F1={m['f1']:.4f} MCC={m['mcc']:.4f}")
         
