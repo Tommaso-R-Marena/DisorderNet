@@ -19,14 +19,18 @@ _AROM = set("FWY")
 _HYDRO = set("AILMFVW")
 
 
+# Byte lookup table: +1 for KRH, -1 for DE, 0 otherwise.
+_CHARGE_LUT = np.zeros(256, dtype=np.float32)
+for _aa in _POS:
+    _CHARGE_LUT[ord(_aa)] = 1.0
+for _aa in _NEG:
+    _CHARGE_LUT[ord(_aa)] = -1.0
+
+
 def _charges(seq: str) -> np.ndarray:
-    out = np.zeros(len(seq), dtype=np.float32)
-    for i, aa in enumerate(seq):
-        if aa in _POS:
-            out[i] = 1.0
-        elif aa in _NEG:
-            out[i] = -1.0
-    return out
+    if not seq:
+        return np.zeros(0, dtype=np.float32)
+    return _CHARGE_LUT[np.frombuffer(seq.encode("latin-1", "replace"), dtype=np.uint8)]
 
 
 def net_charge_per_residue(seq: str) -> float:
@@ -64,21 +68,15 @@ def scd_lite(seq: str) -> float:
     """
     if len(seq) < 4:
         return 0.0
-    q = _charges(seq)
+    q = _charges(seq).astype(np.float64)
     n = len(q)
-    # Windowed approximation — accuracy-preserving enough for triage cues
+    # Windowed approximation — accuracy-preserving enough for triage cues.
+    # Grouping the double sum by lag d turns it into w dot products:
+    #   Σ_i Σ_{j=i+1}^{i+w} q_i q_j √(j-i)  =  Σ_{d=1}^{w} √d · (q[:-d] · q[d:])
     w = min(40, n - 1)
     total = 0.0
-    for i in range(n):
-        qi = float(q[i])
-        if qi == 0.0:
-            continue
-        j_hi = min(n, i + w + 1)
-        for j in range(i + 1, j_hi):
-            qj = float(q[j])
-            if qj == 0.0:
-                continue
-            total += qi * qj * math.sqrt(j - i)
+    for d in range(1, w + 1):
+        total += math.sqrt(d) * float(np.dot(q[:-d], q[d:]))
     return float(total / n)
 
 

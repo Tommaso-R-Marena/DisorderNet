@@ -32,20 +32,23 @@ Interval = tuple[int, int]  # half-open [start, end)
 
 
 def intervals_from_binary(binary: np.ndarray, min_len: int = 1) -> list[Interval]:
-    """Extract contiguous runs of 1s as half-open intervals."""
-    binary = np.asarray(binary, dtype=np.int8).ravel()
-    intervals: list[Interval] = []
-    start: Optional[int] = None
-    for i, v in enumerate(binary):
-        if v and start is None:
-            start = i
-        elif not v and start is not None:
-            if i - start >= min_len:
-                intervals.append((start, i))
-            start = None
-    if start is not None and len(binary) - start >= min_len:
-        intervals.append((start, len(binary)))
-    return intervals
+    """Extract contiguous runs of non-zero values as half-open intervals.
+
+    Runs shorter than ``min_len`` are dropped. Vectorised: run boundaries come
+    from a single diff over a zero-padded copy, which matters because segment
+    metrics call this once per protein on every evaluation epoch.
+    """
+    flags = np.asarray(binary).ravel() != 0
+    if flags.size == 0:
+        return []
+    # Pad with False on both sides so every run has an explicit rising/falling edge.
+    edges = np.diff(np.concatenate(([False], flags, [False])).view(np.int8))
+    starts = np.flatnonzero(edges == 1)
+    ends = np.flatnonzero(edges == -1)
+    if min_len > 1:
+        keep = (ends - starts) >= min_len
+        starts, ends = starts[keep], ends[keep]
+    return list(zip(starts.tolist(), ends.tolist()))
 
 
 def interval_iou(a: Interval, b: Interval) -> float:

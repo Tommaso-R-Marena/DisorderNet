@@ -6,6 +6,14 @@ and multi-scale contextual features.
 import numpy as np
 from collections import Counter
 
+from window_stats import (
+    SymbolWindows,
+    build_index_table,
+    encode_sequence,
+    moving_average,
+    moving_variance,
+)
+
 # ============================================================
 # AMINO ACID PROPERTY SCALES
 # ============================================================
@@ -88,6 +96,35 @@ ALL_SCALES = {
     'bulkiness': BULKINESS,
 }
 
+# Residue classes used for both the windowed and the protein-level fractions.
+# These live at module scope because the global block needs them even when
+# `windows` is empty.
+DISORDER_PROMOTING = frozenset("AEGKPQRS")
+ORDER_PROMOTING = frozenset("CFILMVWY")
+
+DEFAULT_WINDOWS = (5, 11, 21, 41)
+PRO_GLY_WINDOW = 21      # local Pro/Gly enrichment window (odd, centred)
+LOW_COMPLEXITY_HALF = 25  # low-complexity flag looks at i-25 .. i+25
+LOW_COMPLEXITY_MAX_UNIQUE = 8
+_MAX_ENTROPY_BITS = 4.32  # log2(20), used to normalise the global entropy
+
+# Fixed blocks: one-hot(20) + properties(8) + position(2)
+#               + Pro/Gly(2) + low-complexity(1) + global(3)
+_STATIC_FEATURE_DIM = 36
+_PER_WINDOW_FEATURE_DIM = 42
+
+# (20, 8) property matrix in ALL_SCALES order; unknown residues read as zeros.
+_SCALE_MATRIX = np.array(
+    [[scale.get(aa, 0.0) for scale in ALL_SCALES.values()] for aa in "ACDEFGHIKLMNPQRSTVWY"],
+    dtype=np.float64,
+)
+_AA_LUT = build_index_table("ACDEFGHIKLMNPQRSTVWY", default=-1, dtype=np.int32)
+
+
+def n_features(windows=DEFAULT_WINDOWS) -> int:
+    """Number of columns produced by :func:`compute_features_for_protein`."""
+    return _STATIC_FEATURE_DIM + _PER_WINDOW_FEATURE_DIM * len(tuple(windows))
+
 
 def get_residue_properties(aa):
     """Get physicochemical property vector for an amino acid."""
@@ -130,100 +167,99 @@ def sequence_complexity(window):
     return complexity
 
 
-def compute_features_for_protein(sequence, windows=[5, 11, 21, 41]):
+def compute_features_for_protein(sequence, windows=DEFAULT_WINDOWS):
     """
     Compute feature matrix for a protein sequence.
-    
+
     Returns: numpy array of shape (seq_len, num_features)
+
+    Fully vectorised: each windowed block is a prefix-sum difference over the
+    sequence (see :mod:`window_stats`) rather than a per-residue Python loop,
+    and the protein-level block is computed once instead of once per residue.
     """
+    windows = tuple(windows)
     seq_len = len(sequence)
-    all_features = []
-    
-    for i in range(seq_len):
-        aa = sequence[i]
-        feat = []
-        
-        # 1. One-hot encoding (20 features)
-        onehot = [0.0] * 20
-        if aa in AA_TO_IDX:
-            onehot[AA_TO_IDX[aa]] = 1.0
-        feat.extend(onehot)
-        
-        # 2. Physicochemical properties (8 features)
-        feat.extend(get_residue_properties(aa))
-        
-        # 3. Relative position features (2 features)
-        rel_pos = i / max(seq_len - 1, 1)
-        dist_to_terminus = min(i, seq_len - 1 - i) / max(seq_len - 1, 1)
-        feat.extend([rel_pos, dist_to_terminus])
-        
-        # 4. Multi-scale windowed features
-        for w in windows:
-            half_w = w // 2
-            start = max(0, i - half_w)
-            end = min(seq_len, i + half_w + 1)
-            window_seq = sequence[start:end]
-            
-            # 4a. Amino acid composition in window (20 features per window)
-            aa_counts = Counter(window_seq)
-            window_len = len(window_seq)
-            composition = [aa_counts.get(aa, 0) / window_len for aa in AMINO_ACIDS]
-            feat.extend(composition)
-            
-            # 4b. Average properties in window (8 features per window)
-            for scale_name, scale in ALL_SCALES.items():
-                avg_val = np.mean([scale.get(c, 0.0) for c in window_seq])
-                feat.append(avg_val)
-            
-            # 4c. Property variances in window (8 features per window)
-            for scale_name, scale in ALL_SCALES.items():
-                var_val = np.var([scale.get(c, 0.0) for c in window_seq])
-                feat.append(var_val)
-            
-            # 4d. Shannon entropy and complexity (2 features per window)
-            feat.append(shannon_entropy(window_seq))
-            feat.append(sequence_complexity(window_seq))
-            
-            # 4e. Disorder-promoting residue fraction (1 feature per window)
-            disorder_promoting = set("AEGKPQRS")
-            order_promoting = set("CFILMVWY")
-            dp_frac = sum(1 for c in window_seq if c in disorder_promoting) / window_len
-            op_frac = sum(1 for c in window_seq if c in order_promoting) / window_len
-            feat.extend([dp_frac, op_frac])
-            
-            # 4f. Charge pattern features (2 features per window)
-            charges = [CHARGE.get(c, 0) for c in window_seq]
-            net_charge = sum(charges) / window_len
-            charge_asym = sum(abs(c) for c in charges) / window_len
-            feat.extend([net_charge, charge_asym])
-        
-        # 5. Proline and glycine enrichment (2 features)
-        # These are strong disorder indicators
-        local_w = 21
-        half = local_w // 2
-        s, e = max(0, i - half), min(seq_len, i + half + 1)
-        local = sequence[s:e]
-        feat.append(local.count('P') / len(local))
-        feat.append(local.count('G') / len(local))
-        
-        # 6. Low complexity indicator (1 feature)
-        # Is this residue in a low-complexity region?
-        lc_window = sequence[max(0, i-25):min(seq_len, i+26)]
-        unique_aa = len(set(lc_window))
-        feat.append(1.0 if unique_aa <= 8 else 0.0)
-        
-        # 7. Protein-level global features (3 features)
-        global_disorder_frac = sum(1 for c in sequence if c in disorder_promoting) / seq_len
-        global_entropy = shannon_entropy(sequence)
-        log_length = np.log(seq_len)
-        feat.extend([global_disorder_frac, global_entropy / 4.32, log_length / 10.0])
-        
-        all_features.append(feat)
-    
-    return np.array(all_features, dtype=np.float32)
+    if seq_len == 0:
+        return np.zeros((0, n_features(windows)), dtype=np.float32)
+
+    idx = encode_sequence(sequence, _AA_LUT)
+    known = np.flatnonzero(idx >= 0)
+    sym = SymbolWindows(sequence)
+    blocks = []
+
+    # 1. One-hot encoding (20 features)
+    onehot = np.zeros((seq_len, 20), dtype=np.float64)
+    onehot[known, idx[known]] = 1.0
+    blocks.append(onehot)
+
+    # 2. Physicochemical properties (8 features); unknown residues stay zero
+    props = np.zeros((seq_len, 8), dtype=np.float64)
+    props[known] = _SCALE_MATRIX[idx[known]]
+    blocks.append(props)
+
+    # 3. Relative position features (2 features)
+    positions = np.arange(seq_len, dtype=np.float64)
+    denom = float(max(seq_len - 1, 1))
+    blocks.append(
+        np.stack([positions / denom,
+                  np.minimum(positions, (seq_len - 1) - positions) / denom], axis=1)
+    )
+
+    # Per-residue class/charge indicators shared across window scales.
+    is_disorder = np.isin(idx, [AA_TO_IDX[c] for c in sorted(DISORDER_PROMOTING)])
+    is_order = np.isin(idx, [AA_TO_IDX[c] for c in sorted(ORDER_PROMOTING)])
+    charge = props[:, 1]  # 'charge' is the second entry of ALL_SCALES
+    residue_stats = np.stack(
+        [is_disorder, is_order, charge, np.abs(charge)], axis=1
+    ).astype(np.float64)
+
+    # 4. Multi-scale windowed features (42 per window)
+    for w in windows:
+        half_w = w // 2
+        window_len = sym.window_lengths(half_w).astype(np.float64)
+        entropy = sym.entropy(half_w).astype(np.float64)
+        # Wootton-Federhen complexity reduces exactly to H / log2(min(n, 20)).
+        with np.errstate(divide="ignore", invalid="ignore"):
+            complexity = np.where(window_len > 1,
+                                  entropy / np.log2(np.minimum(window_len, 20.0)), 0.0)
+
+        stats = moving_average(residue_stats, half_w)
+        blocks.append(moving_average(onehot, half_w))          # 4a composition (20)
+        blocks.append(moving_average(props, half_w))           # 4b mean properties (8)
+        blocks.append(moving_variance(props, half_w))          # 4c variances (8)
+        blocks.append(np.stack([entropy, complexity], axis=1))  # 4d (2)
+        blocks.append(stats[:, :2])                            # 4e disorder/order frac (2)
+        blocks.append(stats[:, 2:])                            # 4f net / |charge| (2)
+
+    # 5. Proline and glycine enrichment (2 features) — strong disorder indicators
+    pg_half = PRO_GLY_WINDOW // 2
+    pg_len = sym.window_lengths(pg_half).astype(np.float64)
+    blocks.append(
+        np.stack([sym.char_counts('P', pg_half) / pg_len,
+                  sym.char_counts('G', pg_half) / pg_len], axis=1)
+    )
+
+    # 6. Low complexity indicator (1 feature)
+    low_complexity = sym.distinct(LOW_COMPLEXITY_HALF) <= LOW_COMPLEXITY_MAX_UNIQUE
+    blocks.append(low_complexity.astype(np.float64).reshape(-1, 1))
+
+    # 7. Protein-level global features (3 features) — constant down the sequence
+    global_disorder_frac = float(is_disorder.sum()) / seq_len
+    global_entropy = sym.total_entropy()
+    log_length = float(np.log(seq_len))
+    blocks.append(
+        np.broadcast_to(
+            np.array([global_disorder_frac,
+                      global_entropy / _MAX_ENTROPY_BITS,
+                      log_length / 10.0]),
+            (seq_len, 3),
+        )
+    )
+
+    return np.concatenate(blocks, axis=1).astype(np.float32)
 
 
-def get_feature_names(windows=[5, 11, 21, 41]):
+def get_feature_names(windows=DEFAULT_WINDOWS):
     """Get descriptive names for all features."""
     names = []
     
