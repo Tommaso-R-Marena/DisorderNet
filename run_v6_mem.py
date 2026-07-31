@@ -80,11 +80,30 @@ def phys(seq):
     f.append(np.full((L,3),[dv.mean(),len(set(seq))/20,np.log(L)/10],dtype=np.float32))  # 3
     return np.concatenate(f,1)
 
-def evaluate(yt,yp):
+def youden_threshold(yt,yp):
+    """Threshold maximising Youden's J (tpr - fpr)."""
+    fpr,tpr,th=roc_curve(yt,yp)
+    return float(th[np.argmax(tpr-fpr)])
+
+def evaluate(yt,yp,threshold=None):
+    """Ranking + thresholded metrics.
+
+    ``auc_roc``/``avg_precision`` are threshold-free. The remaining metrics need
+    a decision threshold; when ``threshold`` is None it is picked by Youden's J
+    **on the same data being scored**, which is optimistic — the threshold has
+    seen the labels it is graded against. AUC/AP are unaffected, but f1/mcc/
+    precision/recall/balanced_acc are biased upward by that choice.
+
+    Pass a ``threshold`` derived from held-out (e.g. training-fold) predictions
+    for an unbiased estimate; ``cpu_accuracy_bench.py`` does this. The default
+    is kept so historical ``results_v6/metrics.json`` numbers stay comparable.
+    """
     auc=roc_auc_score(yt,yp); ap=average_precision_score(yt,yp)
-    fpr,tpr,th=roc_curve(yt,yp); opt=th[np.argmax(tpr-fpr)]; yb=(yp>=opt).astype(int)
+    opt=youden_threshold(yt,yp) if threshold is None else float(threshold)
+    yb=(yp>=opt).astype(int)
     return {"auc_roc":auc,"avg_precision":ap,"f1":f1_score(yt,yb),"mcc":matthews_corrcoef(yt,yb),
-            "precision":precision_score(yt,yb),"recall":recall_score(yt,yb),"balanced_acc":balanced_accuracy_score(yt,yb)}
+            "precision":precision_score(yt,yb),"recall":recall_score(yt,yb),
+            "balanced_acc":balanced_accuracy_score(yt,yb),"threshold":opt}
 
 def main():
     print("="*70)
