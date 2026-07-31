@@ -26,6 +26,16 @@ def soft_dice_from_logits(
     return 1.0 - dice
 
 
+def _masked_probs_and_labels(logits, labels, mask):
+    """Sigmoid probabilities and labels with padded positions zeroed out.
+
+    Zeroing lets every per-sequence statistic be a row sum, so the whole batch
+    is a handful of kernels instead of one Python iteration per sequence.
+    """
+    m = mask.to(logits.dtype)
+    return torch.sigmoid(logits) * m, labels.to(logits.dtype) * m
+
+
 def batch_mean_dice_loss(
     logits: torch.Tensor,
     labels: torch.Tensor,
@@ -33,17 +43,15 @@ def batch_mean_dice_loss(
     smooth: float = 1.0,
 ) -> torch.Tensor:
     """Per-sequence soft Dice averaged over batch (ignores padding)."""
-    losses: list[torch.Tensor] = []
-    for b in range(logits.shape[0]):
-        m = mask[b]
-        if m.sum() < 2:
-            continue
-        losses.append(
-            soft_dice_from_logits(logits[b][m], labels[b][m], smooth=smooth)
-        )
-    if not losses:
+    probs, y = _masked_probs_and_labels(logits, labels, mask)
+    intersection = (probs * y).sum(dim=1)
+    denom = probs.sum(dim=1) + y.sum(dim=1)
+    per_seq = 1.0 - (2.0 * intersection + smooth) / (denom + smooth)
+
+    valid = mask.sum(dim=1) >= 2
+    if not bool(valid.any()):
         return torch.zeros((), device=logits.device, dtype=logits.dtype)
-    return torch.stack(losses).mean()
+    return per_seq[valid].mean()
 
 
 def apply_label_smoothing(labels: torch.Tensor, smoothing: float) -> torch.Tensor:
@@ -62,21 +70,18 @@ def batch_mean_tversky_loss(
     smooth: float = 1.0,
 ) -> torch.Tensor:
     """Per-sequence Tversky loss (alpha=FN weight, beta=FP weight)."""
-    losses: list[torch.Tensor] = []
-    for b in range(logits.shape[0]):
-        m = mask[b]
-        if m.sum() < 2:
-            continue
-        probs = torch.sigmoid(logits[b][m])
-        y = labels[b][m].float()
-        tp = (probs * y).sum()
-        fn = (y * (1.0 - probs)).sum()
-        fp = ((1.0 - y) * probs).sum()
-        tversky = (tp + smooth) / (tp + alpha * fn + beta * fp + smooth)
-        losses.append(1.0 - tversky)
-    if not losses:
+    probs, y = _masked_probs_and_labels(logits, labels, mask)
+    # Padding is zero in both probs and y, so it drops out of every term:
+    #   fn = sum (1-p)*y = sum y - p*y      fp = sum (1-y)*p = sum p - p*y
+    tp = (probs * y).sum(dim=1)
+    fn = y.sum(dim=1) - tp
+    fp = probs.sum(dim=1) - tp
+    per_seq = 1.0 - (tp + smooth) / (tp + alpha * fn + beta * fp + smooth)
+
+    valid = mask.sum(dim=1) >= 2
+    if not bool(valid.any()):
         return torch.zeros((), device=logits.device, dtype=logits.dtype)
-    return torch.stack(losses).mean()
+    return per_seq[valid].mean()
 
 
 def rdrop_symmetric_kl(
@@ -124,34 +129,22 @@ def composite_disorder_loss(
     if cfg.label_smoothing > 0:
         flat_labels = apply_label_smoothing(flat_labels, cfg.label_smoothing)
 
+    # One per-residue pass, then reduce. (This used to compute the focal/BCE
+    # term twice whenever sample weights were supplied — i.e. on every training
+    # step — and throw the unweighted copy away.)
+    per_residue = nn.functional.binary_cross_entropy_with_logits(
+        flat_logits, flat_labels, pos_weight=pos_weight, reduction="none",
+    )
     if cfg.use_focal_loss:
-        bce = nn.functional.binary_cross_entropy_with_logits(
-            flat_logits, flat_labels, pos_weight=pos_weight, reduction="none",
-        )
         probs = torch.sigmoid(flat_logits)
         pt = torch.where(flat_labels > 0.5, probs, 1.0 - probs)
-        focal = bce * ((1.0 - pt) ** cfg.focal_gamma)
-        base_loss = focal.mean()
-    else:
-        base_loss = nn.functional.binary_cross_entropy_with_logits(
-            flat_logits, flat_labels, pos_weight=pos_weight,
-        )
+        per_residue = per_residue * ((1.0 - pt) ** cfg.focal_gamma)
 
-    if sample_weight is not None:
+    if sample_weight is None:
+        base_loss = per_residue.mean()
+    else:
         sw = sample_weight[mask]
-        if cfg.use_focal_loss:
-            bce = nn.functional.binary_cross_entropy_with_logits(
-                flat_logits, flat_labels, pos_weight=pos_weight, reduction="none",
-            )
-            probs = torch.sigmoid(flat_logits)
-            pt = torch.where(flat_labels > 0.5, probs, 1.0 - probs)
-            weighted = bce * ((1.0 - pt) ** cfg.focal_gamma) * sw
-            base_loss = weighted.sum() / sw.sum().clamp(min=1.0)
-        else:
-            bce = nn.functional.binary_cross_entropy_with_logits(
-                flat_logits, flat_labels, pos_weight=pos_weight, reduction="none",
-            )
-            base_loss = (bce * sw).sum() / sw.sum().clamp(min=1.0)
+        base_loss = (per_residue * sw).sum() / sw.sum().clamp(min=1.0)
 
     total = base_loss
     if getattr(cfg, "use_dice_loss", False) and logits.dim() == 2:

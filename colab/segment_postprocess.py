@@ -39,23 +39,15 @@ def postprocess_binary(
 
 
 def _close_gaps(binary: np.ndarray, max_gap: int) -> np.ndarray:
-    """Fill runs of 0 shorter than max_gap when sandwiched between 1s."""
+    """Fill runs of 0 no longer than max_gap when sandwiched between 1s."""
     out = binary.copy()
     n = len(out)
-    i = 0
-    while i < n:
-        if out[i] != 0:
-            i += 1
+    for start, end in intervals_from_binary(out == 0, min_len=1):
+        if end - start > max_gap:
             continue
-        gap_start = i
-        while i < n and out[i] == 0:
-            i += 1
-        gap_end = i
-        gap_len = gap_end - gap_start
-        has_left = gap_start > 0 and out[gap_start - 1] == 1
-        has_right = gap_end < n and out[gap_end] == 1
-        if has_left and has_right and gap_len <= max_gap:
-            out[gap_start:gap_end] = 1
+        # Interior gaps only: both flanks must exist and be predicted disorder.
+        if start > 0 and end < n and out[start - 1] == 1 and out[end] == 1:
+            out[start:end] = 1
     return out
 
 
