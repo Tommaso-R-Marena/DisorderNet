@@ -37,6 +37,29 @@ cumsum helpers. Two invariants matter: prefix sums accumulate in **float64**
 (a float32 cumsum over the bulkiness/MW scales loses the significant digits
 that `E[x^2]-E[x]^2` depends on) and moving variances are **clipped at 0**.
 
+### Measuring CPU accuracy (before claiming a change helps)
+`cpu_accuracy_bench.py` runs the same 5-fold protein-grouped CV as `run_v6_mem.py`
+so two variants can be compared under identical splits and seeds:
+```
+python cpu_accuracy_bench.py --data real                 # DisProt, the number that counts
+python cpu_accuracy_bench.py --data synthetic            # no-download fallback
+python cpu_accuracy_bench.py --variant smoothed --out ab.json
+```
+Rules of thumb:
+- `--data real` needs `fetch_disprot.py` + `extract_esm_embeddings.py` to have run.
+  Both need network (`disprot.org`, `dl.fbaipublicfiles.com`); some sandboxes
+  block them, in which case only `--data synthetic` is available.
+- **Synthetic AUC is not comparable to the DisProt number.** It is calibrated to
+  the same 0.80–0.87 band and is only meaningful as an A/B between variants on
+  the same corpus. It has a genuine Bayes ceiling (part of the label is driven by
+  a field the model never sees), so it does not saturate.
+- Re-run with only `model_seed` changed to get this benchmark's **noise floor**;
+  a claimed improvement has to beat it before it means anything.
+- `run_v6_mem.evaluate` picks its decision threshold with Youden's J **on the
+  data being scored**, which inflates f1/mcc/precision/recall (AUC/AP are
+  unaffected). Pass an explicit `threshold=` for an unbiased number — the bench
+  derives each fold's threshold from the other folds and reports both.
+
 ### Running the CPU pipeline (the "application")
 The end-to-end CPU model lives in the top-level scripts. Paths are centralized in
 `disordernet_paths.py` and default to **repo-local** dirs (`./data`, `./data/embeddings`,
