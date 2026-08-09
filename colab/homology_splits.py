@@ -269,6 +269,88 @@ def _blast_homologous_pairs(
         return None
 
 
+def blast_cross_identity_hits(
+    query_proteins: list,
+    subject_proteins: list,
+    min_identity: float = 0.40,
+    min_coverage: float = 0.50,
+    n_jobs: Optional[int] = None,
+) -> Optional[list]:
+    """Identity hits between two protein sets (e.g. CAID targets vs training set).
+
+    Returns ``[(query_index, subject_index, identity), ...]`` at or above
+    ``min_identity``, or ``None`` when BLAST is unavailable/fails so the caller
+    can fall back.
+
+    Exists because the naive alternative is ``len(queries) * len(subjects)``
+    full Ratcliff/Obershelp comparisons — ~1.7M for CAID3 against DisProt, which
+    is roughly five single-threaded hours. BLAST does the same job in seconds
+    and with real alignment identity.
+    """
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    if not _blast_available():
+        return None
+    n_jobs = n_jobs or available_cpus()
+
+    def _write(path, proteins) -> int:
+        written = 0
+        with open(path, "w") as fh:
+            for i, p in enumerate(proteins):
+                seq = (p.get("sequence") or "").strip()
+                if seq:
+                    fh.write(f">{i}\n{seq}\n")
+                    written += 1
+        return written
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="dn_blastx_") as td:
+            tmp = Path(td)
+            qf, sf = tmp / "q.fasta", tmp / "s.fasta"
+            if not _write(qf, query_proteins) or not _write(sf, subject_proteins):
+                return []
+            subprocess.run(
+                ["makeblastdb", "-in", str(sf), "-dbtype", "prot", "-out", str(tmp / "db")],
+                check=True, capture_output=True, text=True,
+            )
+            out = tmp / "hits.tsv"
+            subprocess.run(
+                ["blastp", "-query", str(qf), "-db", str(tmp / "db"),
+                 "-outfmt", "6 qseqid sseqid pident length qlen slen",
+                 "-evalue", "1e-3", "-max_target_seqs", "5000",
+                 "-num_threads", str(max(1, n_jobs)), "-out", str(out)],
+                check=True, capture_output=True, text=True,
+            )
+            best: dict = {}
+            with out.open() as fh:
+                for line in fh:
+                    parts = line.rstrip("\n").split("\t")
+                    if len(parts) < 6:
+                        continue
+                    try:
+                        qi, si = int(parts[0]), int(parts[1])
+                        pid = float(parts[2]) / 100.0
+                        alen, qlen, slen = int(parts[3]), int(parts[4]), int(parts[5])
+                    except ValueError:
+                        continue
+                    shorter = min(qlen, slen)
+                    if shorter <= 0:
+                        continue
+                    cov = alen / shorter
+                    if cov < min_coverage:
+                        continue
+                    ident = pid * cov
+                    if ident >= min_identity:
+                        key = (qi, si)
+                        if ident > best.get(key, 0.0):
+                            best[key] = ident
+            return [(q, s, ident) for (q, s), ident in sorted(best.items())]
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
 def cluster_proteins_by_homology(
     proteins: list,
     min_identity: float = 0.40,

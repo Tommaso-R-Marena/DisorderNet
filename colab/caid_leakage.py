@@ -9,8 +9,11 @@ This module:
 2. Optionally filters training proteins that hit the CAID set (leak-free train).
 3. Writes a machine-readable audit for publish packages / METHODS_CHECKLIST.
 
-Identity uses the same SequenceMatcher protocol as ``homology_splits`` (≥40%
-default) so paper language stays consistent with ``docs/HOMOLOGY_HOLDOUT.md``.
+Identity uses the same backend as ``homology_splits`` (≥40% default) so paper
+language stays consistent with ``docs/HOMOLOGY_HOLDOUT.md``: BLASTp percent
+identity scaled by alignment coverage where BLAST+ is available, otherwise the
+in-process Ratcliff/Obershelp approximation. The report's ``protocol`` field
+records which one produced it.
 """
 from __future__ import annotations
 
@@ -55,33 +58,70 @@ def audit_train_vs_caid(
     id_hits = sorted(set(train_by_id) & set(caid_by_id))
     seq_hits: list[dict] = []
     comparisons = 0
-    for cid, cp in caid_by_id.items():
-        cseq = cp.get("sequence", "")
-        for tid, tp in train_by_id.items():
+    protocol = "SequenceMatcher_identity_plus_id"
+    truncated = False
+
+    caid_items = list(caid_by_id.items())
+    train_items = list(train_by_id.items())
+
+    # Preferred path: BLASTp. The nested pairwise loop below is
+    # len(caid) * len(train) full O(L^2) comparisons — ~1.7M for CAID3 against
+    # DisProt, roughly five single-threaded hours — and it previously only
+    # appeared fast because difflib's autojunk was silently zeroing every score
+    # for sequences of 200+ residues, i.e. the audit was not auditing anything.
+    from colab.homology_splits import blast_cross_identity_hits
+
+    blast_hits = blast_cross_identity_hits(
+        [cp for _, cp in caid_items],
+        [tp for _, tp in train_items],
+        min_identity=min_identity,
+    )
+    if blast_hits is not None:
+        protocol = "blastp_pident_x_coverage_plus_id"
+        comparisons = len(caid_items) * len(train_items)
+        for qi, si, ident in blast_hits:
+            cid, cp = caid_items[qi]
+            tid, tp = train_items[si]
             if tid == cid:
                 continue
-            comparisons += 1
+            seq_hits.append(
+                {
+                    "caid_id": cid,
+                    "train_id": tid,
+                    "identity": round(float(ident), 4),
+                    "caid_len": len(cp.get("sequence", "")),
+                    "train_len": len(tp.get("sequence", "")),
+                }
+            )
+    else:
+        for cid, cp in caid_items:
+            cseq = cp.get("sequence", "")
+            for tid, tp in train_items:
+                if tid == cid:
+                    continue
+                comparisons += 1
+                if comparisons > max_pairwise:
+                    break
+                ident = _seq_identity(cseq, tp.get("sequence", ""))
+                if ident >= min_identity:
+                    seq_hits.append(
+                        {
+                            "caid_id": cid,
+                            "train_id": tid,
+                            "identity": round(ident, 4),
+                            "caid_len": len(cseq),
+                            "train_len": len(tp.get("sequence", "")),
+                        }
+                    )
             if comparisons > max_pairwise:
+                truncated = True
                 break
-            ident = _seq_identity(cseq, tp.get("sequence", ""))
-            if ident >= min_identity:
-                seq_hits.append(
-                    {
-                        "caid_id": cid,
-                        "train_id": tid,
-                        "identity": round(ident, 4),
-                        "caid_len": len(cseq),
-                        "train_len": len(tp.get("sequence", "")),
-                    }
-                )
-        if comparisons > max_pairwise:
-            break
 
     n_train = len(train_proteins)
     n_caid = len(caid_proteins)
     leak_ids = set(id_hits) | {h["train_id"] for h in seq_hits}
     return {
-        "protocol": "SequenceMatcher_identity_plus_id",
+        "protocol": protocol,
         "min_identity": min_identity,
         "n_train": n_train,
         "n_caid": n_caid,
@@ -92,11 +132,13 @@ def audit_train_vs_caid(
         "n_train_flagged_for_exclusion": len(leak_ids),
         "flagged_train_ids": sorted(leak_ids),
         "comparisons": comparisons,
-        "truncated_pairwise": comparisons > max_pairwise,
+        "truncated_pairwise": truncated,
         "leak_free": len(leak_ids) == 0,
         "disclaimer": (
-            "Not MMseqs2 / not official CAID BLAST filters. Conservative internal "
-            "audit aligned with docs/HOMOLOGY_HOLDOUT.md."
+            "Internal audit aligned with docs/HOMOLOGY_HOLDOUT.md. Uses BLASTp "
+            "percent identity scaled by alignment coverage over the shorter "
+            "sequence when BLAST+ is available (see `protocol`); not the official "
+            "CAID filter pipeline."
         ),
     }
 
