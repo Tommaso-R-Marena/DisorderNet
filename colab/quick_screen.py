@@ -10,6 +10,7 @@ the go/no-go reflects the ultra stack, not a toy CNN recipe.
 
 from __future__ import annotations
 
+import os
 import json
 import time
 from dataclasses import dataclass
@@ -319,6 +320,23 @@ def run_paradigm_quick_screen(
     screen_cfg.pin_memory = cfg.pin_memory
     screen_cfg.num_workers = cfg.num_workers
     screen_cfg.data_cache = cfg.data_cache
+
+    # Diagnostic override. The screen profile's epoch budget is deliberately
+    # small, so a screen that is still improving at the last epoch cannot tell
+    # you whether the paradigm is weak or merely undertrained. Raising this
+    # separates the two before committing to a full CV.
+    _screen_epochs = os.environ.get("DISORDERNET_SCREEN_EPOCHS")
+    if _screen_epochs:
+        try:
+            screen_cfg.num_epochs = int(_screen_epochs)
+            screen_cfg.patience = max(screen_cfg.patience, screen_cfg.num_epochs // 3)
+            print(
+                f"  [diagnostic] DISORDERNET_SCREEN_EPOCHS={screen_cfg.num_epochs} "
+                f"(patience={screen_cfg.patience})",
+                flush=True,
+            )
+        except ValueError:
+            pass
 
     print(
         f"\n  GPU CV: {screen_cfg.n_folds} folds  profile={train_profile}  "

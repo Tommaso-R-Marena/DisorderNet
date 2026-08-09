@@ -110,6 +110,8 @@ def _build_cfg(args, workdir: str):
         else args.data_cache,
         num_workers=args.num_workers,
     )
+    if getattr(args, "num_epochs", None):
+        overrides["num_epochs"] = int(args.num_epochs)
     if getattr(args, "function_head", False):
         overrides["use_function_head"] = True
     if getattr(args, "no_function_head", False):
@@ -1412,6 +1414,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--backbone", default="650M", help="ESM-2 backbone key (650M, 3B, …)")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--n-folds", type=int, default=5)
+    p.add_argument(
+        "--num-epochs",
+        type=int,
+        default=None,
+        help="Override the profile's epoch budget (diagnostics: distinguishes an "
+             "undertrained run from a broken one)",
+    )
     p.add_argument("--workdir", default=None, help="Working directory (default: Slurm scratch)")
     p.add_argument("--checkpoint-dir", default="checkpoints", help="Relative to workdir")
     p.add_argument("--data-cache", default="disprot_raw.json", help="DisProt cache path")
