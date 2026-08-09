@@ -112,6 +112,10 @@ disordernet_slurm_setup() {
   export OMP_NUM_THREADS="${OMP_NUM_THREADS:-${SLURM_CPUS_PER_TASK:-8}}"
   export MKL_NUM_THREADS="${MKL_NUM_THREADS:-${OMP_NUM_THREADS}}"
   export TOKENIZERS_PARALLELISM=false
+  # tqdm redraws with \r to stderr, which in a batch job turns each progress bar
+  # into one multi-megabyte line in the .err file and buries real tracebacks.
+  # Throttling the refresh keeps progress visible while making the logs greppable.
+  export TQDM_MININTERVAL="${TQDM_MININTERVAL:-30}"
   export TMPDIR="${TMPDIR:-/tmp}"
   # Keep model weights in ONE persistent, shared cache. A repo-local default
   # meant each checkout re-downloaded ESM-2 from scratch — 2.5GB for 650M and
