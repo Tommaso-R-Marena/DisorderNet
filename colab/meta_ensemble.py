@@ -15,17 +15,50 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
 from colab.biological_utility import align_fold_predictions
+from colab.cv_splits import resolve_cv_splits
 from colab.inference_fusion import compute_pooled_metrics, write_fused_probs_to_fold_results
+
+
+def _assign_protein_folds(
+    proteins: list,
+    fold_results: list,
+    used_ids: list[str],
+    n_folds: int,
+) -> np.ndarray:
+    """Fold index per entry of ``used_ids``, reusing the run's own CV partition.
+
+    Keeping the meta-learner's folds identical to the base CV folds means a
+    residue is never scored by a stacker fitted on predictions from a model that
+    trained on that same protein.
+    """
+    fold_of_id: dict[str, int] = {}
+    for fold_idx, (_, val_idx) in enumerate(
+        resolve_cv_splits(proteins, n_folds, fold_results=fold_results)
+    ):
+        for i in val_idx:
+            fold_of_id[proteins[i]["id"]] = fold_idx
+    # Any id missing from the partition round-robins into a fold so it is still
+    # scored out-of-sample rather than silently dropped.
+    return np.array(
+        [fold_of_id.get(pid, idx % max(n_folds, 1)) for idx, pid in enumerate(used_ids)],
+        dtype=np.int64,
+    )
 
 
 def _build_stacker_matrix(
     aligned: list[dict],
     streams: dict[str, dict[str, np.ndarray]],
-) -> tuple[np.ndarray, np.ndarray]:
-    """Stack aligned prediction streams into (N, n_streams) feature matrix."""
+) -> tuple[np.ndarray, np.ndarray, list[str], np.ndarray]:
+    """Stack aligned prediction streams into (N, n_streams) feature matrix.
+
+    Also returns the usable protein ids and a per-row protein index, so the
+    meta-learner can be fitted out-of-fold rather than on its own scores.
+    """
     names = list(streams.keys())
     chunks_x: list[np.ndarray] = []
     chunks_y: list[np.ndarray] = []
+    used_ids: list[str] = []
+    row_protein: list[np.ndarray] = []
 
     for item in aligned:
         pid = item["id"]
@@ -46,10 +79,17 @@ def _build_stacker_matrix(
         mat = np.stack(cols, axis=1)
         chunks_x.append(mat)
         chunks_y.append(np.asarray(item["labels"], dtype=np.float32))
+        row_protein.append(np.full(mat.shape[0], len(used_ids), dtype=np.int64))
+        used_ids.append(pid)
 
     if not chunks_x:
         raise ValueError("No aligned residues for meta-ensemble stacking")
-    return np.vstack(chunks_x), np.concatenate(chunks_y)
+    return (
+        np.vstack(chunks_x),
+        np.concatenate(chunks_y),
+        used_ids,
+        np.concatenate(row_protein),
+    )
 
 
 def fit_meta_stacker(
@@ -86,25 +126,55 @@ def apply_meta_stacker(
     aligned = align_fold_predictions(proteins, fold_results, n_folds=n_folds)
 
     try:
-        X, y = _build_stacker_matrix(aligned, streams)
+        X, y, used_ids, row_protein = _build_stacker_matrix(aligned, streams)
     except ValueError as exc:
         return {"skipped": True, "reason": str(exc)}, fold_results
 
     if len(np.unique(y)) < 2:
         return {"skipped": True, "reason": "insufficient label diversity"}, fold_results
 
+    # Out-of-fold stacking. Fitting the meta-learner on every OOF residue and
+    # then scoring those same residues makes `after` a resubstitution score, so
+    # delta_auc_pooled and gap_to_esmdispred would flatter the model against a
+    # genuinely held-out reference. Instead each residue is scored by a stacker
+    # that never saw its protein, grouping by protein so no protein straddles
+    # the fit/score boundary.
+    protein_fold = _assign_protein_folds(proteins, fold_results, used_ids, n_folds)
+    row_fold = protein_fold[row_protein]
+
+    stacked_probs = np.empty(len(y), dtype=np.float32)
+    n_meta_folds = 0
+    for f in np.unique(row_fold):
+        score_mask = row_fold == f
+        fit_mask = ~score_mask
+        if not fit_mask.any() or len(np.unique(y[fit_mask])) < 2:
+            # Degenerate meta-fold: fall back to the full fit for these rows.
+            continue
+        m_f, s_f = fit_meta_stacker(y[fit_mask], X[fit_mask], C=C)
+        stacked_probs[score_mask] = (
+            m_f.predict_proba(s_f.transform(X[score_mask]))[:, 1].astype(np.float32)
+        )
+        n_meta_folds += 1
+
+    # Final reported coefficients come from a full fit (for interpretability and
+    # for deployment), but they are NOT what produced `stacked_probs`.
     model, scaler = fit_meta_stacker(y, X, C=C)
-    X_scaled = scaler.transform(X)
-    stacked_probs = model.predict_proba(X_scaled)[:, 1].astype(np.float32)
+    if n_meta_folds == 0:
+        stacked_probs = model.predict_proba(scaler.transform(X))[:, 1].astype(np.float32)
 
     stream_names = list(streams.keys())
     coefs = dict(zip(stream_names, model.coef_[0].tolist()))
+    in_sample = model.predict_proba(scaler.transform(X))[:, 1].astype(np.float32)
     report_fit = {
         "stream_names": stream_names,
         "coefficients": coefs,
         "intercept": float(model.intercept_[0]),
-        "train_auc": float(roc_auc_score(y, stacked_probs)),
-        "train_ap": float(average_precision_score(y, stacked_probs)),
+        "train_auc": float(roc_auc_score(y, in_sample)),
+        "train_ap": float(average_precision_score(y, in_sample)),
+        "oof_auc": float(roc_auc_score(y, stacked_probs)),
+        "oof_ap": float(average_precision_score(y, stacked_probs)),
+        "n_meta_folds": n_meta_folds,
+        "stacking": "out_of_fold" if n_meta_folds else "in_sample_fallback",
     }
 
     offset = 0

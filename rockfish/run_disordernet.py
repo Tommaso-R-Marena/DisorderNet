@@ -294,6 +294,7 @@ def stage_stack(args, cfg, proteins, fold_results, cv_summary) -> tuple[list, di
         seed=cfg.seed,
         use_v6_pro=True,
         use_meta_ensemble=True,
+        cfg=cfg,
     )
     print_sota_stack_report(sota_report)
     save_sota_stack_report(

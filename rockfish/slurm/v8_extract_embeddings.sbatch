@@ -5,7 +5,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1
-#SBATCH --mem=64G
+#SBATCH --mem=32000M
 #SBATCH --time=00-08:00:00
 #SBATCH --account=sfried3_gpu
 #SBATCH --qos=qos_gpu

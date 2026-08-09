@@ -25,13 +25,20 @@ def _norm_id(pid: str) -> str:
 
 
 def _seq_identity(a: str, b: str) -> float:
+    """Identity approximation shared with ``homology_splits.sequence_identity``.
+
+    ``autojunk`` must stay disabled: with it on, difflib junks every amino acid
+    for inputs of length >= 200, so a near-duplicate of a CAID target scored
+    ~0.01 and this audit certified "no leakage" for essentially every protein
+    long enough to matter.
+    """
     if not a or not b:
         return 0.0
-    # Length gate: skip absurd pairwise work for very different lengths
+    # Length gate: skip pairwise work that cannot reach the threshold anyway.
     la, lb = len(a), len(b)
     if min(la, lb) / max(la, lb) < 0.5:
         return 0.0
-    return float(SequenceMatcher(None, a.upper(), b.upper()).ratio())
+    return float(SequenceMatcher(None, a.upper(), b.upper(), autojunk=False).ratio())
 
 
 def audit_train_vs_caid(

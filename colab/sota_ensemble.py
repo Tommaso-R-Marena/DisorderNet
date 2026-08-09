@@ -126,6 +126,7 @@ def apply_sota_stack(
     seed: int = 42,
     use_v6_pro: bool = False,
     use_meta_ensemble: bool = False,
+    cfg=None,
 ) -> tuple[dict, list, dict[str, np.ndarray]]:
     """
     GPU → optional v6 blend → three-way stack with physics prior.
@@ -144,9 +145,13 @@ def apply_sota_stack(
             pro_cache = v6_cache_path.replace(".json", "_pro.json")
             v6_probs_by_id = get_v6_pro_oof_probs(
                 proteins, n_folds=n_folds, seed=seed, cache_path=pro_cache,
+                cfg=cfg, fold_results=fold_results,
             )
         else:
-            oof_probs, oof_labels, _ = run_v6_lite_oof(proteins, n_folds=n_folds, seed=seed)
+            oof_probs, oof_labels, _ = run_v6_lite_oof(
+                proteins, n_folds=n_folds, seed=seed,
+                cfg=cfg, fold_results=fold_results,
+            )
             v6_probs_by_id = aligned_probs_from_oof(proteins, oof_probs)
             save_v6_probs_cache(v6_probs_by_id, v6_cache_path)
 

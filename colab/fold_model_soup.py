@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from colab.compact_checkpoint import load_compact_checkpoint
-from colab.cv_splits import get_cv_splits
+from colab.cv_splits import resolve_cv_splits
 from colab.disordernet_gpu import (
     DisorderNetGPU,
     DisProtDataset,
@@ -169,7 +169,10 @@ def run_fold_model_soup(
 
     ckpt_dir = checkpoint_dir or cfg.checkpoint_dir
     n_folds = cfg.n_folds
-    splits = get_cv_splits(proteins, n_folds)
+    # Must match the partition the fold checkpoints were trained under. Re-deriving
+    # with the default "protein" method while training used "homology" makes
+    # mode="held_out" evaluate each fold model on proteins it was trained on.
+    splits = resolve_cv_splits(proteins, n_folds, cfg=cfg, fold_results=fold_results)
     device = cfg.device
 
     prob_sum: dict[str, np.ndarray] = {

@@ -20,7 +20,7 @@ from sklearn.metrics import (
     matthews_corrcoef,
     roc_auc_score,
 )
-from colab.cv_splits import get_cv_splits
+from colab.cv_splits import get_cv_splits, resolve_cv_splits
 
 from colab.disordernet_gpu import FUNCTIONAL_TERM_GROUPS
 
@@ -274,6 +274,7 @@ def align_fold_predictions(
     proteins: list,
     fold_results: list,
     n_folds: int = 5,
+    cfg=None,
 ) -> list[dict]:
     """
     Map each protein to its out-of-fold predictions (pooled CV).
@@ -286,7 +287,11 @@ def align_fold_predictions(
     # "screen_plus"/"ultra" use homology splits, so a plain get_cv_splits() call would
     # assign proteins to the wrong folds and desync probs from proteins.
     need_splits = any(not fold.get("val_ids") for fold in fold_results)
-    splits = get_cv_splits(proteins, n_folds) if need_splits else None
+    splits = (
+        resolve_cv_splits(proteins, n_folds, cfg=cfg, fold_results=fold_results)
+        if need_splits
+        else None
+    )
     aligned: list[dict] = []
 
     for fold_idx, fold in enumerate(fold_results):

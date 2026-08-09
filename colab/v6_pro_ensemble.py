@@ -16,7 +16,7 @@ import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import average_precision_score, roc_auc_score
 
-from colab.cv_splits import get_cv_splits
+from colab.cv_splits import get_cv_splits, resolve_cv_splits
 from colab.ensemble_v6 import (
     _stack_protein_features,
     aligned_probs_from_oof,
@@ -128,13 +128,28 @@ def run_v6_pro_oof(
     n_folds: int = 5,
     seed: int = 42,
     verbose: bool = True,
+    *,
+    cfg=None,
+    split_method: str | None = None,
+    homology_min_identity: float | None = None,
+    fold_results: list | None = None,
 ) -> tuple[np.ndarray, np.ndarray, list[dict]]:
     """
     Run full-strength v6-style OOF on GPU protein list.
 
+    Split parameters must describe the same partition the GPU folds used — see
+    ``colab.cv_splits.resolve_cv_splits`` for why a mismatch leaks homologues
+    into this stream's training set.
+
     Returns (oof_probs, oof_labels, per_fold_metadata).
     """
-    splits = get_cv_splits(proteins, n_folds)
+    splits = resolve_cv_splits(
+        proteins, n_folds,
+        cfg=cfg,
+        split_method=split_method,
+        homology_min_identity=homology_min_identity,
+        fold_results=fold_results,
+    )
     oof_probs_by_id: dict[str, np.ndarray] = {}
     oof_labels_by_id: dict[str, np.ndarray] = {}
     fold_meta: list[dict] = []
@@ -239,6 +254,11 @@ def get_v6_pro_oof_probs(
     cache_path: str = "v6_pro_oof_probs_cache.json",
     force_recompute: bool = False,
     verbose: bool = True,
+    *,
+    cfg=None,
+    split_method: str | None = None,
+    homology_min_identity: float | None = None,
+    fold_results: list | None = None,
 ) -> dict[str, np.ndarray]:
     """Load or compute v6-pro OOF probabilities keyed by protein id."""
     if not force_recompute:
@@ -250,6 +270,10 @@ def get_v6_pro_oof_probs(
 
     oof_probs, _, _ = run_v6_pro_oof(
         proteins, n_folds=n_folds, seed=seed, verbose=verbose,
+        cfg=cfg,
+        split_method=split_method,
+        homology_min_identity=homology_min_identity,
+        fold_results=fold_results,
     )
     by_id = aligned_probs_from_oof(proteins, oof_probs)
     save_v6_probs_cache(by_id, cache_path)

@@ -380,8 +380,11 @@ def submit_sbatch(
     Submit a Slurm script. Returns job id (or DRY_RUN placeholder).
     Raises RuntimeError / CalledProcessError on failure.
 
-    ``mem`` overrides ``#SBATCH --mem`` when set (use e.g. ``180G`` for a100 GPU
-    jobs — full 192G often aborts at start). Leave None for CPU package jobs.
+    ``mem`` overrides ``#SBATCH --mem`` when set. Keep it equal to
+    ``cpus-per-task * 4000M`` on Rockfish: the a100/ica100/shared partitions set
+    MaxMemPerCPU=4000MB, and Slurm silently raises AllocCPUS to
+    ``ceil(mem_MB / 4000)`` when the request exceeds that ratio. Leave None to
+    use the value baked into the sbatch file.
     """
     script = Path(script)
     if not script.is_file() and not dry_run:

@@ -2222,7 +2222,17 @@ def save_cv_progress(
         "n_proteins": len(proteins),
         "protein_ids": [p["id"] for p in proteins],
         "proteins_fingerprint": proteins_fingerprint(proteins),
-        "fold_val_ids": get_fold_val_protein_ids(proteins, cfg.n_folds),
+        # Must carry the run's own split_method — recording "protein" splits for a
+        # homology-split run makes this reproducibility artifact describe a CV
+        # design the run never used.
+        "fold_val_ids": get_fold_val_protein_ids(
+            proteins,
+            cfg.n_folds,
+            split_method=getattr(cfg, "split_method", "protein"),
+            homology_min_identity=getattr(cfg, "homology_min_identity", 0.40),
+        ),
+        "split_method": getattr(cfg, "split_method", "protein"),
+        "homology_min_identity": getattr(cfg, "homology_min_identity", 0.40),
         "config_fingerprint": config_fingerprint(cfg),
         "n_folds": cfg.n_folds,
         "seed": cfg.seed,

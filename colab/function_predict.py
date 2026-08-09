@@ -501,9 +501,11 @@ def align_function_oof(
             [],
         )
 
-    from colab.cv_splits import get_cv_splits
+    from colab.cv_splits import resolve_cv_splits
 
-    splits = get_cv_splits(proteins, n_folds)
+    # Fold membership must match training, otherwise each fold's function
+    # probabilities are paired with another fold's proteins and labels.
+    splits = resolve_cv_splits(proteins, n_folds, fold_results=fold_results)
     y_true_parts: list[np.ndarray] = []
     y_prob_parts: list[np.ndarray] = []
     protein_ids: list[str] = []

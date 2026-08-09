@@ -13,7 +13,7 @@ from typing import Optional
 
 import numpy as np
 from sklearn.metrics import average_precision_score, roc_auc_score
-from colab.cv_splits import get_cv_splits
+from colab.cv_splits import get_cv_splits, resolve_cv_splits
 
 from colab.biological_utility import align_fold_predictions
 from colab.phase3_synthesis import find_optimal_fusion_alpha, fuse_disorder_score
@@ -175,7 +175,10 @@ def write_fused_probs_to_fold_results(
     by_id = {item["id"]: item["probs"] for item in aligned}
     updated = []
 
-    splits = get_cv_splits(proteins, n_folds)
+    # Use the partition recorded at training time. Re-deriving with the default
+    # "protein" method under a homology-split run writes each protein's fused
+    # probabilities into the wrong fold, desyncing val_probs from val_labels.
+    splits = resolve_cv_splits(proteins, n_folds, fold_results=fold_results)
 
     for fold_idx, (_, val_idx) in enumerate(splits):
         if fold_idx >= len(fold_results):

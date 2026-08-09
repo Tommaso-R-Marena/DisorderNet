@@ -17,7 +17,7 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import average_precision_score, roc_auc_score
 from tqdm.auto import tqdm
 
-from colab.cv_splits import get_cv_splits
+from colab.cv_splits import get_cv_splits, resolve_cv_splits
 
 from colab.biological_utility import align_fold_predictions
 from colab.inference_fusion import compute_pooled_metrics, write_fused_probs_to_fold_results
@@ -87,13 +87,30 @@ def run_v6_lite_oof(
     n_folds: int = 5,
     seed: int = 42,
     verbose: bool = True,
+    *,
+    cfg=None,
+    split_method: str | None = None,
+    homology_min_identity: float | None = None,
+    fold_results: list | None = None,
 ) -> tuple[np.ndarray, np.ndarray, list[dict]]:
     """
     Run lightweight v6-style OOF predictions aligned with GPU CV folds.
 
+    The split parameters must describe the *same* partition the GPU folds used.
+    Under the default "protein" method a protein's homologues are scattered
+    across folds, so a v6 model trained on the homology-split complement would
+    score proteins whose near-duplicates it just trained on — inflating this
+    stream and, through the stack, the headline AUC.
+
     Returns (oof_probs, oof_labels, per_fold_metadata).
     """
-    splits = get_cv_splits(proteins, n_folds)
+    splits = resolve_cv_splits(
+        proteins, n_folds,
+        cfg=cfg,
+        split_method=split_method,
+        homology_min_identity=homology_min_identity,
+        fold_results=fold_results,
+    )
     oof_probs_by_id: dict[str, np.ndarray] = {}
     oof_labels_by_id: dict[str, np.ndarray] = {}
     fold_meta: list[dict] = []
