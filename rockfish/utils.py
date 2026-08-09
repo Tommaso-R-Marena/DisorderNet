@@ -237,6 +237,12 @@ def sbatch_export_keys(extra: Sequence[str] = ()) -> str:
         "DISORDERNET_BOLTZ_ROOT",
         "BOLTZ_CACHE",
         "DISORDERNET_MAIL_USER",
+        # Without this each job re-downloads DisProt: ~7 minutes and 34 paged
+        # REST requests, on GPU walltime.
+        "DISORDERNET_DISPROT_CACHE",
+        "DISORDERNET_HOMOLOGY_JOBS",
+        "TORCH_HOME",
+        "HF_HOME",
     )
     for k in optional:
         if os.environ.get(k):
