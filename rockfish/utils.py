@@ -240,6 +240,9 @@ def sbatch_export_keys(extra: Sequence[str] = ()) -> str:
         # Without this each job re-downloads DisProt: ~7 minutes and 34 paged
         # REST requests, on GPU walltime.
         "DISORDERNET_DISPROT_CACHE",
+        # Absolute shared pLDDT cache; without it each run re-fetches ~2.5k
+        # AlphaFold entries over HTTP on GPU walltime.
+        "DISORDERNET_PLDDT_CACHE",
         "DISORDERNET_HOMOLOGY_JOBS",
         "TORCH_HOME",
         "HF_HOME",
