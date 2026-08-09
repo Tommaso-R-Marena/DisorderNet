@@ -86,6 +86,37 @@ Notes:
   which is test-only); the startup update script installs both.
 - Generated `data/`/`results*/` files are gitignored.
 
+### Fold alignment — the leakage rule that matters most
+Every post-training consumer (fold soup, v6/v6-pro OOF, fusion, stacking, stats,
+function head) must partition proteins **exactly the way training did**. Use
+`colab.cv_splits.resolve_cv_splits`, which prefers the `val_ids` recorded on each
+fold result and otherwise honours the run's own `split_method`.
+
+Calling `get_cv_splits(proteins, n_folds)` re-derives with the default
+`"protein"` method. The `ultra` / `ultra3b` / `screen_plus` profiles train with
+`split_method="homology"`, so that call silently disagrees with training and
+puts a fold model's own training proteins into its "held-out" evaluation set.
+`tests/test_leakage_guards.py` covers this; do not bypass it.
+
+Related invariants, all regression-tested:
+- The meta-stacker must be fitted **out-of-fold** (grouped by protein), never on
+  the residues it scores.
+- Isotonic calibration must be fitted **leave-one-fold-out**. Temperature scaling
+  is strictly monotone so it cannot move AUC/AP; isotonic is not and does.
+- Threshold-dependent metrics (f1/mcc) must take the cut-point from other folds.
+
+### Homology clustering (`colab/homology_splits.py`)
+- **`difflib.SequenceMatcher` must be constructed with `autojunk=False`.** With
+  the default, difflib junks every amino acid for inputs of 200+ residues, and
+  two 95%-identical proteins score ~0.01. This made homology splits and the CAID
+  leakage audit silent no-ops for 78.5% of DisProt. There is a preflight guard
+  in `rockfish/slurm/_smoke_checks.py`.
+- BLAST+ is the preferred backend and is ~1000x faster than the Python path
+  (16 s vs "does not finish" on 2663 proteins). `_common.sh` loads `blast-plus`
+  and warns if `blastp` is missing. `meta["backend"]` records which ran.
+- Never size worker pools from `os.cpu_count()` — that is the whole node, not
+  the allocation. Use `homology_splits.available_cpus()`.
+
 ### Rockfish publish path (HPC)
 - Operator ops guide (finish signals, timelines, stuck QOS recovery): root
   `README.md` § **Path C**. Also `rockfish/README.md` § From scratch,
@@ -95,7 +126,21 @@ Notes:
   (usually `sfried3_gpu`); CPU/`shared` stays `-A sfried3` with no qos.
   Prefer `bash rockfish/slurm/submit_v8.sh` (never submits an empty `--qos`).
   Discover GPU account via `sacctmgr … | awk … /qos_gpu/`.
-- **Walltime:** Rockfish a100 max is **72 h** (not 48 h); shared ≈ 36 h.
+- **Sizing:** a100 / ica100 / shared / express enforce `MaxMemPerCPU=4000`.
+  Slurm silently raises `AllocCPUS` to `ceil(mem_MB / 4000)` when a request
+  exceeds that ratio, so `--mem=180G` grabbed **47 of 48 CPUs** on a 4-GPU node
+  to run one GPU — blocking three A100s and quadrupling the billing. Always size
+  as `cpus-per-task * 4000M`. Measured peak RSS for this pipeline is ~12 GB.
+  Also note `--mem=192G` exceeds a100 node RealMemory (187.5 GiB).
+- **`_common.sh` sourcing:** Slurm copies the batch script into a per-job spool
+  directory, so `${BASH_SOURCE[0]}` does **not** resolve to the repo. Resolve
+  against `PROJECT_DIR` first (every sbatch already does; keep it that way).
+- **QOS caps:** `express_queue` is 4 CPUs/job; `shared` is 32; `qos_gpu` allows
+  10 GPUs per user. GPU jobs need `-A sfried3_gpu --qos=qos_gpu`; CPU jobs use
+  `-A sfried3` with no qos.
+- **Never run compute on a login node.** Even the pytest suite goes to `shared`
+  (it takes ~2.5 min there).
+- **Walltime:** Rockfish a100 max is **72 h** (not 48 h); shared ≈ 36 h; l40s 24 h.
   Fold resume via `cv_progress.json`; campaign watchdog:
   `bash rockfish/slurm/submit_publish_full.sh`.
 - Use the two publish submitters (not the retired all-in-one):
