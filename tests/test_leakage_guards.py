@@ -329,3 +329,102 @@ class TestHomologyClusteringActuallyClusters:
         for pos in rng.choice(400, size=20, replace=False):
             caid[pos] = rng.choice(list(_AA))
         assert _seq_identity("".join(train), "".join(caid)) > 0.80
+
+
+class TestWatchdogDetectsStalledPhases:
+    """The campaign watchdog reported ``status=running folds=0/10`` for 30 hours
+    after the GPU job had already failed 4 seconds in.
+
+    ``ACTIVE`` includes ``PENDING``, and Slurm keeps the dependent clean/package
+    jobs queued as ``DependencyNeverSatisfied`` once their dependency fails. The
+    ``any(st.active)`` short-circuit therefore read a dead phase as progressing
+    and never resubmitted.
+    """
+
+    @staticmethod
+    def _phase():
+        return {
+            "kind": "650m",
+            "root": "/nonexistent/publish_650m_test",
+            "status": "running",
+            "job_ids": {"ultra": "1001", "clean": "1002", "package": "1003"},
+        }
+
+    def test_failed_main_with_pending_dependents_is_stalled(self):
+        from colab.cv_splits import resolve_cv_splits  # noqa: F401  (import sanity)
+        from rockfish.publish_campaign import JobState, phase_is_stalled
+
+        states = {
+            "1001": JobState("1001", "FAILED", "1:0"),
+            "1002": JobState("1002", "PENDING"),
+            "1003": JobState("1003", "PENDING"),
+        }
+        reasons = {
+            "1002": "DependencyNeverSatisfied",
+            "1003": "DependencyNeverSatisfied",
+        }
+        assert phase_is_stalled(self._phase(), states, reasons) is True
+
+    def test_all_dependents_dead_pending_is_stalled(self):
+        from rockfish.publish_campaign import JobState, phase_is_stalled
+
+        states = {
+            "1001": JobState("1001", "PENDING"),
+            "1002": JobState("1002", "PENDING"),
+            "1003": JobState("1003", "PENDING"),
+        }
+        reasons = dict.fromkeys(["1001", "1002", "1003"], "DependencyNeverSatisfied")
+        assert phase_is_stalled(self._phase(), states, reasons) is True
+
+    def test_genuinely_running_phase_is_not_stalled(self):
+        from rockfish.publish_campaign import JobState, phase_is_stalled
+
+        states = {
+            "1001": JobState("1001", "RUNNING"),
+            "1002": JobState("1002", "PENDING"),
+            "1003": JobState("1003", "PENDING"),
+        }
+        reasons = {"1002": "Dependency", "1003": "Dependency"}
+        assert phase_is_stalled(self._phase(), states, reasons) is False
+
+    def test_normal_queue_wait_is_not_stalled(self):
+        from rockfish.publish_campaign import JobState, phase_is_stalled
+
+        states = {"1001": JobState("1001", "PENDING")}
+        reasons = {"1001": "Resources"}
+        assert phase_is_stalled(self._phase(), states, reasons) is False
+
+    def test_advance_campaign_resubmits_a_stalled_phase(self, monkeypatch):
+        """End-to-end: the stalled phase must trigger a resubmit, not be reported
+        as running."""
+        import rockfish.publish_campaign as pc
+
+        phase = self._phase()
+        campaign = {
+            "status": "running",
+            "resubmit_count": 0,
+            "max_resubmits": 8,
+            "phases": [phase],
+        }
+        submitted: list = []
+        monkeypatch.setattr(pc, "package_ready", lambda root: False)
+        monkeypatch.setattr(pc, "cancel_jobs", lambda ids, **kw: None)
+        monkeypatch.setattr(
+            pc, "_submit_kind",
+            lambda camp, ph, dry_run=False: submitted.append(ph["kind"]) or ph,
+        )
+
+        states = {
+            "1001": pc.JobState("1001", "FAILED", "1:0"),
+            "1002": pc.JobState("1002", "PENDING"),
+            "1003": pc.JobState("1003", "PENDING"),
+        }
+        reasons = dict.fromkeys(["1002", "1003"], "DependencyNeverSatisfied")
+
+        pc.advance_campaign(
+            campaign,
+            job_query=lambda ids: states,
+            reason_query=lambda ids: reasons,
+        )
+        assert submitted == ["650m"], "stalled phase was not resubmitted"
+        assert campaign["resubmit_count"] == 1
