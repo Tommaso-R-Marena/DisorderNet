@@ -91,8 +91,12 @@ disordernet_slurm_setup() {
   export MKL_NUM_THREADS="${MKL_NUM_THREADS:-${OMP_NUM_THREADS}}"
   export TOKENIZERS_PARALLELISM=false
   export TMPDIR="${TMPDIR:-/tmp}"
-  export HF_HOME="${HF_HOME:-${PROJECT_DIR}/.cache/huggingface}"
-  export TORCH_HOME="${TORCH_HOME:-${PROJECT_DIR}/.cache/torch}"
+  # Keep model weights in ONE persistent, shared cache. A repo-local default
+  # meant each checkout re-downloaded ESM-2 from scratch — 2.5GB for 650M and
+  # ~11GB for 3B, per job — while an already-populated ~/.cache/torch sat
+  # unused. Weights are immutable and version-keyed, so sharing is safe.
+  export HF_HOME="${HF_HOME:-${HOME}/.cache/huggingface}"
+  export TORCH_HOME="${TORCH_HOME:-${HOME}/.cache/torch}"
   mkdir -p "${HF_HOME}" "${TORCH_HOME}"
 }
 

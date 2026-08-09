@@ -49,7 +49,11 @@ def apply_hpc_runtime_settings(
         torch_home = os.path.join(scratch, "torch_hub")
         os.makedirs(torch_home, exist_ok=True)
         os.environ.setdefault("TORCH_HOME", torch_home)
-        report["torch_home"] = torch_home
+    # Report the value actually in force. setdefault is a no-op when the job
+    # script already exported TORCH_HOME, so reporting the computed path made
+    # the log claim a cache location the process was not using.
+    if os.environ.get("TORCH_HOME"):
+        report["torch_home"] = os.environ["TORCH_HOME"]
 
     if verbose and report:
         print("HPC efficiency:", ", ".join(f"{k}={v}" for k, v in report.items()))

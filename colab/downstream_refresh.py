@@ -37,14 +37,46 @@ def refresh_downstream_metrics(
     all_probs = np.concatenate([r["val_probs"] for r in fold_results])
     all_labels = np.concatenate([r["val_labels"] for r in fold_results])
 
+    threshold_given = threshold is not None
     if threshold is None:
         threshold, _ = optimal_threshold(all_labels, all_probs)
 
-    preds_opt = (all_probs >= threshold).astype(int)
     our_auc = float(roc_auc_score(all_labels, all_probs))
     our_ap = float(average_precision_score(all_labels, all_probs))
-    our_f1 = float(f1_score(all_labels.astype(int), preds_opt))
-    our_mcc = float(matthews_corrcoef(all_labels.astype(int), preds_opt))
+
+    # Threshold-dependent metrics (f1, mcc) are biased upward when the cut-point
+    # is chosen on the very residues being scored — AUC/AP are rank-based and so
+    # unaffected. Score each fold at a threshold fitted on the *other* folds.
+    # Same correction the CPU accuracy bench already applies to run_v6_mem.
+    threshold_convention = "caller_supplied" if threshold_given else "in_sample_youden"
+    preds_oof: Optional[np.ndarray] = None
+    fold_thresholds: list[float] = []
+    if not threshold_given and len(fold_results) > 1:
+        chunks = []
+        for i, fr in enumerate(fold_results):
+            others_p = np.concatenate(
+                [np.asarray(o["val_probs"]) for j, o in enumerate(fold_results) if j != i]
+            )
+            others_y = np.concatenate(
+                [np.asarray(o["val_labels"]) for j, o in enumerate(fold_results) if j != i]
+            )
+            if len(np.unique(others_y)) < 2:
+                t_i = float(threshold)
+            else:
+                t_i, _ = optimal_threshold(others_y, others_p)
+            fold_thresholds.append(float(t_i))
+            chunks.append((np.asarray(fr["val_probs"]) >= t_i).astype(int))
+        preds_oof = np.concatenate(chunks)
+        threshold_convention = "out_of_fold_youden"
+
+    preds_opt = (all_probs >= threshold).astype(int)
+    preds_reported = preds_oof if preds_oof is not None else preds_opt
+    our_f1 = float(f1_score(all_labels.astype(int), preds_reported))
+    our_mcc = float(matthews_corrcoef(all_labels.astype(int), preds_reported))
+    # Keep the biased numbers visible rather than silently replacing them, so the
+    # size of the correction is auditable.
+    our_f1_in_sample = float(f1_score(all_labels.astype(int), preds_opt))
+    our_mcc_in_sample = float(matthews_corrcoef(all_labels.astype(int), preds_opt))
 
     caid_report = run_full_caid_report(
         proteins=proteins,
@@ -81,6 +113,10 @@ def refresh_downstream_metrics(
         "our_ap": our_ap,
         "our_f1": our_f1,
         "our_mcc": our_mcc,
+        "our_f1_in_sample_threshold": our_f1_in_sample,
+        "our_mcc_in_sample_threshold": our_mcc_in_sample,
+        "threshold_convention": threshold_convention,
+        "fold_thresholds": fold_thresholds,
         "opt_threshold": float(threshold),
         "f1_max": f1_max,
         "segment_f1": segment_f1,
