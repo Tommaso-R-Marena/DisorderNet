@@ -103,6 +103,11 @@ disordernet_slurm_setup() {
   fi
 
   export PYTHONUNBUFFERED=1
+  # ESM attention allocates in bursts across widely varying sequence lengths,
+  # which fragments the caching allocator badly enough to OOM with hundreds of
+  # MB still nominally free. Expandable segments let the allocator grow a
+  # region instead of hunting for a contiguous block.
+  export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
   export PYTHONPATH="${PROJECT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
   export OMP_NUM_THREADS="${OMP_NUM_THREADS:-${SLURM_CPUS_PER_TASK:-8}}"
   export MKL_NUM_THREADS="${MKL_NUM_THREADS:-${OMP_NUM_THREADS}}"
