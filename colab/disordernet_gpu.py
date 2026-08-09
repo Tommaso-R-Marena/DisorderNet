@@ -1695,7 +1695,18 @@ def _warmup_cosine_scheduler(optimizer, total_steps: int, warmup_steps: int):
     return LambdaLR(optimizer, lr_lambda)
 
 
-@torch.inference_mode()
+# NOTE: must be no_grad, NOT inference_mode.
+#
+# fair-esm's RotaryEmbedding memoises its cos/sin tables on the module, keyed by
+# sequence length. A table first materialised inside torch.inference_mode() is
+# permanently flagged as an inference tensor, and the *next training* batch that
+# happens to hit that same sequence length dies with
+#   RuntimeError: Inference tensors cannot be saved for backward.
+# Because the cache is length-keyed and the backbone is shared across folds, the
+# failure surfaces at an arbitrary later fold — this killed the 650M publish run
+# at fold 3 after 4.9h, having sailed through folds 1 and 2. no_grad() gives the
+# same memory/speed profile here without poisoning the cache.
+@torch.no_grad()
 def eval_epoch(
     model: nn.Module,
     loader: DataLoader,

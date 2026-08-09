@@ -428,3 +428,76 @@ class TestWatchdogDetectsStalledPhases:
         )
         assert submitted == ["650m"], "stalled phase was not resubmitted"
         assert campaign["resubmit_count"] == 1
+
+
+class TestNoInferenceModeInTrainingLoop:
+    """fair-esm's RotaryEmbedding memoises cos/sin tables keyed by sequence length.
+
+    A table first created inside ``torch.inference_mode()`` is permanently an
+    inference tensor, so the next *training* batch at that same length dies with
+    "Inference tensors cannot be saved for backward". The cache is length-keyed
+    and the ESM backbone is shared across folds, so the crash surfaces at an
+    arbitrary later fold — it killed the 650M publish run at fold 3 after 4.9
+    hours of GPU time, having passed folds 1 and 2 cleanly.
+    """
+
+    def test_eval_and_inference_paths_use_no_grad(self):
+        import pathlib
+
+        offenders = []
+        for path in [
+            pathlib.Path("colab/disordernet_gpu.py"),
+            pathlib.Path("colab/fold_model_soup.py"),
+            pathlib.Path("colab/predict_batch.py"),
+            pathlib.Path("colab/inference_tta.py"),
+        ]:
+            if not path.exists():
+                continue
+            for lineno, line in enumerate(path.read_text().splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue
+                if "inference_mode" in stripped:
+                    offenders.append(f"{path}:{lineno}: {stripped}")
+        assert not offenders, (
+            "torch.inference_mode() poisons fair-esm's rotary cache and breaks a "
+            "later training fold. Use torch.no_grad().\n  " + "\n  ".join(offenders)
+        )
+
+    def test_rotary_cache_survives_eval_then_train(self):
+        """Reproduce the mechanism directly on a rotary-style length-keyed cache."""
+        import torch
+
+        class LengthCachedTable(torch.nn.Module):
+            """Mirrors fair-esm RotaryEmbedding's memoisation."""
+
+            def __init__(self):
+                super().__init__()
+                self._cached_len = None
+                self._cached = None
+                self.w = torch.nn.Parameter(torch.ones(4))
+
+            def forward(self, x):
+                n = x.shape[0]
+                if self._cached_len != n:
+                    self._cached_len = n
+                    self._cached = torch.ones(n, 4)
+                # Order matters: the cached tensor must multiply a grad-requiring
+                # value so autograd has to SAVE it for backward. That save is what
+                # rejects an inference tensor, and it is what rotary cos/sin does.
+                return (x * self.w) * self._cached
+
+        # Populate the cache under no_grad (the fix), then train at that length.
+        m = LengthCachedTable()
+        with torch.no_grad():
+            m(torch.randn(7, 4))
+        loss = m(torch.randn(7, 4)).sum()
+        loss.backward()  # must not raise
+        assert m.w.grad is not None
+
+        # And confirm inference_mode genuinely breaks it, so this test is not vacuous.
+        m2 = LengthCachedTable()
+        with torch.inference_mode():
+            m2(torch.randn(7, 4))
+        with pytest.raises(RuntimeError, match="[Ii]nference tensor"):
+            m2(torch.randn(7, 4)).sum().backward()

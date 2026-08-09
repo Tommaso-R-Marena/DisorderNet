@@ -107,7 +107,11 @@ def _predict_proteins_multitask(
                 )
                 fn_probs = None
             else:
-                with torch.inference_mode():
+                # no_grad, not inference_mode: fair-esm caches rotary cos/sin
+                # tables per sequence length, and a table created under
+                # inference_mode poisons any later training step that reuses it.
+                # See the note on eval_epoch in colab/disordernet_gpu.py.
+                with torch.no_grad():
                     out = _forward_multitask(
                         model, tokens, aa, mask, rich_feats=rich_t, plddt_feats=plddt_t,
                     )
