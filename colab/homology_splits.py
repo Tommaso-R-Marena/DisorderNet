@@ -7,12 +7,21 @@ protocol than protein-ID-only GroupKFold.
 
 Similarity metric
 -----------------
-``sequence_identity`` is the Ratcliff/Obershelp matching-block ratio
-(``difflib.SequenceMatcher``), i.e. ``2 * matched_characters / (len_a + len_b)``.
-It is an alignment-free *approximation* to sequence identity, not a
-Smith-Waterman/BLAST identity, and it is not gap-aware. It is adequate for
-partitioning but should be described as such in methods text; a dedicated tool
-(MMseqs2, CD-HIT) is the right choice if exact identity thresholds matter.
+Two backends, selected by ``backend="auto"``:
+
+* **blastp** (preferred, used whenever BLAST+ is on PATH) — true alignment-based
+  percent identity, the quantity CAID/CD-HIT protocols are actually defined on.
+  Identity is projected onto the shorter sequence as
+  ``pident * alignment_length / min(qlen, slen)`` with a minimum coverage, so a
+  short high-identity local hit cannot merge two otherwise unrelated proteins.
+  This is what methods text should describe.
+* **python** (fallback) — ``sequence_identity``, the Ratcliff/Obershelp
+  matching-block ratio ``2 * matched / (len_a + len_b)``. Alignment-free, not
+  gap-aware, and only an *approximation* to identity. It is also O(L^2) in pure
+  Python, so an all-vs-all over a few thousand proteins does not finish; the
+  k-mer index below exists to keep the candidate set small.
+
+``meta["backend"]`` records which one produced a given clustering.
 
 Two correctness notes, both of which previously made clustering a silent no-op:
 
@@ -32,6 +41,7 @@ Two correctness notes, both of which previously made clustering a silent no-op:
 from __future__ import annotations
 
 import os
+import time
 from difflib import SequenceMatcher
 from typing import Optional
 
@@ -91,6 +101,29 @@ def _kmer_containment(ka: frozenset, kb: frozenset) -> float:
     return len(ka & kb) / min(len(ka), len(kb))
 
 
+def available_cpus() -> int:
+    """CPUs this process may actually use.
+
+    ``os.cpu_count()`` reports the whole node (48 on a Rockfish a100 node), not
+    the job's allocation. Spawning that many workers inside an 8-CPU cgroup
+    oversubscribes the allocation, thrashes, and steals time from other jobs
+    sharing the node. Prefer Slurm's allocation, then the scheduler affinity
+    mask, and only fall back to the node count.
+    """
+    slurm = os.environ.get("SLURM_CPUS_PER_TASK") or os.environ.get("SLURM_CPUS_ON_NODE")
+    if slurm:
+        try:
+            n = int(slurm)
+            if n > 0:
+                return n
+        except ValueError:
+            pass
+    try:
+        return max(1, len(os.sched_getaffinity(0)))
+    except AttributeError:  # pragma: no cover - non-Linux
+        return max(1, os.cpu_count() or 1)
+
+
 _WORKER_SEQS: list = []
 _WORKER_MIN_IDENTITY: float = 0.40
 
@@ -120,8 +153,8 @@ def _verify_pairs(
         return []
 
     if n_jobs is None:
-        n_jobs = int(os.environ.get("DISORDERNET_HOMOLOGY_JOBS", "0")) or (os.cpu_count() or 1)
-    n_jobs = max(1, min(int(n_jobs), os.cpu_count() or 1))
+        n_jobs = int(os.environ.get("DISORDERNET_HOMOLOGY_JOBS", "0")) or available_cpus()
+    n_jobs = max(1, min(int(n_jobs), available_cpus()))
 
     # Process startup only pays off on a real workload.
     if n_jobs == 1 or len(pairs) < 512:
@@ -151,11 +184,98 @@ def _verify_pairs(
         return _identity_chunk(pairs)
 
 
+def _blast_available() -> bool:
+    from shutil import which
+
+    return bool(which("makeblastdb") and which("blastp"))
+
+
+def _blast_homologous_pairs(
+    proteins: list,
+    min_identity: float,
+    n_jobs: int,
+    min_coverage: float = 0.50,
+) -> Optional[list]:
+    """All-vs-all BLASTp; return index pairs at >= ``min_identity``.
+
+    Preferred over the Ratcliff/Obershelp approximation: BLAST reports true
+    alignment-based percent identity (the quantity CAID/CD-HIT protocols are
+    defined on) and finishes an all-vs-all on a few thousand proteins in
+    seconds, where the pure-Python O(L^2) matcher does not finish at all.
+
+    Identity is projected onto the shorter sequence as
+    ``pident * alignment_length / min(qlen, slen)`` so a short high-identity
+    local hit between otherwise unrelated proteins does not merge clusters.
+    Returns ``None`` if BLAST is unavailable or fails, so the caller can fall
+    back rather than silently under-clustering.
+    """
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="dn_blast_") as td:
+            tmp = Path(td)
+            fasta = tmp / "all.fasta"
+            with fasta.open("w") as fh:
+                for i, p in enumerate(proteins):
+                    seq = (p.get("sequence") or "").strip()
+                    if seq:
+                        fh.write(f">{i}\n{seq}\n")
+
+            subprocess.run(
+                ["makeblastdb", "-in", str(fasta), "-dbtype", "prot",
+                 "-out", str(tmp / "db")],
+                check=True, capture_output=True, text=True,
+            )
+            out = tmp / "hits.tsv"
+            subprocess.run(
+                ["blastp",
+                 "-query", str(fasta),
+                 "-db", str(tmp / "db"),
+                 "-outfmt", "6 qseqid sseqid pident length qlen slen",
+                 "-evalue", "1e-3",
+                 "-max_target_seqs", "5000",
+                 "-num_threads", str(max(1, n_jobs)),
+                 "-out", str(out)],
+                check=True, capture_output=True, text=True,
+            )
+
+            pairs: set = set()
+            with out.open() as fh:
+                for line in fh:
+                    parts = line.rstrip("\n").split("\t")
+                    if len(parts) < 6:
+                        continue
+                    q, s, pident, alen, qlen, slen = parts[:6]
+                    if q == s:
+                        continue
+                    try:
+                        qi, si = int(q), int(s)
+                        pid = float(pident) / 100.0
+                        alen_i, qlen_i, slen_i = int(alen), int(qlen), int(slen)
+                    except ValueError:
+                        continue
+                    shorter = min(qlen_i, slen_i)
+                    if shorter <= 0:
+                        continue
+                    coverage = alen_i / shorter
+                    if coverage < min_coverage:
+                        continue
+                    if pid * coverage >= min_identity:
+                        pairs.add((min(qi, si), max(qi, si)))
+            return sorted(pairs)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
 def cluster_proteins_by_homology(
     proteins: list,
     min_identity: float = 0.40,
     length_bin_width: Optional[int] = None,  # deprecated; retained for compatibility
     n_jobs: Optional[int] = None,
+    verbose: bool = True,
+    backend: str = "auto",
 ) -> tuple[np.ndarray, dict]:
     """
     Greedy single-linkage clustering by sequence identity.
@@ -193,6 +313,51 @@ def cluster_proteins_by_homology(
     seqs = [p["sequence"] for p in proteins]
     lengths = np.array([len(s) for s in seqs], dtype=np.int64)
     ratio = _max_length_ratio(min_identity)
+    n_jobs_eff = n_jobs if n_jobs is not None else available_cpus()
+
+    # Preferred path: real alignment identity from BLAST+.
+    if backend in ("auto", "blast") and _blast_available():
+        _t0 = time.time()
+        if verbose:
+            print(
+                f"  homology clustering: {n} proteins via BLASTp all-vs-all "
+                f"on {n_jobs_eff} thread(s)…",
+                flush=True,
+            )
+        blast_pairs = _blast_homologous_pairs(proteins, min_identity, n_jobs_eff)
+        if blast_pairs is not None:
+            n_merges = 0
+            for i, j in blast_pairs:
+                if union(i, j):
+                    n_merges += 1
+            elapsed = time.time() - _t0
+            roots = [find(i) for i in range(n)]
+            remap = {r: idx for idx, r in enumerate(sorted(set(roots)))}
+            cluster_ids = np.array([remap[r] for r in roots], dtype=np.int64)
+            if verbose:
+                print(
+                    f"  homology clustering: {len(remap)} clusters, "
+                    f"{n_merges:,} merges in {elapsed:.1f}s (blastp)",
+                    flush=True,
+                )
+            return cluster_ids, {
+                "n_proteins": n,
+                "n_clusters": int(len(remap)),
+                "n_merges": int(n_merges),
+                "n_candidate_pairs": int(len(blast_pairs)),
+                "n_pairs_compared": int(len(blast_pairs)),
+                "min_identity": float(min_identity),
+                "method": "greedy_single_linkage",
+                "metric": "blastp_pident_x_coverage_over_shorter",
+                "backend": "blastp",
+                "seconds": round(elapsed, 2),
+                "n_jobs": n_jobs_eff,
+                "degenerate": bool(len(remap) == n and n > 1),
+            }
+        if verbose:
+            print("  BLAST unavailable/failed — falling back to in-process metric", flush=True)
+        if backend == "blast":
+            raise RuntimeError("backend='blast' requested but BLAST failed")
 
     # Candidate generation via an inverted k-mer index. Scanning the full length
     # window pairwise is O(n^2) matcher calls — ~5.5M for DisProt's 3333
@@ -243,6 +408,13 @@ def cluster_proteins_by_homology(
             candidate_pairs.append((i, j))
 
     n_candidates = len(candidate_pairs)
+    if verbose:
+        print(
+            f"  homology clustering: {n} proteins → {n_candidates:,} candidate pairs "
+            f"(k={_KMER_K} index), verifying on {available_cpus()} CPU(s)…",
+            flush=True,
+        )
+    _t0 = time.time()
 
     # Pass 2 — verify candidates with the real metric. Ratcliff/Obershelp is
     # O(L^2) pure Python, so on a few thousand multi-hundred-residue proteins
@@ -257,6 +429,9 @@ def cluster_proteins_by_homology(
     for (i, j), is_homologous in zip(candidate_pairs, verdicts):
         if is_homologous and union(i, j):
             n_merges += 1
+    elapsed = time.time() - _t0
+    if verbose:
+        print(f"  homology clustering: {n_merges:,} merges in {elapsed:.1f}s", flush=True)
 
     roots = [find(i) for i in range(n)]
     remap = {r: idx for idx, r in enumerate(sorted(set(roots)))}
@@ -269,9 +444,12 @@ def cluster_proteins_by_homology(
         "n_merges": int(n_merges),
         "n_pairs_compared": int(n_compared),
         "n_candidate_pairs": int(n_candidates),
+        "seconds": round(elapsed, 2),
+        "n_jobs": available_cpus(),
         "min_identity": float(min_identity),
         "method": "greedy_single_linkage",
         "metric": "ratcliff_obershelp_autojunk_off",
+        "backend": "python",
         # True when clustering collapsed to one-protein-per-cluster, i.e. the
         # homology split is indistinguishable from a plain protein split. This
         # is the failure mode that previously went unnoticed.

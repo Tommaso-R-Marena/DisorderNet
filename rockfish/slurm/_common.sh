@@ -56,14 +56,18 @@ disordernet_slurm_setup() {
   echo "============================================================"
 
   # Prefer Rockfish `ml` shorthand; fall back to `module`
-  if command -v ml &>/dev/null; then
-    ml purge 2>/dev/null || true
-    ml gcc/11.4.0 2>/dev/null || true
-    ml cuda/11.8.0 2>/dev/null || true
-  elif command -v module &>/dev/null; then
+  # gcc must load first: modern Python lives under the compiler hierarchy.
+  # blast-plus supplies blastp/makeblastdb for homology clustering — without it
+  # the split falls back to a pure-Python O(L^2) metric that cannot finish an
+  # all-vs-all over DisProt.
+  if command -v module &>/dev/null; then
     module purge 2>/dev/null || true
-    if module is-avail gcc/11.4.0 2>/dev/null; then module load gcc/11.4.0; fi
-    if module is-avail cuda/11.8.0 2>/dev/null; then module load cuda/11.8.0; fi
+    module load gcc/11.4.0 2>/dev/null || module load gcc/9.3.0 2>/dev/null || true
+    module load cuda/12.1.0 2>/dev/null || module load cuda/11.8.0 2>/dev/null || true
+    module load blast-plus/2.14.1 2>/dev/null || module load blast/2.13.0 2>/dev/null || true
+  fi
+  if ! command -v blastp &>/dev/null; then
+    echo "WARN: blastp not on PATH — homology clustering will use the slow fallback" >&2
   fi
 
   if [[ ! -f "${ENV_DIR}/bin/activate" ]]; then
@@ -83,6 +87,19 @@ disordernet_slurm_setup() {
   mkdir -p "${PROJECT_DIR}/logs" "${RESULTS_DIR}"
   if [[ -n "${WK_DIR}" ]]; then
     mkdir -p "${WK_DIR}" || exit 1
+  fi
+
+  # Seed the DisProt cache from a shared copy when one exists. The REST API
+  # takes ~7 minutes and 34 paged requests to serve the full release; doing that
+  # once per job wastes GPU walltime and is needlessly hard on disprot.org.
+  # The cache is content-hashed, so a stale copy is detectable downstream.
+  local disprot_src="${DISORDERNET_DISPROT_CACHE:-${HOME}/.cache/disordernet/disprot_raw.json}"
+  local disprot_dst="${WK_DIR:-${PROJECT_DIR}}/disprot_raw.json"
+  if [[ -s "${disprot_src}" && ! -s "${disprot_dst}" ]]; then
+    mkdir -p "$(dirname "${disprot_dst}")"
+    if cp "${disprot_src}" "${disprot_dst}" 2>/dev/null; then
+      echo "Seeded DisProt cache from ${disprot_src}"
+    fi
   fi
 
   export PYTHONUNBUFFERED=1
