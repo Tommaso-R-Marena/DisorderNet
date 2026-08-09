@@ -326,7 +326,15 @@ class TrainConfig:
     use_hallucination_weighting: bool = True
     hallucination_weight: float = 3.0
     high_plddt_threshold: float = 70.0
-    af_plddt_cache_dir: str = "af_plddt_cache"
+    # Absolute by default when DISORDERNET_PLDDT_CACHE is set. Two call sites
+    # resolve this differently — CV uses it relative to the CWD, postprocess joins
+    # it onto checkpoint_dir — so a relative value means the cache built during CV
+    # is not found later and every AlphaFold entry is re-fetched over HTTP, on GPU
+    # walltime, once per run. An absolute path makes os.path.join a no-op at both
+    # sites and lets main + clean share one cache.
+    af_plddt_cache_dir: str = field(
+        default_factory=lambda: os.environ.get("DISORDERNET_PLDDT_CACHE", "af_plddt_cache")
+    )
 
     # Train-time structure channel (novel vs sequence-only SOTA)
     use_plddt_features: bool = False
