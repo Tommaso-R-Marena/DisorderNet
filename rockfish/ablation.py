@@ -439,7 +439,20 @@ def cmd_collect(args: argparse.Namespace) -> int:
         }
         rows.append(row)
 
+    # The publish run is already the baseline configuration, so an ablation can
+    # borrow it rather than spend another ~12 GPU-hours reproducing it. Only
+    # valid when that run used the same code revision — the manifest records
+    # git_revision for exactly this check.
     base = next((r for r in rows if r["arm"] == "baseline"), None)
+    if base is None and args.baseline_workdir:
+        base = {
+            "arm": "baseline (external)",
+            "description": f"borrowed from {args.baseline_workdir}",
+            "changes_task": False,
+            "job_id": "",
+            **_arm_accuracy(Path(args.baseline_workdir)),
+        }
+        rows.insert(0, base)
     for r in rows:
         if base and r is not base:
             for metric in ("cv_auc", "caid3_auc"):
@@ -524,6 +537,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     sc = sub.add_parser("collect", help="Assemble the results table")
     sc.add_argument("--root", required=True)
+    sc.add_argument(
+        "--baseline-workdir",
+        default=None,
+        help="Use an existing run as the baseline row instead of submitting a "
+             "duplicate arm (e.g. the publish run, which is already the "
+             "baseline configuration). Only valid if it used the same code revision.",
+    )
     sc.set_defaults(func=cmd_collect)
     return p
 
