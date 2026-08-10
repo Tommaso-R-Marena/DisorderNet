@@ -11,6 +11,7 @@ This module is the evaluation spine for the claim:
 
 from __future__ import annotations
 
+import os
 import json
 from typing import Optional
 
@@ -198,6 +199,35 @@ def finalize_distrust_benchmark_with_caid3(
     return bench
 
 
+def _bootstrap_distrust_delta(
+    labels_by_protein: list,
+    dn_by_protein: list,
+    plddt_by_protein: list,
+    *,
+    n_boot: int = 1000,
+) -> dict:
+    """Protein-clustered CI for DisorderNet minus inverse-pLDDT on matched residues.
+
+    Applies the same validity filter ``compare_distrust_baselines`` uses (finite
+    pLDDT), per protein, so the interval describes exactly the comparison the
+    point estimate reports.
+    """
+    from colab.bootstrap_ci import paired_protein_bootstrap_delta
+
+    ys, dns, invs = [], [], []
+    for y, p, pld in zip(labels_by_protein, dn_by_protein, plddt_by_protein):
+        valid = ~np.isnan(pld)
+        if int(valid.sum()) < 2 or len(np.unique(y[valid])) < 2:
+            continue
+        ys.append(y[valid])
+        dns.append(p[valid])
+        invs.append(plddt_to_disorder_score(pld[valid]))
+
+    if len(ys) < 2:
+        return {"insufficient_data": True, "n_proteins": len(ys)}
+    return paired_protein_bootstrap_delta(ys, dns, invs, metric="auc", n_boot=n_boot)
+
+
 def run_labeled_distrust_benchmark(
     proteins: list,
     fold_results: list,
@@ -253,6 +283,15 @@ def run_labeled_distrust_benchmark(
             disorder_threshold=disorder_threshold,
             high_plddt_threshold=high_plddt_threshold,
         )
+        # delta_auc_dn_minus_plddt is go/no-go criterion #1 and came out at
+        # +0.0088 in the 650M run. A difference that small is uninterpretable
+        # without an interval, and the interval has to resample *proteins*:
+        # residues within a protein are strongly correlated, so treating ~10^6
+        # of them as independent draws would make almost any gap look decisive.
+        baselines["delta_auc_ci"] = _bootstrap_distrust_delta(
+            all_y, all_p, all_plddt,
+            n_boot=int(os.environ.get("DISORDERNET_CI_BOOT", "1000")),
+        )
 
     report = {
         "protocol_version": PROTOCOL_VERSION,
@@ -301,4 +340,18 @@ def print_distrust_benchmark(report: dict) -> None:
             f"  matched AUC  DN={dn.get('auc')}  inv-pLDDT={pl.get('auc')}  "
             f"Δ={base.get('delta_auc_dn_minus_plddt')}"
         )
+        # The interval, not just the point estimate: go/no-go criterion #1 turns
+        # on a difference of a few thousandths of AUC.
+        ci = base.get("delta_auc_ci") or {}
+        if ci.get("ci_low") is not None:
+            verdict = (
+                "within protein-level sampling noise"
+                if ci.get("crosses_zero") else "excludes zero"
+            )
+            print(
+                f"    95% CI [{ci['ci_low']:+.4f}, {ci['ci_high']:+.4f}] "
+                f"over {ci.get('n_proteins')} proteins (cluster bootstrap) — {verdict}"
+            )
+            if ci.get("p_value_bootstrap") is not None:
+                print(f"    bootstrap p = {ci['p_value_bootstrap']:.4f}")
     print("  non-claims:", ", ".join(report.get("non_claims") or []))
