@@ -57,6 +57,55 @@ def _resolve_workdir(path: Optional[str]) -> str:
     return os.getcwd()
 
 
+def _apply_caid_leak_free_filter(proteins: list, meta: dict, cfg, args) -> tuple[list, dict]:
+    """Drop training proteins that ID- or homology-hit the CAID reference set.
+
+    Shared by every label source. It previously lived inline in the DisProt
+    branch, so the MobiDB branch returned before reaching it and trained
+    unfiltered. That matters most for exactly the arm it was added for:
+    ``pdb_missing`` trains on the same missing-residue definition CAID3 scores,
+    and CAID3's Disorder-PDB references have PDB structures by construction, so
+    the overlap is expected to be larger than DisProt's — training on it would
+    make the CAID3 number measure memorisation.
+    """
+    if args is None or not getattr(args, "caid_leak_free_train", False):
+        return proteins, meta
+
+    from colab.caid_challenge import resolve_caid3_references
+    from colab.caid_leakage import (
+        audit_train_vs_caid,
+        filter_train_proteins,
+        load_caid_refs_for_audit,
+        save_leakage_audit,
+    )
+
+    ckpt = cfg.checkpoint_dir
+    os.makedirs(ckpt, exist_ok=True)
+    refs = resolve_caid3_references(ckpt, getattr(args, "caid3_reference", None))
+    caid_prots = load_caid_refs_for_audit(list(refs.values()))
+    if not caid_prots:
+        print("  CAID leak-free train: no reference proteins resolved — SKIPPED")
+        return proteins, meta
+
+    audit = audit_train_vs_caid(
+        proteins,
+        caid_prots,
+        min_identity=float(getattr(args, "caid_leak_identity", 0.40)),
+    )
+    proteins, filt = filter_train_proteins(proteins, audit)
+    audit["filter"] = filt
+    audit["applied_before_cv"] = True
+    audit["label_source"] = getattr(args, "label_source", "disprot")
+    save_leakage_audit(audit, os.path.join(ckpt, "caid_leakage_audit.json"))
+    meta = dict(meta or {})
+    meta["caid_leak_free_train"] = filt
+    print(
+        f"  CAID leak-free train: removed {filt['n_removed']} / {filt['n_before']} "
+        f"proteins (identity>={getattr(args, 'caid_leak_identity', 0.40)})"
+    )
+    return proteins, meta
+
+
 def _load_proteins_mobidb(cfg, args) -> tuple[list, dict]:
     """Load training proteins from MobiDB under a non-DisProt label definition.
 
@@ -91,6 +140,9 @@ def _load_proteins_mobidb(cfg, args) -> tuple[list, dict]:
         min_order=cfg.min_order,
     )
     proteins = to_pipeline_proteins(labelled)
+    # Same filter the DisProt path applies. Must run BEFORE the content hash so
+    # the resume fingerprint describes the set actually trained on.
+    proteins, _ = _apply_caid_leak_free_filter(proteins, {}, cfg, args)
     meta = {
         "label_source": source.value,
         "mobidb_proteome": args.mobidb_proteome,
@@ -137,36 +189,7 @@ def _load_proteins(data_cache: str, cfg, args=None) -> tuple[list, dict]:
     if skipped:
         disprot_meta["skipped"] = dict(skipped)
 
-    # Leak-free CAID training: drop DisProt proteins that ID/homology-hit CAID refs.
-    if args is not None and getattr(args, "caid_leak_free_train", False):
-        from colab.caid_challenge import resolve_caid3_references
-        from colab.caid_leakage import (
-            audit_train_vs_caid,
-            filter_train_proteins,
-            load_caid_refs_for_audit,
-            save_leakage_audit,
-        )
-
-        ckpt = cfg.checkpoint_dir
-        os.makedirs(ckpt, exist_ok=True)
-        refs = resolve_caid3_references(ckpt, getattr(args, "caid3_reference", None))
-        caid_prots = load_caid_refs_for_audit(list(refs.values()))
-        if caid_prots:
-            audit = audit_train_vs_caid(
-                proteins,
-                caid_prots,
-                min_identity=float(getattr(args, "caid_leak_identity", 0.40)),
-            )
-            proteins, filt = filter_train_proteins(proteins, audit)
-            audit["filter"] = filt
-            audit["applied_before_cv"] = True
-            save_leakage_audit(audit, os.path.join(ckpt, "caid_leakage_audit.json"))
-            disprot_meta = dict(disprot_meta or {})
-            disprot_meta["caid_leak_free_train"] = filt
-            print(
-                f"  CAID leak-free train: removed {filt['n_removed']} / {filt['n_before']} "
-                f"proteins (identity≥{getattr(args, 'caid_leak_identity', 0.40)})"
-            )
+    proteins, disprot_meta = _apply_caid_leak_free_filter(proteins, disprot_meta, cfg, args)
     return proteins, disprot_meta
 
 

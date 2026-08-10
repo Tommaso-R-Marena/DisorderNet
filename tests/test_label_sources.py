@@ -198,3 +198,97 @@ class TestEvidenceReachesTheDataset:
         d = to_pipeline_proteins([lp])[0]
         assert d["label_evidence"][:3] == [False, False, False]
         assert all(d["label_evidence"][3:])
+
+
+class TestCaidFilterAppliesToEveryLabelSource:
+    """The CAID leak-free filter must not be reachable from only one code path.
+
+    It originally lived inline in the DisProt branch of _load_proteins, and the
+    MobiDB branch returned before reaching it. The pdb_missing arm therefore
+    trained unfiltered on 19,819 proteins — while being scored on CAID3, whose
+    Disorder-PDB references share the same missing-residue definition and have
+    PDB structures by construction. That would have measured memorisation.
+    """
+
+    def test_both_label_paths_call_the_shared_filter(self):
+        import inspect
+
+        from rockfish import run_disordernet as rd
+
+        disprot_src = inspect.getsource(rd._load_proteins)
+        mobidb_src = inspect.getsource(rd._load_proteins_mobidb)
+        for name, src in (("disprot", disprot_src), ("mobidb", mobidb_src)):
+            assert "_apply_caid_leak_free_filter" in src, (
+                f"the {name} label path does not apply the CAID leak-free filter"
+            )
+
+    def test_filter_is_a_noop_when_disabled(self):
+        from rockfish.run_disordernet import _apply_caid_leak_free_filter
+
+        class _Args:
+            caid_leak_free_train = False
+
+        class _Cfg:
+            checkpoint_dir = "/nonexistent"
+
+        proteins = [{"id": "P1", "sequence": "AAAA", "length": 4}]
+        out, meta = _apply_caid_leak_free_filter(proteins, {"x": 1}, _Cfg(), _Args())
+        assert out is proteins and meta == {"x": 1}
+
+    def test_filter_removes_flagged_proteins_and_records_the_audit(self, tmp_path, monkeypatch):
+        import rockfish.run_disordernet as rd
+
+        class _Args:
+            caid_leak_free_train = True
+            caid3_reference = None
+            caid_leak_identity = 0.40
+            label_source = "pdb_missing"
+
+        class _Cfg:
+            checkpoint_dir = str(tmp_path)
+
+        proteins = [
+            {"id": "KEEP", "sequence": "A" * 40, "length": 40},
+            {"id": "LEAK", "sequence": "C" * 40, "length": 40},
+        ]
+        monkeypatch.setattr(
+            "colab.caid_challenge.resolve_caid3_references", lambda *a, **k: {"r": "x.fasta"}
+        )
+        monkeypatch.setattr(
+            "colab.caid_leakage.load_caid_refs_for_audit",
+            lambda paths: [{"id": "LEAK", "sequence": "C" * 40}],
+        )
+
+        out, meta = rd._apply_caid_leak_free_filter(proteins, {}, _Cfg(), _Args())
+        kept = {p["id"] for p in out}
+        assert "LEAK" not in kept, "a CAID-identical training protein must be dropped"
+        assert "KEEP" in kept
+        assert meta["caid_leak_free_train"]["n_removed"] == 1
+        assert (tmp_path / "caid_leakage_audit.json").exists()
+
+    def test_audit_records_which_label_source_it_filtered(self, tmp_path, monkeypatch):
+        import json
+
+        import rockfish.run_disordernet as rd
+
+        class _Args:
+            caid_leak_free_train = True
+            caid3_reference = None
+            caid_leak_identity = 0.40
+            label_source = "pdb_missing"
+
+        class _Cfg:
+            checkpoint_dir = str(tmp_path)
+
+        monkeypatch.setattr(
+            "colab.caid_challenge.resolve_caid3_references", lambda *a, **k: {"r": "x"}
+        )
+        monkeypatch.setattr(
+            "colab.caid_leakage.load_caid_refs_for_audit",
+            lambda paths: [{"id": "Z", "sequence": "D" * 40}],
+        )
+        rd._apply_caid_leak_free_filter(
+            [{"id": "A", "sequence": "A" * 40, "length": 40}], {}, _Cfg(), _Args()
+        )
+        audit = json.loads((tmp_path / "caid_leakage_audit.json").read_text())
+        assert audit["label_source"] == "pdb_missing"
