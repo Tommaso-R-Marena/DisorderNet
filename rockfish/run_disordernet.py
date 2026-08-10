@@ -61,7 +61,16 @@ def _load_proteins(data_cache: str, cfg, args=None) -> tuple[list, dict]:
     from colab.disordernet_gpu import fetch_disprot, get_disprot_cache_meta, process_disprot
 
     entries = fetch_disprot(cache_path=data_cache)
-    proteins, disprot_meta = process_disprot(entries, cfg)
+    # process_disprot returns (proteins, skipped_counter) — the second value is a
+    # Counter of filter reasons, NOT the DisProt cache metadata. Binding it to
+    # `disprot_meta` meant load_cv_progress compared a real content_sha256 against
+    # None on every resume attempt and always rejected the saved folds, so
+    # auto-resume silently restarted CV from fold 0 — which makes the campaign's
+    # walltime-resume guarantee hollow on jobs that need it most.
+    proteins, skipped = process_disprot(entries, cfg)
+    disprot_meta = dict(get_disprot_cache_meta(data_cache) or {})
+    if skipped:
+        disprot_meta["skipped"] = dict(skipped)
 
     # Leak-free CAID training: drop DisProt proteins that ID/homology-hit CAID refs.
     if args is not None and getattr(args, "caid_leak_free_train", False):

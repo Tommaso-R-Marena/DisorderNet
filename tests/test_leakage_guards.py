@@ -501,3 +501,75 @@ class TestNoInferenceModeInTrainingLoop:
             m2(torch.randn(7, 4))
         with pytest.raises(RuntimeError, match="[Ii]nference tensor"):
             m2(torch.randn(7, 4)).sum().backward()
+
+
+class TestCvResumeActuallyResumes:
+    """Auto-resume silently restarted CV from fold 0 on every attempt.
+
+    ``_load_proteins`` bound ``process_disprot``'s second return value — a
+    Counter of filter reasons — to ``disprot_meta``. ``load_cv_progress`` then
+    compared the saved ``content_sha256`` against ``Counter.get("content_sha256")``
+    (None) and rejected the saved folds every time. A 650M run that died at fold
+    3 after 4.9 hours therefore restarted from scratch instead of resuming, and
+    the campaign's walltime-resume guarantee never worked.
+    """
+
+    def test_load_cv_progress_accepts_matching_snapshot(self, tmp_path):
+        import json
+
+        from colab.cv_splits import config_fingerprint, proteins_fingerprint
+        from colab.disordernet_gpu import TrainConfig, load_cv_progress
+
+        proteins = _make_proteins(10)
+        cfg = TrainConfig.from_profile("ultra")
+        cfg.n_folds = 5
+        meta = {"content_sha256": "abc123", "n_entries": 3337}
+
+        payload = {
+            "version": 2,
+            "n_proteins": len(proteins),
+            "protein_ids": [p["id"] for p in proteins],
+            "proteins_fingerprint": proteins_fingerprint(proteins),
+            "config_fingerprint": config_fingerprint(cfg),
+            "n_folds": cfg.n_folds,
+            "seed": cfg.seed,
+            "disprot_meta": meta,
+            "fold_results": [
+                {"fold": 1, "best_auc": 0.76, "val_probs": [0.1], "val_labels": [1]},
+                {"fold": 2, "best_auc": 0.75, "val_probs": [0.2], "val_labels": [0]},
+            ],
+        }
+        path = tmp_path / "cv_progress.json"
+        path.write_text(json.dumps(payload))
+
+        # Matching metadata must resume.
+        loaded = load_cv_progress(str(path), cfg, proteins, meta)
+        assert len(loaded) == 2, "matching snapshot was rejected — resume is broken"
+
+        # A Counter-like object without content_sha256 is what the bug passed;
+        # it must not masquerade as a genuine mismatch.
+        from collections import Counter
+
+        skipped = Counter({"too_long": 425})
+        loaded_bad = load_cv_progress(str(path), cfg, proteins, skipped)
+        assert len(loaded_bad) == 0, (
+            "a metadata object with no content_sha256 should not silently "
+            "compare equal — the fix is to pass real cache metadata"
+        )
+
+        # A genuinely different snapshot must still be rejected.
+        other = {"content_sha256": "different"}
+        assert load_cv_progress(str(path), cfg, proteins, other) == []
+
+    def test_load_proteins_returns_real_cache_metadata(self):
+        """Guard the actual binding in run_disordernet._load_proteins."""
+        import inspect
+        import pathlib
+
+        src = pathlib.Path("rockfish/run_disordernet.py").read_text()
+        assert "proteins, disprot_meta = process_disprot(" not in src, (
+            "process_disprot returns (proteins, skipped_counter); binding the "
+            "counter to disprot_meta breaks CV resume"
+        )
+        assert "get_disprot_cache_meta(data_cache)" in src
+        del inspect
