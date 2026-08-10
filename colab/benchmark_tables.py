@@ -97,6 +97,16 @@ LITERATURE_REFERENCE_BENCHMARKS: list[dict] = [
     },
 ]
 
+LEGACY_SPLIT_METHOD = "protein"
+LEGACY_NOTE = (
+    "Rows marked (legacy) were measured under PROTEIN-grouped CV, before the "
+    "homology-clustering defect was fixed (difflib autojunk silently disabled "
+    "homology separation for proteins over 199 residues). Homologues were "
+    "therefore split across folds, so those AUCs are optimistic and NOT "
+    "comparable to a homology-grouped run."
+)
+
+
 # ---------------------------------------------------------------------------
 # Table B: Our runs on DisProt (same protocol within each row)
 # ---------------------------------------------------------------------------
@@ -147,14 +157,24 @@ def build_our_disprot_row(
     f1_max: Optional[float] = None,
     mcc: Optional[float] = None,
     status: str = "verified",
+    split_method: str = LEGACY_SPLIT_METHOD,
 ) -> dict:
-    """Build a GPU (or updated) row for Table B."""
+    """Build a GPU (or updated) row for Table B.
+
+    The row records the split the run actually used, so a live homology-split
+    result is not tagged with the template's protein-grouped protocol and then
+    mislabelled as a legacy measurement.
+    """
     row = dict(OUR_DISPROT_GPU_TEMPLATE)
     row["auc"] = float(auc)
     row["ap"] = float(ap) if ap is not None else None
     row["f1_max"] = float(f1_max) if f1_max is not None else None
     row["mcc"] = float(mcc) if mcc is not None else None
     row["status"] = status
+    row["protocol"] = (
+        f"DisProt, 5-fold {split_method}-grouped CV, ESM-2 650M + LoRA"
+    )
+    row["split_method"] = split_method
     return row
 
 
@@ -163,10 +183,15 @@ def get_literature_table() -> list[dict]:
 
 
 def get_our_disprot_table(gpu_auc: Optional[float] = None, gpu_ap: Optional[float] = None,
-                          gpu_f1_max: Optional[float] = None, gpu_mcc: Optional[float] = None) -> list[dict]:
+                          gpu_f1_max: Optional[float] = None, gpu_mcc: Optional[float] = None,
+                          split_method: str = LEGACY_SPLIT_METHOD) -> list[dict]:
     rows = [dict(OUR_DISPROT_CPU_V6)]
     if gpu_auc is not None:
-        rows.append(build_our_disprot_row(gpu_auc, gpu_ap, gpu_f1_max, gpu_mcc))
+        rows.append(
+            build_our_disprot_row(
+                gpu_auc, gpu_ap, gpu_f1_max, gpu_mcc, split_method=split_method
+            )
+        )
     else:
         rows.append(dict(OUR_DISPROT_GPU_TEMPLATE))
     return rows
@@ -195,13 +220,24 @@ def print_our_disprot_table(
     gpu_ap: Optional[float] = None,
     gpu_f1_max: Optional[float] = None,
     gpu_mcc: Optional[float] = None,
+    split_method: str = LEGACY_SPLIT_METHOD,
 ) -> None:
-    """Print Table B — our runs on identical in-repo protocol."""
-    rows = get_our_disprot_table(gpu_auc, gpu_ap, gpu_f1_max, gpu_mcc)
+    """Print Table B — our runs on identical in-repo protocol.
+
+    ``split_method`` must be the method the current run actually used. The
+    header previously hardcoded "protein-grouped" regardless, mislabelling the
+    protocol of any homology-split run in a table intended for publication.
+    """
+    rows = get_our_disprot_table(gpu_auc, gpu_ap, gpu_f1_max, gpu_mcc, split_method)
+    mixed = split_method != LEGACY_SPLIT_METHOD
     print(f"\n{'═' * 72}")
-    print(" TABLE B — OUR DISPROT 5-FOLD PROTEIN-GROUPED CV")
+    print(f" TABLE B — OUR DISPROT 5-FOLD {split_method.upper()}-GROUPED CV")
     print(f"{'═' * 72}")
-    print("  Directly comparable within this table only.")
+    if mixed:
+        print("  WARNING: mixed protocols — see the note below. Rows are NOT")
+        print("           directly comparable to one another.")
+    else:
+        print("  Directly comparable within this table only.")
     print(f"{'─' * 72}")
     print(f"  {'Method':<36} {'AUC':>7} {'AP':>7} {'F1*':>7} {'MCC':>7}  Status")
     print(f"{'─' * 72}")
@@ -213,9 +249,17 @@ def print_our_disprot_table(
         status = r.get("status", "")
         if status == "pending_full_run":
             status = "pending GPU run"
+        # Any row whose recorded protocol predates the current split method is a
+        # legacy measurement and must be labelled, not quietly tabulated beside
+        # the live one.
+        if mixed and LEGACY_SPLIT_METHOD in (r.get("protocol") or "") \
+                and r.get("status") != "pending_full_run":
+            status = f"{status} (legacy)"
         print(f"  {r['method']:<36} {auc_s:>7} {ap_s:>7} {f1_s:>7} {mcc_s:>7}  {status}")
     print(f"{'─' * 72}")
     print("  * F1_max = max F1 over thresholds (CAID-style)")
+    if mixed:
+        print(f"  {LEGACY_NOTE}")
     print(f"{'═' * 72}")
 
 
@@ -224,23 +268,41 @@ def print_matched_benchmark_report(
     gpu_ap: Optional[float] = None,
     gpu_f1_max: Optional[float] = None,
     gpu_mcc: Optional[float] = None,
+    split_method: str = LEGACY_SPLIT_METHOD,
 ) -> dict:
     """Print both tables and return structured summary."""
     print_literature_reference_table()
-    print_our_disprot_table(gpu_auc, gpu_ap, gpu_f1_max, gpu_mcc)
+    print_our_disprot_table(gpu_auc, gpu_ap, gpu_f1_max, gpu_mcc, split_method=split_method)
 
     if gpu_auc is not None:
         print(f"\n── Context (not head-to-head) ──")
         print(f"  GPU AUC {gpu_auc:.4f} vs literature AF3-pLDDT 0.747 (CAID3, different protocol)")
         print(f"  GPU AUC {gpu_auc:.4f} vs literature ESMDisPred 0.895 (CAID3 SOTA, different protocol)")
-        print(f"  GPU vs our v6 CPU: {gpu_auc - OUR_DISPROT_CPU_V6['auc']:+.4f} (same DisProt task, different model)")
+        if split_method == LEGACY_SPLIT_METHOD:
+            print(
+                f"  GPU vs our v6 CPU: {gpu_auc - OUR_DISPROT_CPU_V6['auc']:+.4f} "
+                "(same DisProt task, different model)"
+            )
+        else:
+            # Subtracting a protein-split v6 AUC from a homology-split GPU AUC
+            # would attribute a protocol difference to the model.
+            print(
+                f"  GPU vs our v6 CPU: not shown — v6's {OUR_DISPROT_CPU_V6['auc']:.3f} "
+                f"was measured under {LEGACY_SPLIT_METHOD}-grouped CV, this run "
+                f"used {split_method}-grouped. Re-measure v6 under the same "
+                "split before comparing."
+            )
 
     return {
         "literature_reference": get_literature_table(),
-        "our_disprot_runs": get_our_disprot_table(gpu_auc, gpu_ap, gpu_f1_max, gpu_mcc),
+        "our_disprot_runs": get_our_disprot_table(
+            gpu_auc, gpu_ap, gpu_f1_max, gpu_mcc, split_method
+        ),
+        "split_method": split_method,
         "disclaimer": (
-            "Literature AUCs are reference points only. "
-            "Only rows in Table B share our CV protocol."
+            "Literature AUCs are reference points only. Rows in Table B share "
+            "the DisProt task but not necessarily the split method — check each "
+            "row's protocol field. " + (LEGACY_NOTE if split_method != LEGACY_SPLIT_METHOD else "")
         ),
     }
 

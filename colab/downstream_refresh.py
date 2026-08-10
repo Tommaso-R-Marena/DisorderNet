@@ -28,6 +28,7 @@ def refresh_downstream_metrics(
     threshold: Optional[float] = None,
     apply_postprocess: bool = True,
     print_reports: bool = True,
+    split_method: str = "protein",
 ) -> dict:
     """
     Recompute CAID, biological utility, and benchmark tables from fold_results.
@@ -106,6 +107,9 @@ def refresh_downstream_metrics(
         gpu_ap=our_ap,
         gpu_f1_max=f1_max,
         gpu_mcc=our_mcc,
+        # The table header and the legacy-row labelling both depend on the
+        # split the run actually used; defaulting it would mislabel the protocol.
+        split_method=split_method,
     )
 
     return {

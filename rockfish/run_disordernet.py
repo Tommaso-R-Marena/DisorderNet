@@ -857,6 +857,7 @@ def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
     ckpt = cfg.checkpoint_dir
     downstream = refresh_downstream_metrics(
         proteins, fold_results, n_folds=cfg.n_folds, print_reports=True,
+        split_method=getattr(cfg, "split_method", "protein"),
     )
 
     # Disorder → function (multi-label) OOF report
