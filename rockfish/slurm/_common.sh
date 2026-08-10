@@ -160,6 +160,22 @@ disordernet_slurm_run() {
   if [[ "${RUN_NO_PLDDT_FEATURES:-0}" == "1" ]]; then
     EXTRA_ARGS+=(--no-plddt-features)
   fi
+  # Ablation levers: label definition, data scale, epoch budget.
+  if [[ -n "${DISORDERNET_LABEL_SOURCE:-}" ]]; then
+    EXTRA_ARGS+=(--label-source "${DISORDERNET_LABEL_SOURCE}")
+  fi
+  if [[ -n "${DISORDERNET_MOBIDB_PROTEOME:-}" ]]; then
+    EXTRA_ARGS+=(--mobidb-proteome "${DISORDERNET_MOBIDB_PROTEOME}")
+  fi
+  if [[ -n "${DISORDERNET_MOBIDB_LIMIT:-}" && "${DISORDERNET_MOBIDB_LIMIT}" != "0" ]]; then
+    EXTRA_ARGS+=(--mobidb-limit "${DISORDERNET_MOBIDB_LIMIT}")
+  fi
+  if [[ -n "${DISORDERNET_MIN_EVIDENCE:-}" ]]; then
+    EXTRA_ARGS+=(--min-evidence-fraction "${DISORDERNET_MIN_EVIDENCE}")
+  fi
+  if [[ -n "${DISORDERNET_NUM_EPOCHS:-}" ]]; then
+    EXTRA_ARGS+=(--num-epochs "${DISORDERNET_NUM_EPOCHS}")
+  fi
   if [[ -n "${SEED_DIRS:-}" ]]; then
     EXTRA_ARGS+=(--seed-dirs "${SEED_DIRS}")
   fi

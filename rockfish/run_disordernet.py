@@ -57,8 +57,73 @@ def _resolve_workdir(path: Optional[str]) -> str:
     return os.getcwd()
 
 
+def _load_proteins_mobidb(cfg, args) -> tuple[list, dict]:
+    """Load training proteins from MobiDB under a non-DisProt label definition.
+
+    Used for the label-source ablation: ``pdb_missing`` trains on the same
+    definition CAID3's Disorder-PDB reference scores, removing the domain shift
+    of training on curated functional disorder and testing on crystallographic
+    disorder.
+    """
+    from colab.label_sources import (
+        LabelSource,
+        build_labelled_set,
+        fetch_mobidb_proteome,
+        to_pipeline_proteins,
+    )
+
+    source = LabelSource(args.label_source)
+    cache = getattr(args, "mobidb_cache", "") or os.path.join(
+        os.path.expanduser("~/.cache/disordernet"), f"mobidb_{args.mobidb_proteome}.ndjson"
+    )
+    records = fetch_mobidb_proteome(
+        args.mobidb_proteome,
+        cache,
+        limit=getattr(args, "mobidb_limit", None) or None,
+    )
+    labelled, stats = build_labelled_set(
+        records,
+        source,
+        min_len=cfg.min_seq_len,
+        max_len=cfg.max_seq_len,
+        min_evidence_fraction=float(getattr(args, "min_evidence_fraction", 0.10)),
+        min_disorder=cfg.min_disorder,
+        min_order=cfg.min_order,
+    )
+    proteins = to_pipeline_proteins(labelled)
+    meta = {
+        "label_source": source.value,
+        "mobidb_proteome": args.mobidb_proteome,
+        "mobidb_cache": cache,
+        # Content hash of the label set, so CV resume can tell one label
+        # definition from another rather than silently reusing foreign folds.
+        "content_sha256": _label_set_sha(proteins),
+        "label_stats": stats,
+    }
+    return proteins, meta
+
+
+def _label_set_sha(proteins: list) -> str:
+    import hashlib
+
+    import numpy as np
+
+    h = hashlib.sha256()
+    for p in proteins:
+        h.update(p["id"].encode())
+        h.update(b"\x00")
+        h.update(np.asarray(p["labels"], dtype=np.int8).tobytes())
+        h.update(np.asarray(p["label_evidence"], dtype=bool).tobytes())
+    return h.hexdigest()
+
+
 def _load_proteins(data_cache: str, cfg, args=None) -> tuple[list, dict]:
     from colab.disordernet_gpu import fetch_disprot, get_disprot_cache_meta, process_disprot
+
+    # Non-DisProt label definitions come from MobiDB and skip the DisProt REST
+    # path entirely (different source, different evidence semantics).
+    if args is not None and getattr(args, "label_source", "disprot") != "disprot":
+        return _load_proteins_mobidb(cfg, args)
 
     entries = fetch_disprot(cache_path=data_cache)
     # process_disprot returns (proteins, skipped_counter) — the second value is a
@@ -1423,6 +1488,34 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--backbone", default="650M", help="ESM-2 backbone key (650M, 3B, …)")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--n-folds", type=int, default=5)
+    p.add_argument(
+        "--label-source",
+        default=os.environ.get("DISORDERNET_LABEL_SOURCE", "disprot"),
+        choices=["disprot", "mobidb_curated", "pdb_missing", "union"],
+        help="Disorder definition to train on. 'pdb_missing' matches the CAID3 "
+             "Disorder-PDB benchmark (missing residues); 'disprot' is curated "
+             "functional disorder. Non-DisProt sources come from MobiDB and carry "
+             "per-residue evidence masks.",
+    )
+    p.add_argument(
+        "--mobidb-proteome",
+        default=os.environ.get("DISORDERNET_MOBIDB_PROTEOME", "UP000005640"),
+        help="UniProt proteome id for MobiDB label sources (default: human)",
+    )
+    p.add_argument("--mobidb-cache", default=os.environ.get("DISORDERNET_MOBIDB_CACHE", ""))
+    p.add_argument(
+        "--mobidb-limit",
+        type=int,
+        default=int(os.environ.get("DISORDERNET_MOBIDB_LIMIT", "0") or 0),
+        help="Cap the MobiDB pull (0 = whole proteome). Useful for ablation sizing.",
+    )
+    p.add_argument(
+        "--min-evidence-fraction",
+        type=float,
+        default=float(os.environ.get("DISORDERNET_MIN_EVIDENCE", "0.10")),
+        help="Drop proteins whose labelled residues cover less than this fraction "
+             "of the chain (PDB-derived labels only cover crystallised regions)",
+    )
     p.add_argument(
         "--num-epochs",
         type=int,
