@@ -153,6 +153,10 @@ def evaluate_caid_predictions(
     all_labels: list[float] = []
     all_probs: list[float] = []
     per_protein: list[dict] = []
+    # Kept unflattened for the cluster bootstrap: residues within a protein are
+    # correlated, so the protein is the unit of independent sampling.
+    labels_by_protein: list[np.ndarray] = []
+    probs_by_protein: list[np.ndarray] = []
     n_missing = 0
 
     for p in reference_proteins:
@@ -172,6 +176,8 @@ def evaluate_caid_predictions(
             continue
         all_labels.extend(lab.tolist())
         all_probs.extend(prb.tolist())
+        labels_by_protein.append(lab)
+        probs_by_protein.append(prb)
         m = compute_caid_metrics(lab, prb, threshold=threshold)
         per_protein.append({"id": pid, **m})
 
@@ -188,6 +194,20 @@ def evaluate_caid_predictions(
     pooled = compute_caid_metrics(labels_arr, probs_arr, threshold=threshold)
     f1m = compute_f1_max(labels_arr, probs_arr)
 
+    # A benchmark AUC quoted against a literature figure needs an interval, and
+    # the interval must resample proteins rather than residues (see
+    # colab/bootstrap_ci.py). Whether the CI reaches 0.895 is a more honest
+    # answer to "are we at SOTA" than the point difference alone.
+    from colab.bootstrap_ci import protein_bootstrap_metric
+
+    auc_ci = protein_bootstrap_metric(
+        labels_by_protein, probs_by_protein, metric="auc",
+        n_boot=int(os.environ.get("DISORDERNET_CI_BOOT", "1000")),
+    )
+    reaches_sota = None
+    if auc_ci.get("ci_high") is not None:
+        reaches_sota = bool(auc_ci["ci_high"] >= 0.895)
+
     return {
         "insufficient_data": False,
         "benchmark": "CAID3_disorder_pdb",
@@ -200,8 +220,15 @@ def evaluate_caid_predictions(
             "threshold_at_f1_max": f1m["threshold_at_f1_max"],
         },
         "per_protein": per_protein[:20],
+        "auc_ci": auc_ci,
         "esmdispred_reference_auc": 0.895,
         "delta_vs_esmdispred": float(pooled["auc"]) - 0.895 if pooled.get("auc") else None,
+        "ci_reaches_esmdispred": reaches_sota,
+        "comparison_note": (
+            "ESMDisPred's 0.895 is a published point estimate on this benchmark; "
+            "no interval is available for it, so ci_reaches_esmdispred asks only "
+            "whether our own sampling uncertainty is consistent with that value."
+        ),
     }
 
 
@@ -228,4 +255,14 @@ def print_caid3_eval_report(report: dict) -> None:
     delta = report.get("delta_vs_esmdispred")
     if delta is not None:
         print(f"  vs ESMDisPred   : {delta:+.4f}  (ref 0.895, CAID3 protocol)")
+    ci = report.get("auc_ci") or {}
+    if ci.get("ci_low") is not None:
+        print(
+            f"  95% CI          : [{ci['ci_low']:.4f}, {ci['ci_high']:.4f}] "
+            f"over {ci.get('n_proteins')} proteins (protein-clustered bootstrap)"
+        )
+        if report.get("ci_reaches_esmdispred"):
+            print("                    CI reaches 0.895 — consistent with SOTA")
+        else:
+            print("                    CI does not reach 0.895 — below SOTA")
     print(f"{'═' * 64}")

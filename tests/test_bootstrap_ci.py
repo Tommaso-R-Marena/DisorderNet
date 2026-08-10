@@ -149,3 +149,32 @@ class TestWiredIntoDistrustBenchmark:
         assert r["n_proteins"] == 40
         assert r["n_residues"] == 40 * 190, "NaN pLDDT residues must be dropped"
         assert r["ci_low"] is not None and r["ci_high"] is not None
+
+
+class TestCaid3ReportsAnInterval:
+    def test_evaluation_attaches_a_protein_clustered_ci(self):
+        """A benchmark AUC quoted against a literature figure needs an interval."""
+        import numpy as np
+
+        from colab.caid3_eval import evaluate_caid_predictions
+
+        rng = np.random.default_rng(21)
+        refs, preds = [], {}
+        for i in range(40):
+            n = 150
+            lab = np.zeros(n, dtype=np.int8)
+            lab[40:90] = 1
+            refs.append({
+                "id": f"C{i}", "sequence": "A" * n, "length": n,
+                "labels": lab.tolist(), "eval_mask": [True] * n,
+            })
+            preds[f"C{i}"] = np.clip(
+                0.5 + 0.3 * (lab - 0.5) + rng.normal(0, 0.2, n), 0, 1
+            ).astype(np.float32)
+
+        rep = evaluate_caid_predictions(refs, preds)
+        ci = rep["auc_ci"]
+        assert ci["resampling_unit"] == "protein"
+        assert ci["n_proteins"] == 40
+        assert ci["ci_low"] <= rep["pooled"]["auc"] <= ci["ci_high"]
+        assert isinstance(rep["ci_reaches_esmdispred"], bool)
