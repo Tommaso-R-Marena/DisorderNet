@@ -94,6 +94,13 @@ EVIDENCED_RESIDUES = {
 }
 BASELINE_EPOCHS = 35
 
+# Measured: two identical runs of fold 1 (same seed, same split, same code)
+# gave max-epoch AUC 0.7651 and 0.7421. cudnn.benchmark and non-deterministic
+# GPU kernels let trajectories diverge over ~30 epochs, and the gap is
+# comparable to the between-fold spread. Used as the noise floor when an
+# ablation has no replicates of its own.
+MEASURED_RERUN_SD = 0.023
+
 # Every key any arm can set, with its neutral (baseline) value. Each is written
 # explicitly for each arm so an omitted key cannot inherit a neighbouring arm's
 # setting — see the note in cmd_submit.
@@ -252,10 +259,15 @@ def cmd_submit(args: argparse.Namespace) -> int:
     defaults = env_defaults()
     mail = mail_sbatch_args(os.environ.get("DISORDERNET_MAIL_USER"))
 
+    seeds = [int(s) for s in str(args.seeds).split(",") if str(s).strip()]
+
     submitted = []
     for name in names:
+      for seed in seeds:
         arm = ARMS[name]
-        workdir = root / name
+        # One workdir per (arm, seed) so replicates never share checkpoints.
+        label = name if len(seeds) == 1 else f"{name}_s{seed}"
+        workdir = root / label
         workdir.mkdir(parents=True, exist_ok=True)
         # EVERY ablation key is set explicitly for EVERY arm, to its arm value or
         # its neutral default. os.environ persists across loop iterations and
@@ -271,6 +283,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
             "DISORDERNET_WORKDIR": str(workdir),
             "CHECKPOINT_SUBDIR": "checkpoints",
             "DISORDERNET_ACCOUNT": args.account,
+            "SEED": str(seed),
         }
 
         # Hold optimizer steps constant unless the caller overrides, so a
@@ -299,7 +312,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
         jid = submit_sbatch(
             PHASE_SBATCH,
             account=args.account,
-            job_name=f"dn-abl-{name}"[:50],
+            job_name=f"dn-abl-{label}"[:50],
             export=sbatch_export_keys(
                 ("DISORDERNET_LABEL_SOURCE", "DISORDERNET_MOBIDB_PROTEOME",
                  "DISORDERNET_MOBIDB_LIMIT", "DISORDERNET_MIN_EVIDENCE",
@@ -312,15 +325,25 @@ def cmd_submit(args: argparse.Namespace) -> int:
             extra_args=mail,
             mem=arm.gpu_mem,
         )
-        submitted.append({"arm": name, "job_id": jid, "workdir": str(workdir), "env": arm.env})
-        print(f"  {name:22s} → job {jid}  ({arm.description})")
+        submitted.append({
+            "arm": name, "seed": seed, "label": label,
+            "job_id": jid, "workdir": str(workdir), "env": arm.env,
+        })
+        print(f"  {label:24s} → job {jid}  ({arm.description})")
 
     manifest = {
         "stamp": stamp,
         "root": str(root),
         "git_revision": git_revision(),
         "baseline_env": BASELINE_ENV,
+        "seeds": seeds,
         "arms": submitted,
+        "noise_floor_note": (
+            "Same-fold, same-seed reruns of this pipeline differ by ~0.023 AUC "
+            "(cudnn.benchmark plus non-deterministic GPU kernels diverge over ~30 "
+            "epochs), which is comparable to the between-fold spread. Any arm "
+            "delta smaller than the measured seed spread is not a result."
+        ),
     }
     (root / "ablation_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"\nWrote {root / 'ablation_manifest.json'}")
@@ -419,6 +442,44 @@ def _arm_accuracy(workdir: Path) -> dict:
     return acc
 
 
+def _aggregate_replicates(replicates: list) -> list:
+    """Collapse per-seed runs into one row per arm, carrying the spread.
+
+    Reporting each seed separately invites quoting the best one. The spread is
+    also the only thing that makes a delta interpretable: identical reruns of
+    this pipeline differ by ~0.023 AUC, so an arm that gains less than its own
+    seed spread has not demonstrated anything.
+    """
+    import statistics
+
+    by_arm: dict = {}
+    for r in replicates:
+        by_arm.setdefault(r["arm"], []).append(r)
+
+    out = []
+    for arm, reps in by_arm.items():
+        head = dict(reps[0])
+        head["n_seeds"] = len(reps)
+        head["seeds"] = [r.get("seed") for r in reps]
+        for metric in ("cv_auc", "caid3_auc"):
+            vals = [r[metric] for r in reps if r.get(metric) is not None]
+            if not vals:
+                continue
+            head[metric] = round(statistics.fmean(vals), 4)
+            head[f"{metric}_sd"] = (
+                round(statistics.stdev(vals), 4) if len(vals) > 1 else None
+            )
+            head[f"{metric}_values"] = [round(v, 4) for v in vals]
+        for cost in ("gpu_hours", "cpu_hours", "elapsed_hours"):
+            vals = [r[cost] for r in reps if r.get(cost) is not None]
+            if vals:
+                head[cost] = round(sum(vals), 3)   # total spend across replicates
+        states = {r.get("state") for r in reps}
+        head["state"] = "COMPLETED" if states == {"COMPLETED"} else ",".join(sorted(s for s in states if s))
+        out.append(head)
+    return out
+
+
 def cmd_collect(args: argparse.Namespace) -> int:
     root = Path(args.root)
     manifest = _read_json(root / "ablation_manifest.json")
@@ -426,18 +487,22 @@ def cmd_collect(args: argparse.Namespace) -> int:
         print(f"ERROR: no ablation_manifest.json under {root}", file=sys.stderr)
         return 2
 
-    rows = []
+    replicates = []
     for entry in manifest["arms"]:
         arm = ARMS.get(entry["arm"])
-        row = {
+        replicates.append({
             "arm": entry["arm"],
+            "seed": entry.get("seed"),
             "description": arm.description if arm else "",
             "changes_task": bool(arm and arm.changes_task),
             "job_id": entry["job_id"],
             **_sacct_cost(entry["job_id"]),
             **_arm_accuracy(Path(entry["workdir"])),
-        }
-        rows.append(row)
+        })
+
+    # Aggregate replicates so an arm is one row with a spread, not N rows that
+    # invite cherry-picking the best seed.
+    rows = _aggregate_replicates(replicates)
 
     # The publish run is already the baseline configuration, so an ablation can
     # borrow it rather than spend another ~12 GPU-hours reproducing it. Only
@@ -453,11 +518,24 @@ def cmd_collect(args: argparse.Namespace) -> int:
             **_arm_accuracy(Path(args.baseline_workdir)),
         }
         rows.insert(0, base)
+    # Noise floor: the largest observed seed spread, falling back to the value
+    # measured directly on this pipeline when replicates are unavailable.
+    observed_sd = [
+        r[f"{m}_sd"] for r in rows for m in ("cv_auc", "caid3_auc")
+        if r.get(f"{m}_sd") is not None
+    ]
+    noise_floor = max(observed_sd) if observed_sd else MEASURED_RERUN_SD
+    single_seed = all((r.get("n_seeds") or 1) < 2 for r in rows)
+
     for r in rows:
         if base and r is not base:
             for metric in ("cv_auc", "caid3_auc"):
                 if r.get(metric) is not None and base.get(metric) is not None:
-                    r[f"delta_{metric}"] = round(r[metric] - base[metric], 4)
+                    d = round(r[metric] - base[metric], 4)
+                    r[f"delta_{metric}"] = d
+                    # A delta inside the noise floor is not a result, and the
+                    # table must say so rather than leave it to the reader.
+                    r[f"delta_{metric}_exceeds_noise"] = bool(abs(d) > 2 * noise_floor)
             if r.get("gpu_hours") and base.get("gpu_hours"):
                 r["gpu_hours_vs_baseline"] = round(r["gpu_hours"] / base["gpu_hours"], 2)
 
@@ -465,6 +543,14 @@ def cmd_collect(args: argparse.Namespace) -> int:
         "root": str(root),
         "git_revision": manifest.get("git_revision"),
         "baseline_env": manifest.get("baseline_env"),
+        "noise_floor_auc": round(noise_floor, 4),
+        "noise_floor_source": "observed seed spread" if observed_sd else "measured rerun sd",
+        "single_seed_warning": (
+            "Every arm ran one seed. Identical reruns of this pipeline differ by "
+            f"~{MEASURED_RERUN_SD} AUC, so no delta below ~{2 * MEASURED_RERUN_SD:.3f} "
+            "is interpretable. Re-run with --seeds 42,43,44 before claiming an "
+            "improvement."
+        ) if single_seed else None,
         "rows": rows,
         "interpretation": {
             "cv_auc": "DisProt homology-CV. Comparable only across arms with the same label source.",
@@ -473,12 +559,20 @@ def cmd_collect(args: argparse.Namespace) -> int:
         },
     }
     (root / "ablation_results.json").write_text(json.dumps(out, indent=2) + "\n")
-    _print_table(rows)
+    _print_table(rows, noise_floor)
+    print(f"\n  noise floor (AUC): ±{noise_floor:.4f}   "
+          f"({'observed seed spread' if observed_sd else 'measured rerun sd'})")
+    if single_seed:
+        print(
+            "  WARNING: single seed per arm. Identical reruns of this pipeline "
+            f"differ by ~{MEASURED_RERUN_SD} AUC, so deltas below "
+            f"~{2 * MEASURED_RERUN_SD:.3f} mean nothing. Use --seeds 42,43,44."
+        )
     print(f"\nWrote {root / 'ablation_results.json'}")
     return 0
 
 
-def _print_table(rows: list) -> None:
+def _print_table(rows: list, noise_floor: Optional[float] = None) -> None:
     def fmt(v, spec=".4f"):
         if v is None:
             return "—"
@@ -507,6 +601,16 @@ def _print_table(rows: list) -> None:
             "\n  * changes the prediction task — its CV AUC is NOT comparable to "
             "the baseline's.\n    Compare those arms on CAID3 only."
         )
+    flagged = [
+        r["arm"] for r in rows
+        if r.get("delta_caid3_auc") is not None
+        and r.get("delta_caid3_auc_exceeds_noise") is False
+    ]
+    if flagged:
+        print(
+            "\n  Within noise (delta below 2x the noise floor) — not a result: "
+            + ", ".join(flagged)
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -532,6 +636,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--epochs-fixed", action="store_true",
                     help="Use the profile epoch budget as-is instead of "
                          "step-matching data-scale arms (costs ~8x on pdb_missing)")
+    sp.add_argument(
+        "--seeds",
+        default="42",
+        help="Comma-separated seeds per arm. Replicates measure the noise "
+             "floor: this pipeline varies by ~0.023 AUC between identical "
+             "runs, so a single-seed delta is uninterpretable. Use at least "
+             "3 for any claimed improvement.",
+    )
     sp.add_argument("--dry-run", action="store_true")
     sp.set_defaults(func=cmd_submit)
 
