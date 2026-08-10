@@ -178,3 +178,90 @@ class TestCaid3ReportsAnInterval:
         assert ci["n_proteins"] == 40
         assert ci["ci_low"] <= rep["pooled"]["auc"] <= ci["ci_high"]
         assert isinstance(rep["ci_reaches_esmdispred"], bool)
+
+
+class TestRescueNeedsControls:
+    """A bare rescue rate is not a result.
+
+    Rescue is recall restricted to hallucinated residues, so a method that
+    simply predicts disorder more liberally rescues more of them. The reported
+    0.465 says nothing on its own; it needs baselines at a matched prediction
+    budget, and a chance floor.
+    """
+
+    @staticmethod
+    def _data(n=40000, seed=0):
+        import numpy as np
+
+        rng = np.random.default_rng(seed)
+        y = (rng.random(n) < 0.25).astype(np.int8)
+        pld = np.where(y == 1, rng.normal(45, 15, n), rng.normal(85, 10, n)).astype(np.float32)
+        hi = rng.choice(np.flatnonzero(y == 1), size=int(0.3 * (y == 1).sum()), replace=False)
+        pld[hi] = rng.normal(85, 5, len(hi))
+        pld = np.clip(pld, 0, 100).astype(np.float32)
+        return y, pld, rng
+
+    def test_constant_scorer_cannot_win_by_flagging_everything(self):
+        """The failure mode the matched budget exists to prevent."""
+        import numpy as np
+
+        from colab.hallucination_benchmark import compare_rescue_baselines
+
+        y, pld, rng = self._data()
+        n = len(y)
+        dn = np.clip(0.5 + 0.30 * (y - 0.5) + rng.normal(0, 0.18, n), 0, 1).astype(np.float32)
+        r = compare_rescue_baselines(
+            y, pld,
+            {"disordernet": dn, "always_disorder": np.ones(n, dtype=np.float32)},
+        )
+        always = r["methods"]["always_disorder"]
+        assert always["n_flagged"] == r["matched_budget_residues"], (
+            "a constant scorer must be held to the same budget, not allowed to "
+            "flag every residue"
+        )
+        assert always["rescue_rate"] < r["methods"]["disordernet"]["rescue_rate"]
+
+    def test_inverse_plddt_is_structurally_poor_at_rescue(self):
+        """The load-bearing control: hallucinations are high-pLDDT by definition,
+        so a structure-confidence score cannot rank them highly."""
+        import numpy as np
+
+        from colab.af_plddt import plddt_to_disorder_score
+        from colab.hallucination_benchmark import compare_rescue_baselines
+
+        y, pld, rng = self._data()
+        n = len(y)
+        dn = np.clip(0.5 + 0.30 * (y - 0.5) + rng.normal(0, 0.18, n), 0, 1).astype(np.float32)
+        r = compare_rescue_baselines(
+            y, pld,
+            {"disordernet": dn, "inverse_plddt": plddt_to_disorder_score(pld)},
+        )
+        assert r["methods"]["inverse_plddt"]["rescue_rate"] < 0.4
+        assert r["delta_vs_best_competing"] > 0
+
+    def test_reports_precision_alongside_rescue(self):
+        """A method could match the budget but spend it on ordered residues."""
+        import numpy as np
+
+        from colab.hallucination_benchmark import compare_rescue_baselines
+
+        y, pld, rng = self._data()
+        n = len(y)
+        dn = np.clip(0.5 + 0.30 * (y - 0.5) + rng.normal(0, 0.18, n), 0, 1).astype(np.float32)
+        r = compare_rescue_baselines(y, pld, {"disordernet": dn})
+        m = r["methods"]["disordernet"]
+        assert 0.0 <= m["precision_on_flagged"] <= 1.0
+        assert m["n_rescued"] <= r["n_hallucinated"]
+
+    def test_equal_methods_yield_no_advantage(self):
+        """If two methods are the same, the delta must be ~0 — otherwise the
+        comparison manufactures a difference."""
+        import numpy as np
+
+        from colab.hallucination_benchmark import compare_rescue_baselines
+
+        y, pld, rng = self._data()
+        n = len(y)
+        dn = np.clip(0.5 + 0.30 * (y - 0.5) + rng.normal(0, 0.18, n), 0, 1).astype(np.float32)
+        r = compare_rescue_baselines(y, pld, {"disordernet": dn, "twin": dn.copy()})
+        assert abs(r["delta_vs_best_competing"]) < 0.01
