@@ -1,4 +1,6 @@
-# DisorderNet: Beating AlphaFold 3 at Intrinsic Disorder Prediction
+# DisorderNet: A Post-Structure Distrust Layer for Intrinsic Disorder
+
+*Detecting where AlphaFold is confidently wrong about disorder.*
 
 [![Tests](https://github.com/Tommaso-R-Marena/DisorderNet/actions/workflows/test.yml/badge.svg)](https://github.com/Tommaso-R-Marena/DisorderNet/actions/workflows/test.yml)
 
@@ -7,7 +9,7 @@
 | Notebook | What it does | Open |
 |----------|--------------|------|
 | **v8 Multi-scale** | Multi-backbone extraction → v7 CV → **v8 ensemble** → calibration/conformal → predictor | [![Open v8 Multi-scale in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_v8_MultiScale.ipynb) |
-| **Pro (LoRA)** | Full GPU ESM-2 650M/3B + LoRA (targets ≥0.88; auto calibrated conformal) | [![Open Pro in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb) |
+| **Pro (LoRA)** | Full GPU ESM-2 650M/3B + LoRA (auto calibrated conformal) | [![Open Pro in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_Pro.ipynb) |
 | **Quick Screen** | Mini-ultra go/no-go before a full ultra run | [![Open Quick Screen in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Tommaso-R-Marena/DisorderNet/blob/master/colab/DisorderNet_Colab_QuickScreen.ipynb) |
 
 ## Overview
@@ -17,26 +19,78 @@ intrinsically disordered regions (IDRs) in proteins, with **trustworthy per-resi
 uncertainty** — calibrated probabilities and conformal "confident / abstain"
 decisions that most disorder predictors do not provide.
 
-### Headline results (honest, leakage-free 5-fold DisProt CV)
+> ## ⚠ Results under re-measurement (2026-08-10)
+>
+> A defect in homology clustering meant the **"homology split" numbers below were
+> not homology-separated**. `difflib.SequenceMatcher` enables an `autojunk`
+> heuristic that, for inputs of 200+ elements, treats any element occurring in
+> more than 1% of positions as junk. Every amino acid clears 1%, so for proteins
+> longer than 199 residues two 95%-identical sequences scored ~0.01. Nothing
+> reached the 0.40 threshold, no clusters ever merged, and `split_method="homology"`
+> silently produced the same per-protein split it exists to replace.
+>
+> Measured on the DisProt release used here: **2091 of 2663 proteins (78.5%) are
+> ≥200 residues** and were therefore invisible to homology detection; **424
+> proteins** belong to a multi-member family whose members were spread across
+> folds. The same defect disabled the CAID train/test leakage audit, which now
+> removes **323 of 2663** training proteins as ≥40% identical to a CAID3 target.
+>
+> Four further leakage paths inflated post-processing metrics: fold soup scoring
+> checkpoints on their own training proteins, the v6 stream trained on homologues
+> of the proteins it scored, an in-sample meta-stacker, and in-sample isotonic
+> calibration. Separately, saved checkpoints omitted fine-tuned ESM weights, so
+> any number produced by reloading a checkpoint (including CAID3) is unreliable.
+>
+> All are fixed and regression-tested (`tests/test_leakage_guards.py`,
+> `tests/test_checkpoint_roundtrip.py`). **Treat every AUC in this README as
+> provisional until re-measured.** Expect corrected figures to be lower.
+> See [`docs/HOMOLOGY_HOLDOUT.md`](docs/HOMOLOGY_HOLDOUT.md).
 
-All numbers below fit PCA on the **train fold only** (no leakage) and are pooled
-per-residue AUC-ROC. "Homology split" clusters proteins at ≥40% identity so
-homologs never cross folds (CAID-credible).
+### Headline results — legacy, NOT homology-separated
 
-| Model | random split | homology split | notes |
-|-------|-------------:|---------------:|-------|
+All numbers below fit PCA on the **train fold only** and are pooled per-residue
+AUC-ROC. The "homology split" column is retained for provenance only: for the
+reasons above it is **equivalent to a protein split**, so it does not support a
+CAID-credibility claim and is optimistic relative to a true homology holdout.
+
+| Model | random split | "homology" split¹ | notes |
+|-------|-------------:|------------------:|-------|
 | v6 baseline (ESM-2 8M + GBDT) | 0.8397 | — | prior release |
 | v7 (ESM-2 35M) | 0.8479 | 0.8396 | rich features + LGB/XGB/HistGBM blend + smoothing |
 | v7 (ESM-2 150M) | 0.8498 | 0.8457 | |
 | v7 (ESM-2 650M) | 0.8505 | 0.8487 | |
-| **v8 multi-scale ensemble (35M+150M+650M)** | **0.8568** | **0.8525** | best honest CPU result |
+| **v8 multi-scale ensemble (35M+150M+650M)** | **0.8568** | **0.8525** | best legacy CPU result |
+
+¹ Not actually homology-separated — see the notice above.
+
+### First corrected measurements (ESM-2 650M, genuine homology splits)
+
+From the leak-free 650M run (2,340 proteins after removing 323 CAID-homologous
+entries; 1,997 homology clusters via BLASTp). These come from validation
+probabilities computed during training and are **not** affected by the checkpoint
+defect:
+
+| Component | Pooled AUC |
+|---|---:|
+| ESM-2 650M + LoRA alone | 0.7454 |
+| v6-pro (physics GBDT) alone | 0.7804 |
+| AlphaFold pLDDT alone | 0.7906 |
+| GPU + v6 ensemble | 0.8011 |
+| + AlphaFold inference fusion | **0.8196** |
+
+Per-fold GPU AUC: 0.7651 / 0.7611 / 0.7632 / 0.7486 / 0.7376 (mean 0.7551 ± 0.0105).
+
+Two observations worth stating plainly: the trained model is the **weakest single
+component**, and AlphaFold pLDDT alone outperforms it. The gains come from
+combining streams, not from the language model on its own.
 
 The v8 ensemble is also the best-**calibrated** config: isotonic calibration lowers
 Expected Calibration Error from ~0.041 to **~0.0025** (ranking preserved), and the
 split-conformal layer holds its coverage guarantee (empirical coverage ~0.90–0.91 at
 α=0.1) with ~0.86 selective accuracy on the residues it is confident about. The GPU
-LoRA path (ESM-2 650M/3B) targets **≥0.88** and now inherits the same calibrated +
-conformal confidence layer.
+LoRA path (ESM-2 650M/3B) inherits the same calibrated + conformal confidence
+layer. Its measured pooled AUC under genuine homology separation is **0.8196**
+(with AlphaFold fusion), not the ≥0.88 previously targeted here.
 
 Compared to **literature reference points** (different protocols — not head-to-head),
 dedicated disorder predictors substantially outperform using AlphaFold pLDDT as a
@@ -369,7 +423,7 @@ pytest tests/ -v
 | IUPred3 | 0.789 | [CAID](https://caid.idpcentral.org/) | CAID benchmark |
 | flDPnn | 0.814 | [CAID](https://caid.idpcentral.org/) | CAID benchmark |
 | SETH (ProtT5+CNN) | 0.830 | [Ilzhöfer et al.](https://pmc.ncbi.nlm.nih.gov/articles/PMC9580958/) | Published |
-| **DisorderNet v6 (CPU)** | **0.831** | **This repo** | DisProt 5-fold CV |
+| DisorderNet v6 (CPU) | 0.831 | This repo | DisProt 5-fold **protein** split (legacy, not homology-separated) |
 | ESM2_650M-LoRA | 0.880 | [LoRA-DR](https://academic.oup.com/bioinformatics/article/41/Supplement_1/i439/8199360) | CAID1 |
 | flDPnn3a (CAID3) | 0.871 | [CAID3](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/) | CAID3 eval set |
 | ESMDisPred (CAID3 SOTA) | 0.895 | [Kabir et al.](https://pubmed.ncbi.nlm.nih.gov/41648466/) | CAID3 eval set |
@@ -378,11 +432,11 @@ pytest tests/ -v
 
 | Method | AUC-ROC | AP | Status |
 |--------|---------|-----|--------|
-| DisorderNet v6 (ESM-2 8M + GBDT) | 0.831–0.840 | 0.537 | Verified (`results_v6/metrics.json`) |
+| DisorderNet v6 (ESM-2 8M + GBDT) | 0.831–0.840 | 0.537 | Legacy protein-split (`results_v6/metrics.json`); measured 0.7804 under genuine homology splits |
 | DisorderNet v7 (ESM-2 35M, train-only PCA) | 0.848 | 0.558 | Verified (`run_v7.py`, leakage-free) |
 | DisorderNet v7 (ESM-2 650M) | 0.851 | 0.569 | Verified (`run_v7.py`) |
 | **DisorderNet v8 (multi-scale ensemble)** | **0.857** | 0.578 | Verified (`run_v8_multiscale.py`); homology split 0.853 |
-| DisorderNet GPU (ESM-2 650M + LoRA) | 0.817 | — | Verified Colab A100 (`disordernet_gpu_results_*.json`); ultra targets ≥0.88 |
+| DisorderNet GPU (ESM-2 650M + LoRA) | 0.817 | — | Legacy protein-split Colab run; measured 0.7454 under genuine homology splits |
 
 #### Legacy combined view (reference only)
 
@@ -395,7 +449,7 @@ pytest tests/ -v
 | flDPnn (CAID1/2 best) | 0.814 | +9.0% | [CAID](https://caid.idpcentral.org/) |
 | DisorderNet v5 (ESM 8M, PCA-32) | 0.823 | +10.2% | This work |
 | SETH (ProtT5+CNN) | 0.830 | +11.1% | [Ilzhöfer et al.](https://pmc.ncbi.nlm.nih.gov/articles/PMC9580958/) |
-| **DisorderNet v6 (ESM 8M, PCA-48)** | **0.831** | **+11.3%** | **This work** |
+| DisorderNet v6 (ESM 8M, PCA-48) | 0.831 | +11.3% | This work — legacy protein split |
 | flDPnn3a (CAID3) | 0.871 | +16.6% | [CAID3](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/) |
 | ESM2_35M-LoRA | 0.868 | +16.2% | [LoRA-DR](https://academic.oup.com/bioinformatics/article/41/Supplement_1/i439/8199360) |
 | ESM2_650M-LoRA | 0.880 | +17.8% | [LoRA-DR](https://academic.oup.com/bioinformatics/article/41/Supplement_1/i439/8199360) |
@@ -410,10 +464,11 @@ pytest tests/ -v
 | v6 | 0.831–0.840 | 406 | + PCA-48, ESM variance/context features |
 | v7 | 0.848–0.850 | ~855 | PCA-96 + global pooling, LGB+XGB+HistGBM blend, smoothing, train-only PCA, calibration + conformal |
 | **v8** | **0.857 (0.853 homology)** | ensemble | multi-scale PLM ensemble (35M+150M+650M OOF, equal weights) |
-| GPU (Colab) | 0.817 (0.831 AF-fusion subset) | 1280+phys | ESM-2 650M + LoRA + segment-aware ES + v6 ensemble |
-| GPU SOTA track (`sota` profile) | target ≥0.88–0.90 | — | Transformer head, Dice+EMA, 3-way stack, compact ckpt |
-| GPU ULTRA track (`ultra` profile) | target 0.88–0.92 | — | Rich features, FFN LoRA, v6-pro meta-stack, MC-dropout TTA |
-| GPU ULTRA 3B (`ultra3b` profile) | target 0.90–0.93 | — | ESM-2 3B backbone on A100 40GB+ |
+| GPU (Colab, legacy protein split) | 0.817 | 1280+phys | ESM-2 650M + LoRA + segment-aware ES + v6 ensemble |
+| **GPU (homology split, measured)** | **0.7454 alone / 0.8011 +v6 / 0.8196 +AF** | 1280+phys | Same recipe, genuine homology separation |
+| GPU SOTA track (`sota` profile) | *aspirational* ≥0.88–0.90 | — | Transformer head, Dice+EMA, 3-way stack, compact ckpt |
+| GPU ULTRA track (`ultra` profile) | *aspirational* 0.88–0.92; **measured 0.8196** | — | Rich features, FFN LoRA, v6-pro meta-stack, MC-dropout TTA |
+| GPU ULTRA 3B (`ultra3b` profile) | *aspirational* 0.90–0.93, unmeasured | — | ESM-2 3B backbone on A100 40GB+ |
 | GPU ULTRA + function (`ultra_fun`) | disorder + IDR roles | — | Multi-label Disorder→function head |
 
 ### Performance ceiling (honest)
@@ -422,9 +477,10 @@ On **DisProt 5-fold CV** with ESM-2 650M, the realistic band is:
 
 | Stage | Typical pooled AUC |
 |-------|-------------------|
-| Verified GPU baseline | 0.817 |
-| + ultra training + 7b–7d stack | 0.88–0.92 (target) |
-| + ESM-2 3B (`ultra3b`) + full stack | 0.90–0.93 (target) |
+| GPU baseline (legacy protein split) | 0.817 |
+| GPU (measured, homology split) | 0.8196 with AF fusion |
+| + ultra training + 7b–7d stack | 0.88–0.92 (aspirational, not achieved) |
+| + ESM-2 3B (`ultra3b`) + full stack | 0.90–0.93 (aspirational, unmeasured) |
 | + multi-seed blend (2–3 seeds) | +0.005–0.015 |
 | ESMDisPred (CAID3, different protocol) | 0.895 reference |
 
@@ -475,7 +531,7 @@ bash rockfish/slurm/submit_publish_650m.sh \
 `$DISORDERNET_V8_DIR/ensemble/results_v8/metrics.json` and/or  
 `~/disordernet_runs/publish_650m_*/publish_package/PACKAGE_README.md`.
 
-Ultra on Rockfish uses **homology-safe CV**, optional **train-time pLDDT** (disabled in clean companions), and **CAID3** scoring for fair comparison vs ESMDisPred (0.895).
+Ultra on Rockfish uses **homology-separated CV** (BLASTp clustering; genuinely separated only since the 2026-08-10 fix), optional **train-time pLDDT** (disabled in clean companions), and **CAID3** scoring for fair comparison vs ESMDisPred (0.895).
 
 ## Documentation
 
@@ -668,7 +724,7 @@ and the GPU LoRA path are the ways past that.)
 #### Honest evaluation: random vs homology split
 
 Random protein-ID GroupKFold can leak signal via near-duplicate homologs. We also
-report **homology-split** CV (`>=40%` identity clusters, CAID-credible; run with
+report **homology-split** CV (`>=40%` identity clusters via BLASTp; genuinely separated only since the 2026-08-10 fix; run with
 `DISORDERNET_SPLIT=homology python run_v7.py`). The small gap confirms the random
 number is not badly inflated:
 
@@ -774,7 +830,7 @@ AF3's diffusion architecture generates structured coordinates for every residue,
 
 | File | Description |
 |------|-------------|
-| `colab/homology_splits.py` | CAID-credible homology-clustered CV |
+| `colab/homology_splits.py` | Homology-clustered CV (BLASTp preferred; see docs/HOMOLOGY_HOLDOUT.md) |
 | `colab/caid3_eval.py` | CAID3 Disorder-PDB benchmark harness |
 | `colab/structure_encoder.py` | Train-time pLDDT feature channel |
 | `colab/predict_batch.py` | FASTA proteome inference + `.caid` export |
