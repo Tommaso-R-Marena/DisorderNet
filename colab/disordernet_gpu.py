@@ -670,6 +670,10 @@ def setup_environment(cfg: TrainConfig) -> TrainConfig:
 
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
+    # Ablations need reproducible runs more than they need autotuned kernels:
+    # without this the seed spread (~0.023 AUC) swamps the effects being measured.
+    if os.environ.get("DISORDERNET_DETERMINISTIC", "") in ("1", "true", "True"):
+        cfg.deterministic = True
     if cfg.deterministic:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False

@@ -152,3 +152,52 @@ def test_all_arms_declare_a_hypothesis(arm_name):
     arm = ARMS[arm_name]
     assert arm.hypothesis and len(arm.hypothesis) > 40
     assert arm.description
+
+
+class TestDeterminismIsNotSilentlyOverridden:
+    """cfg.deterministic set cudnn.benchmark=False, then apply_hpc_runtime_settings
+    unconditionally set it back to True — so deterministic runs were never
+    deterministic on HPC, and identical reruns diverged by ~0.023 AUC."""
+
+    def test_hpc_settings_respect_an_existing_determinism_request(self):
+        import torch
+
+        from colab.hpc_efficiency import apply_hpc_runtime_settings
+
+        prev_b = torch.backends.cudnn.benchmark
+        prev_d = torch.backends.cudnn.deterministic
+        try:
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+            apply_hpc_runtime_settings(verbose=False)
+            assert torch.backends.cudnn.benchmark is False, (
+                "apply_hpc_runtime_settings re-enabled autotuning and silently "
+                "undid the caller's determinism request"
+            )
+        finally:
+            torch.backends.cudnn.benchmark = prev_b
+            torch.backends.cudnn.deterministic = prev_d
+
+    def test_non_deterministic_runs_still_get_autotuning(self):
+        import torch
+
+        from colab.hpc_efficiency import apply_hpc_runtime_settings
+
+        prev_b = torch.backends.cudnn.benchmark
+        prev_d = torch.backends.cudnn.deterministic
+        try:
+            torch.backends.cudnn.deterministic = False
+            apply_hpc_runtime_settings(verbose=False)
+            if torch.cuda.is_available():
+                assert torch.backends.cudnn.benchmark is True
+        finally:
+            torch.backends.cudnn.benchmark = prev_b
+            torch.backends.cudnn.deterministic = prev_d
+
+    def test_every_ablation_arm_requests_determinism(self):
+        from rockfish.ablation import ABLATION_KEY_DEFAULTS
+
+        assert ABLATION_KEY_DEFAULTS.get("DISORDERNET_DETERMINISTIC") == "1", (
+            "ablation arms must be reproducible; otherwise a delta cannot be "
+            "distinguished from run-to-run divergence"
+        )

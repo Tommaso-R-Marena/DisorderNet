@@ -105,6 +105,11 @@ MEASURED_RERUN_SD = 0.023
 # explicitly for each arm so an omitted key cannot inherit a neighbouring arm's
 # setting — see the note in cmd_submit.
 ABLATION_KEY_DEFAULTS = {
+    # Deterministic kernels for every arm. Autotuned cuDNN plus TF32 let
+    # identical reruns diverge by ~0.023 AUC over ~30 epochs, which is larger
+    # than most effects in this matrix — an ablation that cannot reproduce
+    # itself cannot attribute a delta. Costs some throughput; worth it here.
+    "DISORDERNET_DETERMINISTIC": "1",
     "PROFILE": "ultra",
     "BACKBONE": "650M",
     "DISORDERNET_LABEL_SOURCE": "disprot",
@@ -316,7 +321,8 @@ def cmd_submit(args: argparse.Namespace) -> int:
             export=sbatch_export_keys(
                 ("DISORDERNET_LABEL_SOURCE", "DISORDERNET_MOBIDB_PROTEOME",
                  "DISORDERNET_MOBIDB_LIMIT", "DISORDERNET_MIN_EVIDENCE",
-                 "DISORDERNET_NUM_EPOCHS", "DISORDERNET_MOBIDB_GLOBAL")
+                 "DISORDERNET_NUM_EPOCHS", "DISORDERNET_MOBIDB_GLOBAL",
+                 "DISORDERNET_DETERMINISTIC")
             ),
             partition=args.partition or arm.partition,
             qos=args.qos,

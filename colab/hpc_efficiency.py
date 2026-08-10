@@ -28,14 +28,23 @@ def apply_hpc_runtime_settings(
     """
     report: dict[str, Any] = {}
     if torch.cuda.is_available():
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        torch.backends.cudnn.benchmark = True
-        report["tf32"] = True
-        report["cudnn_benchmark"] = True
+        # Respect a caller that has already asked for determinism. This function
+        # runs *after* setup_environment applies cfg.deterministic, and
+        # unconditionally re-enabling benchmark silently undid it — so
+        # deterministic=True never took effect on HPC, and identical reruns
+        # diverged by ~0.023 AUC over ~30 epochs. Autotuned kernel selection is a
+        # speed optimisation; reproducibility outranks it when asked for.
+        deterministic = bool(torch.backends.cudnn.deterministic)
+        torch.backends.cuda.matmul.allow_tf32 = not deterministic
+        torch.backends.cudnn.allow_tf32 = not deterministic
+        torch.backends.cudnn.benchmark = not deterministic
+        report["tf32"] = not deterministic
+        report["cudnn_benchmark"] = not deterministic
+        report["deterministic"] = deterministic
         try:
-            torch.set_float32_matmul_precision(matmul_precision)
-            report["matmul_precision"] = matmul_precision
+            precision = "highest" if deterministic else matmul_precision
+            torch.set_float32_matmul_precision(precision)
+            report["matmul_precision"] = precision
         except Exception as exc:  # pragma: no cover
             report["matmul_precision_error"] = str(exc)
 

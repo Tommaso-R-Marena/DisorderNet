@@ -173,6 +173,9 @@ disordernet_slurm_run() {
   if [[ -n "${DISORDERNET_MIN_EVIDENCE:-}" ]]; then
     EXTRA_ARGS+=(--min-evidence-fraction "${DISORDERNET_MIN_EVIDENCE}")
   fi
+  if [[ -n "${DISORDERNET_DETERMINISTIC:-}" ]]; then
+    export DISORDERNET_DETERMINISTIC
+  fi
   if [[ -n "${DISORDERNET_NUM_EPOCHS:-}" ]]; then
     EXTRA_ARGS+=(--num-epochs "${DISORDERNET_NUM_EPOCHS}")
   fi
