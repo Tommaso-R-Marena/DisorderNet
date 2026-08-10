@@ -123,9 +123,13 @@ def _predict_proteins_multitask(
                     dis_probs = torch.sigmoid(out).float()
                     fn_probs = None
 
+        # .float() before .numpy(): autocast can hand back bfloat16, which numpy
+        # cannot represent. Belt-and-braces alongside the cast in
+        # mc_dropout_predict_probs — this conversion sits after every inference
+        # branch, so it is the last place a stray low-precision dtype can leak out.
         mask_np = mask.cpu().numpy()
-        dis_np = dis_probs.cpu().numpy()
-        fn_np = fn_probs.cpu().numpy() if fn_probs is not None else None
+        dis_np = dis_probs.float().cpu().numpy()
+        fn_np = fn_probs.float().cpu().numpy() if fn_probs is not None else None
         for i, pid in enumerate(ids):
             m = mask_np[i]
             disorder_out[pid] = dis_np[i][m].astype(np.float32)

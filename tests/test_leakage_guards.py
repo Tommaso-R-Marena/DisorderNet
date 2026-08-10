@@ -573,3 +573,45 @@ class TestCvResumeActuallyResumes:
         )
         assert "get_disprot_cache_meta(data_cache)" in src
         del inspect
+
+
+class TestNoBFloat16LeaksToNumpy:
+    """``Tensor.numpy()`` has no bfloat16 support.
+
+    Under bf16 autocast the MC-dropout TTA branch returned bfloat16 while the
+    plain branch cast to float32, so the fold soup died with
+    ``TypeError: Got unsupported ScalarType BFloat16`` — but only once a run
+    actually reached post-processing with TTA enabled, which took a 7-hour job
+    to discover.
+    """
+
+    def test_mc_dropout_predict_probs_returns_float32(self):
+        import torch
+
+        from colab.inference_tta import mc_dropout_predict_probs
+
+        class TinyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.drop = torch.nn.Dropout(0.1)
+
+            def forward(self, x):
+                return x
+
+        def forward_fn(model, tokens, aa, mask, rich_feats=None, **kw):
+            # Emulate an autocast region handing back bfloat16.
+            return torch.zeros(tokens.shape, dtype=torch.bfloat16)
+
+        probs = mc_dropout_predict_probs(
+            TinyModel(), torch.zeros(2, 5), None, torch.ones(2, 5, dtype=torch.bool),
+            None, 3, forward_fn,
+        )
+        assert probs.dtype == torch.float32, probs.dtype
+        probs.cpu().numpy()  # must not raise
+
+    def test_bfloat16_tensor_cannot_go_straight_to_numpy(self):
+        """Confirms the guard above is not vacuous."""
+        import torch
+
+        with pytest.raises(TypeError, match="BFloat16"):
+            torch.zeros(2, 2, dtype=torch.bfloat16).numpy()
