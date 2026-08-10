@@ -615,3 +615,59 @@ class TestNoBFloat16LeaksToNumpy:
 
         with pytest.raises(TypeError, match="BFloat16"):
             torch.zeros(2, 2, dtype=torch.bfloat16).numpy()
+
+
+class TestFoldCheckpointNaming:
+    """Training and the fold-ensemble loader used different filenames.
+
+    train_fold writes ``fold{N}_best.pt``; load_fold_ensemble_models looked only
+    for ``fold_{N}_*.pt``. The checkpoints existed and were never found, so
+    CAID3 evaluation — the only measurement comparable to published methods —
+    raised "No fold checkpoints" at the end of a run that had trained all five
+    folds successfully.
+    """
+
+    def test_loader_accepts_the_name_training_actually_writes(self, tmp_path, monkeypatch):
+        import colab.predict_batch as pb
+
+        loaded: list = []
+        monkeypatch.setattr(
+            pb, "_load_fold_model", lambda path, *a, **k: loaded.append(path) or object()
+        )
+        # Exactly the spelling colab/disordernet_gpu.py:train_fold uses.
+        for n in range(1, 6):
+            (tmp_path / f"fold{n}_best.pt").write_bytes(b"x")
+
+        models = pb.load_fold_ensemble_models(str(tmp_path), None, None, None, n_folds=5)
+        assert len(models) == 5, f"loaded {len(models)} of 5"
+        assert all("fold" in p for p in loaded)
+
+    def test_loader_still_accepts_the_compact_spelling(self, tmp_path, monkeypatch):
+        import colab.predict_batch as pb
+
+        monkeypatch.setattr(pb, "_load_fold_model", lambda path, *a, **k: object())
+        for n in range(1, 4):
+            (tmp_path / f"fold_{n}_compact.pt").write_bytes(b"x")
+        models = pb.load_fold_ensemble_models(str(tmp_path), None, None, None, n_folds=3)
+        assert len(models) == 3
+
+    def test_error_names_what_it_looked_for_and_what_exists(self, tmp_path):
+        import colab.predict_batch as pb
+
+        (tmp_path / "something_else.pt").write_bytes(b"x")
+        with pytest.raises(FileNotFoundError) as exc:
+            pb.load_fold_ensemble_models(str(tmp_path), None, None, None, n_folds=2)
+        msg = str(exc.value)
+        assert "something_else.pt" in msg, "error should list what IS present"
+        assert "fold" in msg
+
+    def test_mirror_globs_cover_the_training_filename(self):
+        """A mirror that matches no weights leaves a resumed run nothing to restore."""
+        import fnmatch
+
+        from rockfish.utils import ARTIFACT_WEIGHT_GLOBS
+
+        written_by_training = "fold3_best.pt"
+        assert any(
+            fnmatch.fnmatch(written_by_training, g) for g in ARTIFACT_WEIGHT_GLOBS
+        ), f"{written_by_training} matches none of {ARTIFACT_WEIGHT_GLOBS}"

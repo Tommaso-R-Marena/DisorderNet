@@ -62,7 +62,12 @@ ARTIFACT_REPORT_GLOBS: tuple[str, ...] = (
 
 # Large weight globs — mirrored for resume, not copied into publish packages
 ARTIFACT_WEIGHT_GLOBS: tuple[str, ...] = (
+    # Both spellings: training writes fold{N}_best.pt while the compact-checkpoint
+    # path writes fold_{N}_compact.pt. Matching only one silently mirrored no
+    # weights at all, so a resumed run had nothing to restore from.
     "fold_*_compact.pt",
+    "fold*_best.pt",
+    "fold*_compact.pt",
 )
 
 # All basename-level globs (reports + weights)
