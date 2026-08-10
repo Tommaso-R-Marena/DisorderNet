@@ -199,12 +199,20 @@ def fetch_mobidb_proteome(
     limit: Optional[int] = None,
     force: bool = False,
     verbose: bool = True,
+    query: Optional[dict] = None,
 ) -> list[dict]:
-    """Bulk-download a MobiDB proteome as newline-delimited JSON, with a disk cache.
+    """Bulk-download MobiDB records as newline-delimited JSON, with a disk cache.
+
+    ``proteome`` selects one UniProt reference proteome. Pass ``query`` instead
+    to select across all of MobiDB — notably
+    ``{"derived-missing_residues-th_90": "exists"}``, which is the natural
+    universe for PDB-derived labels and is not confined to one organism.
+    Restricting to the human proteome yields only ~3.4k trainable proteins;
+    the cross-organism set is several times larger.
 
     The projection matters: a full record carries hundreds of per-PDB-chain
-    sub-entries (~170KB each), so an unprojected pull of a 82k-protein proteome
-    is many gigabytes for a handful of fields we actually use.
+    sub-entries (~170KB each), so an unprojected pull is many gigabytes for a
+    handful of fields we actually use.
     """
     import requests
 
@@ -223,12 +231,18 @@ def fetch_mobidb_proteome(
         return records
 
     os.makedirs(os.path.dirname(cache_path) or ".", exist_ok=True)
-    params = {"proteome": proteome, "format": "json", "projection": MOBIDB_PROJECTION}
+    params: dict = {"format": "json", "projection": MOBIDB_PROJECTION}
+    if query:
+        params.update(query)
+        selector = ",".join(f"{k}={v}" for k, v in query.items())
+    else:
+        params["proteome"] = proteome
+        selector = f"proteome={proteome}"
     if limit:
         params["limit"] = int(limit)
 
     if verbose:
-        print(f"  MobiDB download: proteome={proteome} limit={limit or 'all'}…", flush=True)
+        print(f"  MobiDB download: {selector} limit={limit or 'all'}…", flush=True)
     t0 = time.time()
     records: list[dict] = []
     tmp_path = cache_path + ".partial"

@@ -84,6 +84,33 @@ BASELINE_ENV = {
     "DISORDERNET_LABEL_SOURCE": "disprot",
 }
 
+# Measured evidenced-residue counts per label source (rockfish/slurm/_label_probe.py,
+# global PDB-coverage selector). Used to hold optimizer steps constant across arms.
+EVIDENCED_RESIDUES = {
+    "disprot": 988_872,          # 2,340 proteins after CAID leak-free filtering
+    "mobidb_curated": 781_386,   # 1,721 proteins
+    "pdb_missing": 6_611_600,    # 19,819 proteins
+    "union": 6_856_167,          # 19,908 proteins
+}
+BASELINE_EPOCHS = 35
+
+
+def compute_matched_epochs(label_source: str, baseline_epochs: int = BASELINE_EPOCHS) -> int:
+    """Epoch budget that holds optimizer steps roughly constant across arms.
+
+    A data-scale arm at a fixed epoch count is really two changes at once: more
+    data *and* proportionally more gradient steps, so an accuracy gain cannot be
+    attributed. Matching steps isolates the data effect; running longer is a
+    separate, explicitly-labelled arm.
+
+    pdb_missing carries 6.7x the evidenced residues of DisProt, so ~5 epochs
+    there costs about what 35 epochs cost on DisProt — the difference between a
+    ~20 GPU-hour arm and a ~150 GPU-hour one.
+    """
+    base = EVIDENCED_RESIDUES.get("disprot", 1)
+    this = EVIDENCED_RESIDUES.get(label_source, base)
+    return max(3, round(baseline_epochs * base / max(this, 1)))
+
 
 ARMS: dict[str, Arm] = {
     "baseline": Arm(
@@ -95,11 +122,13 @@ ARMS: dict[str, Arm] = {
     # ---- Lever 1: data scale -------------------------------------------------
     "mobidb_curated": Arm(
         name="mobidb_curated",
-        description="MobiDB curated consensus, human proteome",
+        description="MobiDB curated consensus (1,721 proteins — SMALLER than DisProt)",
         hypothesis=(
-            "Data scale is the binding constraint: the screen memorised 166 "
-            "proteins (train loss 0.069, val AUC 0.66). Same label *kind* as "
-            "DisProt, ~30x the proteins, so any gain is attributable to scale."
+            "Not a data-scale arm: measurement showed curated consensus yields "
+            "1,721 proteins / 781k evidenced residues, i.e. 0.7x DisProt, not the "
+            "30x a raw proteome count suggests. Retained as a label-quality "
+            "control — same definition kind, different curation pipeline — so a "
+            "gain here would indicate label noise in DisProt rather than scale."
         ),
         env={"DISORDERNET_LABEL_SOURCE": "mobidb_curated"},
     ),
@@ -108,18 +137,27 @@ ARMS: dict[str, Arm] = {
         name="pdb_missing",
         description="PDB missing-residue labels (CAID3 Disorder-PDB definition)",
         hypothesis=(
-            "Training on curated functional disorder while scoring on "
-            "crystallographic disorder is a domain shift. Matching the "
-            "definition should move the CAID3 number specifically."
+            "Two effects at once, both favourable. (1) Task match: training on "
+            "curated functional disorder while scoring on crystallographic "
+            "disorder is a domain shift, and this removes it. (2) Scale: 19,819 "
+            "proteins / 6.6M evidenced residues, 8.5x the proteins and 6.7x the "
+            "evidenced residues of DisProt. Step-matched epochs keep the cost "
+            "comparable, so a CAID3 gain here is the single most informative "
+            "result in the matrix."
         ),
-        env={"DISORDERNET_LABEL_SOURCE": "pdb_missing"},
+        env={
+            "DISORDERNET_LABEL_SOURCE": "pdb_missing",
+            # Cross-organism, not one proteome: human alone yields 3.4k
+            # proteins, the global PDB-coverage set yields 19.8k.
+            "DISORDERNET_MOBIDB_GLOBAL": "1",
+        },
         changes_task=True,
     ),
     "union_labels": Arm(
         name="union_labels",
         description="Curated OR PDB-missing positives",
         hypothesis="Broader positive definition; tests whether the two label kinds are complementary or conflicting.",
-        env={"DISORDERNET_LABEL_SOURCE": "union"},
+        env={"DISORDERNET_LABEL_SOURCE": "union", "DISORDERNET_MOBIDB_GLOBAL": "1"},
         changes_task=True,
     ),
     # ---- Lever 3: pLDDT as a first-class input ------------------------------
@@ -158,7 +196,7 @@ ARMS: dict[str, Arm] = {
             "If data scale and task matching both pay off independently, this "
             "is the configuration that should be competitive on CAID3."
         ),
-        env={"DISORDERNET_LABEL_SOURCE": "pdb_missing"},
+        env={"DISORDERNET_LABEL_SOURCE": "pdb_missing", "DISORDERNET_MOBIDB_GLOBAL": "1"},
         changes_task=True,
         compound=True,
     ),
@@ -210,8 +248,20 @@ def cmd_submit(args: argparse.Namespace) -> int:
             "CHECKPOINT_SUBDIR": "checkpoints",
             "DISORDERNET_ACCOUNT": args.account,
         }
+        # Hold optimizer steps constant unless the caller overrides, so a
+        # data-scale arm measures the data and not a larger step budget.
         if args.num_epochs:
             env["DISORDERNET_NUM_EPOCHS"] = str(args.num_epochs)
+        elif not args.epochs_fixed:
+            src = arm.env.get("DISORDERNET_LABEL_SOURCE", BASELINE_ENV["DISORDERNET_LABEL_SOURCE"])
+            matched = compute_matched_epochs(src)
+            if matched != BASELINE_EPOCHS:
+                env["DISORDERNET_NUM_EPOCHS"] = str(matched)
+                print(
+                    f"    {name}: {src} carries "
+                    f"{EVIDENCED_RESIDUES.get(src, 0):,} evidenced residues → "
+                    f"{matched} epochs (step-matched to {BASELINE_EPOCHS} on DisProt)"
+                )
         os.environ.update(env)
 
         jid = submit_sbatch(
@@ -221,7 +271,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
             export=sbatch_export_keys(
                 ("DISORDERNET_LABEL_SOURCE", "DISORDERNET_MOBIDB_PROTEOME",
                  "DISORDERNET_MOBIDB_LIMIT", "DISORDERNET_MIN_EVIDENCE",
-                 "DISORDERNET_NUM_EPOCHS")
+                 "DISORDERNET_NUM_EPOCHS", "DISORDERNET_MOBIDB_GLOBAL")
             ),
             partition=args.partition or arm.partition,
             qos=args.qos,
@@ -432,7 +482,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--partition", default=None)
     sp.add_argument("--root-workdir", default=None)
     sp.add_argument("--stamp", default=None)
-    sp.add_argument("--num-epochs", type=int, default=None)
+    sp.add_argument("--num-epochs", type=int, default=None,
+                    help="Force an epoch budget for every arm")
+    sp.add_argument("--epochs-fixed", action="store_true",
+                    help="Use the profile epoch budget as-is instead of "
+                         "step-matching data-scale arms (costs ~8x on pdb_missing)")
     sp.add_argument("--dry-run", action="store_true")
     sp.set_defaults(func=cmd_submit)
 
