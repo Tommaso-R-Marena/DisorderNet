@@ -94,6 +94,19 @@ EVIDENCED_RESIDUES = {
 }
 BASELINE_EPOCHS = 35
 
+# Every key any arm can set, with its neutral (baseline) value. Each is written
+# explicitly for each arm so an omitted key cannot inherit a neighbouring arm's
+# setting — see the note in cmd_submit.
+ABLATION_KEY_DEFAULTS = {
+    "PROFILE": "ultra",
+    "BACKBONE": "650M",
+    "DISORDERNET_LABEL_SOURCE": "disprot",
+    "DISORDERNET_MOBIDB_GLOBAL": "0",
+    "RUN_NO_PLDDT_FEATURES": "0",
+    "RUN_NO_HALLUC_WEIGHT": "0",
+    "DISORDERNET_NUM_EPOCHS": str(BASELINE_EPOCHS),
+}
+
 
 def compute_matched_epochs(label_source: str, baseline_epochs: int = BASELINE_EPOCHS) -> int:
     """Epoch budget that holds optimizer steps roughly constant across arms.
@@ -131,6 +144,10 @@ ARMS: dict[str, Arm] = {
             "gain here would indicate label noise in DisProt rather than scale."
         ),
         env={"DISORDERNET_LABEL_SOURCE": "mobidb_curated"},
+        # Same *kind* of label as DisProt, but a different protein set and
+        # curation pipeline — so its CV AUC is measured over different proteins
+        # and is not comparable to the baseline's. CAID3 is the common ground.
+        changes_task=True,
     ),
     # ---- Lever 2: task-matched labels ---------------------------------------
     "pdb_missing": Arm(
@@ -240,28 +257,43 @@ def cmd_submit(args: argparse.Namespace) -> int:
         arm = ARMS[name]
         workdir = root / name
         workdir.mkdir(parents=True, exist_ok=True)
+        # EVERY ablation key is set explicitly for EVERY arm, to its arm value or
+        # its neutral default. os.environ persists across loop iterations and
+        # sbatch_export_keys() forwards any key that is merely *set*, so an arm
+        # that simply omits a key would silently inherit the previous arm's value
+        # — e.g. no_plddt running at pdb_missing's 5 epochs, or inheriting its
+        # RUN_NO_PLDDT_FEATURES. That would corrupt the comparison invisibly.
         env = {
             **defaults,
             **BASELINE_ENV,
+            **{k: v for k, v in ABLATION_KEY_DEFAULTS.items() if k not in arm.env},
             **arm.env,
             "DISORDERNET_WORKDIR": str(workdir),
             "CHECKPOINT_SUBDIR": "checkpoints",
             "DISORDERNET_ACCOUNT": args.account,
         }
+
         # Hold optimizer steps constant unless the caller overrides, so a
         # data-scale arm measures the data and not a larger step budget.
+        src = env.get("DISORDERNET_LABEL_SOURCE", BASELINE_ENV["DISORDERNET_LABEL_SOURCE"])
         if args.num_epochs:
-            env["DISORDERNET_NUM_EPOCHS"] = str(args.num_epochs)
-        elif not args.epochs_fixed:
-            src = arm.env.get("DISORDERNET_LABEL_SOURCE", BASELINE_ENV["DISORDERNET_LABEL_SOURCE"])
-            matched = compute_matched_epochs(src)
-            if matched != BASELINE_EPOCHS:
-                env["DISORDERNET_NUM_EPOCHS"] = str(matched)
-                print(
-                    f"    {name}: {src} carries "
-                    f"{EVIDENCED_RESIDUES.get(src, 0):,} evidenced residues → "
-                    f"{matched} epochs (step-matched to {BASELINE_EPOCHS} on DisProt)"
-                )
+            epochs = int(args.num_epochs)
+        elif args.epochs_fixed:
+            epochs = BASELINE_EPOCHS
+        else:
+            epochs = compute_matched_epochs(src)
+        env["DISORDERNET_NUM_EPOCHS"] = str(epochs)
+        if epochs != BASELINE_EPOCHS:
+            print(
+                f"    {name}: {src} carries {EVIDENCED_RESIDUES.get(src, 0):,} "
+                f"evidenced residues → {epochs} epochs "
+                f"(step-matched to {BASELINE_EPOCHS} on DisProt)"
+            )
+
+        # Drop stale ablation keys from the parent environment before applying
+        # this arm's, so nothing survives from the previous iteration.
+        for key in ABLATION_KEY_DEFAULTS:
+            os.environ.pop(key, None)
         os.environ.update(env)
 
         jid = submit_sbatch(
