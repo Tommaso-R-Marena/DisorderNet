@@ -172,8 +172,9 @@ def apply_sota_stack(
                 "after": meta_report["after"],
                 "delta_auc_pooled": meta_report["delta_auc_pooled"],
                 "delta_ap_pooled": meta_report["delta_ap_pooled"],
-                "target_sota_auc": 0.895,
-                "gap_to_esmdispred": 0.895 - after["auc"],
+                "benchmark_comparability": (
+                    "DisProt homology-CV pooled AUC. NOT comparable to CAID3 figures such as ESMDisPred 0.895: different label definition (curator-annotated functional disorder vs missing residues in crystal structures), different proteins, different protocol. The comparable measurement is caid3_eval_report.json."
+                ),
                 "method": "meta_ensemble",
             }
             return report, fold_results_stacked, v6_probs_by_id
@@ -226,8 +227,9 @@ def apply_sota_stack(
         "after": {"pooled": {k: after[k] for k in ("auc", "ap", "n_residues")}},
         "delta_auc_pooled": after["auc"] - before["auc"],
         "delta_ap_pooled": after["ap"] - before["ap"],
-        "target_sota_auc": 0.895,
-        "gap_to_esmdispred": 0.895 - after["auc"],
+        "benchmark_comparability": (
+            "DisProt homology-CV pooled AUC. NOT comparable to CAID3 figures such as ESMDisPred 0.895: different label definition (curator-annotated functional disorder vs missing residues in crystal structures), different proteins, different protocol. The comparable measurement is caid3_eval_report.json."
+        ),
     }
     return report, fold_results_stacked, v6_probs_by_id
 
@@ -242,8 +244,8 @@ def print_sota_stack_report(report: dict) -> None:
     print(f"  Before   : AUC={b['pooled']['auc']:.4f}  AP={b['pooled']['ap']:.4f}")
     print(f"  After    : AUC={a['pooled']['auc']:.4f}  AP={a['pooled']['ap']:.4f}")
     print(f"  Δ AUC    : {report['delta_auc_pooled']:+.4f}")
-    gap = report.get("gap_to_esmdispred", 0)
-    print(f"  Gap→ESMDisPred (0.895): {gap:+.4f}")
+    print("  (CAID3 comparison lives in caid3_eval_report.json — "
+          "DisProt CV AUC is a different benchmark)")
     print(f"{'═' * 64}")
 
 

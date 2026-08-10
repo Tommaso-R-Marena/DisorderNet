@@ -135,7 +135,7 @@ def apply_meta_stacker(
 
     # Out-of-fold stacking. Fitting the meta-learner on every OOF residue and
     # then scoring those same residues makes `after` a resubstitution score, so
-    # delta_auc_pooled and gap_to_esmdispred would flatter the model against a
+    # delta_auc_pooled would flatter the model against a
     # genuinely held-out reference. Instead each residue is scored by a stacker
     # that never saw its protein, grouping by protein so no protein straddles
     # the fit/score boundary.
@@ -205,7 +205,9 @@ def apply_meta_stacker(
         "after": {"pooled": {k: after[k] for k in ("auc", "ap", "n_residues")}},
         "delta_auc_pooled": after["auc"] - before["auc"],
         "delta_ap_pooled": after["ap"] - before["ap"],
-        "gap_to_esmdispred": 0.895 - after["auc"],
+        "benchmark_comparability": (
+            "DisProt homology-CV pooled AUC. NOT comparable to CAID3 figures such as ESMDisPred 0.895: different label definition (curator-annotated functional disorder vs missing residues in crystal structures), different proteins, different protocol. The comparable measurement is caid3_eval_report.json."
+        ),
         "method": "logistic_meta_stacker",
     }
     return report, fold_results_stacked
@@ -226,7 +228,6 @@ def print_meta_ensemble_report(report: dict) -> None:
     print(f"  Before : AUC={b['auc']:.4f}  AP={b['ap']:.4f}")
     print(f"  After  : AUC={a['auc']:.4f}  AP={a['ap']:.4f}")
     print(f"  Δ AUC  : {report['delta_auc_pooled']:+.4f}")
-    print(f"  Gap→ESMDisPred: {report.get('gap_to_esmdispred', 0):+.4f}")
     print(f"{'═' * 64}")
 
 

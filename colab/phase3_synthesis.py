@@ -350,7 +350,9 @@ def build_benchmark_ranking(our_auc: float, benchmarks: Optional[list[dict]] = N
         "delta_vs_af3": float(our_auc - 0.747),
         "delta_vs_af2": float(our_auc - 0.770),
         "delta_vs_v6": float(our_auc - 0.831),
-        "delta_vs_sota_esmdispred": float(our_auc - 0.895),
+        "benchmark_comparability": (
+            "DisProt homology-CV pooled AUC. NOT comparable to CAID3 figures such as ESMDisPred 0.895: different label definition (curator-annotated functional disorder vs missing residues in crystal structures), different proteins, different protocol. The comparable measurement is caid3_eval_report.json."
+        ),
         "table": rows,
     }
 
@@ -463,7 +465,8 @@ def print_phase3_report(report: dict) -> None:
     print(f"  vs AF3-pLDDT: {bench['delta_vs_af3']:+.4f}")
     print(f"  vs AF2-pLDDT: {bench['delta_vs_af2']:+.4f}")
     print(f"  vs v6 CPU   : {bench['delta_vs_v6']:+.4f}")
-    print(f"  vs SOTA     : {bench['delta_vs_sota_esmdispred']:+.4f}")
+    # No CAID3 delta here: this block reports DisProt CV, a different
+    # benchmark. See caid3_eval_report.json for the comparable number.
 
     cal_rep = report.get("structure_calibration", {})
     if not cal_rep.get("insufficient_data"):

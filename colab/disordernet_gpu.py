@@ -1490,6 +1490,18 @@ class DisProtDataset(Dataset):
                     1.0 + (boundary_weight - 1.0) * is_boundary
                 ) * hall_weights
 
+                # Per-residue label evidence (see colab/label_sources.py). PDB-derived
+                # labels only inform residues some structure actually covers; a
+                # never-crystallised residue is UNKNOWN, not ordered. Zero weight
+                # removes it from both the loss and the metrics. Absent for curated
+                # sources, where the whole chain is annotated.
+                ev = p.get("label_evidence")
+                if ev is not None:
+                    ev_arr = np.zeros(n_res, dtype=np.float64)
+                    usable = min(n_res, len(ev))
+                    ev_arr[:usable] = np.asarray(ev[:usable], dtype=bool).astype(np.float64)
+                    sample_weight = sample_weight * ev_arr
+
                 if "aa_idx" in cached:
                     aa_tensor = cached["aa_idx"]
                 else:
@@ -1680,7 +1692,14 @@ def _disorder_loss(
         )
 
     if sample_weight is not None:
+        # Weighted mean, not mean-of-weighted. A plain .mean() divides by the
+        # residue count rather than the weight mass, so (a) boundary/hallucination
+        # upweighting silently rescales the loss and therefore the effective
+        # learning rate, and (b) zero-weight residues — the UNKNOWN positions of
+        # PDB-derived labels — still inflate the denominator instead of being
+        # excluded. Dividing by the weight sum makes zero weight mean "absent".
         loss = loss * sample_weight
+        return loss.sum() / sample_weight.sum().clamp(min=1e-8)
 
     return loss.mean()
 
@@ -1768,8 +1787,15 @@ def eval_epoch(
         n_batches += 1
 
         probs = torch.sigmoid(logits)
-        all_probs.append(probs[mask].float().cpu().numpy())
-        all_labels.append(labels[mask].cpu().numpy())
+        # Score only residues that carry label evidence. Zero sample weight marks
+        # an UNKNOWN position (PDB-derived labels over never-crystallised
+        # residues); scoring those against a fabricated "ordered" label would
+        # make the metric measure the labelling artefact rather than the model.
+        metric_mask = mask & (sample_weight > 0) if sample_weight is not None else mask
+        if not bool(metric_mask.any()):
+            continue
+        all_probs.append(probs[metric_mask].float().cpu().numpy())
+        all_labels.append(labels[metric_mask].cpu().numpy())
 
         if use_fn and fn_logits is not None and proteins_by_id is not None:
             if fn_labels is None:  # cfg was None, so the loss branch never built them

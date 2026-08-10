@@ -496,7 +496,8 @@ def generate_phase3_figure(phase3_report: dict, prefix: str = "") -> None:
         "",
         f"Rank: #{bench['rank_among_published']} / {bench['n_methods']}",
         f"Δ vs AF3: {bench['delta_vs_af3']:+.3f}",
-        f"Δ vs SOTA: {bench['delta_vs_sota_esmdispred']:+.3f}",
+        # Deliberately no "Δ vs SOTA" line: the panel shows DisProt CV,
+        # which is not on the same scale as CAID3 literature numbers.
     ]
     p1 = ps.get("phase1_biological_utility", {})
     if p1.get("segment_f1") is not None:

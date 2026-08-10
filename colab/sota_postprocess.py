@@ -65,7 +65,9 @@ def run_sota_postprocess(
 
     pooled = compute_pooled_metrics(current)
     report["final_pooled"] = {k: pooled[k] for k in ("auc", "ap", "n_residues")}
-    report["gap_to_esmdispred"] = 0.895 - pooled["auc"]
+    report["benchmark_comparability"] = (
+        "DisProt homology-CV pooled AUC. NOT comparable to CAID3 figures such as ESMDisPred 0.895: different label definition (curator-annotated functional disorder vs missing residues in crystal structures), different proteins, different protocol. The comparable measurement is caid3_eval_report.json."
+    )
     return report, current
 
 
@@ -90,7 +92,6 @@ def print_sota_postprocess_report(report: dict) -> None:
     fp = report.get("final_pooled", {})
     if fp:
         print(f"\n  Final pooled AUC={fp.get('auc', 0):.4f}  AP={fp.get('ap', 0):.4f}")
-        print(f"  Gap→ESMDisPred (0.895): {report.get('gap_to_esmdispred', 0):+.4f}")
     print(f"{'═' * 64}")
 
 
