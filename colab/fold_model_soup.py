@@ -17,7 +17,7 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from colab.compact_checkpoint import load_compact_checkpoint
+from colab.compact_checkpoint import is_trainable_key, load_compact_checkpoint
 from colab.cv_splits import resolve_cv_splits
 from colab.disordernet_gpu import (
     DisorderNetGPU,
@@ -147,12 +147,24 @@ def _load_fold_model(
     fold_model = DisorderNetGPU(esm_backbone, cfg, verbose=False).to(device)
     try:
         load_compact_checkpoint(ckpt_path, fold_model, device=device)
-    except Exception:
+    except Exception as exc:
+        # The old bare `except: ... strict=False` turned any load problem into a
+        # partially-restored model that still produced plausible predictions.
+        # Retry the legacy layout explicitly, then verify the trainable weights
+        # actually landed rather than assuming they did.
         payload = torch.load(ckpt_path, map_location=device, weights_only=False)
-        if isinstance(payload, dict) and "trainable" in payload:
-            fold_model.load_state_dict(payload["trainable"], strict=False)
-        else:
-            fold_model.load_state_dict(payload, strict=False)
+        state = payload["trainable"] if isinstance(payload, dict) and "trainable" in payload \
+            else payload
+        missing, unexpected = fold_model.load_state_dict(state, strict=False)
+        trained_missing = [k for k in missing if is_trainable_key(k)]
+        if trained_missing or unexpected:
+            raise RuntimeError(
+                f"Could not fully restore {os.path.basename(ckpt_path)}: "
+                f"{len(trained_missing)} trainable tensors unmatched, "
+                f"{len(unexpected)} unexpected. Scoring a partially-restored "
+                f"model would quietly degrade every downstream metric. "
+                f"Original error: {exc}"
+            ) from exc
     fold_model.eval()
     return fold_model
 

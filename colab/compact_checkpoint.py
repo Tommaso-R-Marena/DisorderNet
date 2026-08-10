@@ -72,6 +72,21 @@ def load_compact_checkpoint(
     missing, unexpected = model.load_state_dict(trainable, strict=False)
     if unexpected:
         raise RuntimeError(f"Unexpected keys in compact checkpoint: {unexpected[:5]}")
+
+    # A *missing* trainable key is as damaging as an unexpected one and far
+    # harder to notice: the model still runs and still emits plausible
+    # probabilities, just without the weights that were actually trained. If the
+    # LoRA adapters are not injected before loading, every LoRA tensor lands here
+    # and the fold soup silently scores a partially-restored model — worth
+    # ~0.11 AUC in one observed run, with nothing in the logs to show for it.
+    trained_missing = [k for k in missing if is_trainable_key(k)]
+    if trained_missing:
+        raise RuntimeError(
+            f"{len(trained_missing)} trainable tensors in {os.path.basename(path)} "
+            f"had no destination in the model — it would run partially restored. "
+            f"First few: {trained_missing[:5]}. "
+            "Usual cause: LoRA adapters not injected into the backbone before load."
+        )
     return {"missing_keys": missing, "metadata": meta, "n_tensors": len(trainable)}
 
 
