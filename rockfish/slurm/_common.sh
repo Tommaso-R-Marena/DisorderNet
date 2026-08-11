@@ -167,6 +167,15 @@ disordernet_slurm_run() {
   if [[ -n "${DISORDERNET_MOBIDB_PROTEOME:-}" ]]; then
     EXTRA_ARGS+=(--mobidb-proteome "${DISORDERNET_MOBIDB_PROTEOME}")
   fi
+  # Pass explicitly rather than relying on the argparse env default, so the
+  # selector that was actually used appears in the logged command line. This
+  # flag was declared by the ablation and read by nothing for several runs.
+  if [[ "${DISORDERNET_MOBIDB_GLOBAL:-0}" == "1" ]]; then
+    EXTRA_ARGS+=(--mobidb-global)
+  fi
+  if [[ -n "${DISORDERNET_EXPECTED_RESIDUES:-}" ]]; then
+    export DISORDERNET_EXPECTED_RESIDUES
+  fi
   if [[ -n "${DISORDERNET_MOBIDB_LIMIT:-}" && "${DISORDERNET_MOBIDB_LIMIT}" != "0" ]]; then
     EXTRA_ARGS+=(--mobidb-limit "${DISORDERNET_MOBIDB_LIMIT}")
   fi

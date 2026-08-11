@@ -60,6 +60,15 @@ CURATED_KEY = "curated-disorder-priority"
 MISSING_KEY = "derived-missing_residues-th_90"
 OBSERVED_KEY = "derived-observed-priority"
 
+# Cross-organism selector for PDB-derived labels: every MobiDB entry that has a
+# missing-residue annotation, rather than one organism's reference proteome.
+# This is the difference between ~3.4k trainable proteins (human alone) and
+# ~19.8k, and therefore between a data-scale arm that tests something and one
+# that does not. Named so the intent survives, and so the cache filename
+# ("pdbcov") records which universe a run was actually trained on.
+GLOBAL_PDB_COVERAGE_QUERY = {MISSING_KEY: "exists"}
+GLOBAL_PDB_COVERAGE_NAME = "pdbcov"
+
 
 class LabelSource(str, Enum):
     """Which definition of "disordered" to train against."""

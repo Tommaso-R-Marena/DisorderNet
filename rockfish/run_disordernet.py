@@ -106,6 +106,58 @@ def _apply_caid_leak_free_filter(proteins: list, meta: dict, cfg, args) -> tuple
     return proteins, meta
 
 
+def _assert_label_set_matches_budget(
+    stats: dict, label_source: str, universe: str, tolerance: float = 0.25
+) -> None:
+    """Abort if the label set is not the size the epoch budget assumed.
+
+    The ablation step-matches epochs from a table of measured evidenced-residue
+    counts, so the budget and the data are coupled through a constant that
+    nothing checked. When the cross-organism selector silently fell back to the
+    human proteome, the arm got 1.2M evidenced residues instead of 6.6M and ran
+    the 5 epochs matched to the larger figure — a badly undertrained run wearing
+    the label of a matched-budget comparison. Nothing in the output said so.
+
+    The submitter exports the count it budgeted for; this refuses to train if
+    reality disagrees. Failing at minute two beats a plausible wrong number
+    after several GPU-hours.
+    """
+    expected_raw = os.environ.get("DISORDERNET_EXPECTED_RESIDUES", "").strip()
+    if not expected_raw:
+        return
+    try:
+        expected = int(expected_raw)
+    except ValueError:
+        print(f"  WARNING: unparseable DISORDERNET_EXPECTED_RESIDUES={expected_raw!r}")
+        return
+    if expected <= 0:
+        return
+
+    actual = int(stats.get("n_evidenced_residues", 0))
+    ratio = actual / expected
+    if abs(ratio - 1.0) <= tolerance:
+        print(
+            f"  label-set size check: {actual:,} evidenced residues "
+            f"({ratio:.2f}x budgeted) — OK"
+        )
+        return
+
+    raise SystemExit(
+        "\nERROR: label set is not the size this run's epoch budget assumes.\n"
+        f"  label source : {label_source}\n"
+        f"  universe     : {universe}\n"
+        f"  budgeted for : {expected:,} evidenced residues\n"
+        f"  actually got : {actual:,} ({ratio:.2f}x)\n"
+        "\n"
+        "The epoch count is step-matched off the budgeted figure, so training\n"
+        "now would produce a result that is not comparable to the baseline.\n"
+        "Check --mobidb-global / DISORDERNET_MOBIDB_GLOBAL (human proteome\n"
+        "yields ~3.4k proteins, the cross-organism set ~19.8k), then either\n"
+        "correct the selector or update EVIDENCED_RESIDUES in\n"
+        "rockfish/ablation.py to the measured value and resubmit."
+    )
+
+
 def _load_proteins_mobidb(cfg, args) -> tuple[list, dict]:
     """Load training proteins from MobiDB under a non-DisProt label definition.
 
@@ -115,6 +167,8 @@ def _load_proteins_mobidb(cfg, args) -> tuple[list, dict]:
     disorder.
     """
     from colab.label_sources import (
+        GLOBAL_PDB_COVERAGE_NAME,
+        GLOBAL_PDB_COVERAGE_QUERY,
         LabelSource,
         build_labelled_set,
         fetch_mobidb_proteome,
@@ -122,13 +176,24 @@ def _load_proteins_mobidb(cfg, args) -> tuple[list, dict]:
     )
 
     source = LabelSource(args.label_source)
+    # The cross-organism selector was implemented in label_sources but never
+    # reachable from here — `query` was simply never passed — so every arm that
+    # asked for it silently trained on the human reference proteome instead:
+    # 3,388 proteins / 1.2M evidenced residues rather than 19,819 / 6.6M. The
+    # ablation's epoch budget is step-matched off the larger figure, so the arm
+    # ran at 5 epochs on DisProt-sized data and looked like a matched-budget
+    # comparison while being a badly undertrained one.
+    use_global = bool(getattr(args, "mobidb_global", False))
+    query = GLOBAL_PDB_COVERAGE_QUERY if use_global else None
+    universe = GLOBAL_PDB_COVERAGE_NAME if use_global else args.mobidb_proteome
     cache = getattr(args, "mobidb_cache", "") or os.path.join(
-        os.path.expanduser("~/.cache/disordernet"), f"mobidb_{args.mobidb_proteome}.ndjson"
+        os.path.expanduser("~/.cache/disordernet"), f"mobidb_{universe}.ndjson"
     )
     records = fetch_mobidb_proteome(
         args.mobidb_proteome,
         cache,
         limit=getattr(args, "mobidb_limit", None) or None,
+        query=query,
     )
     labelled, stats = build_labelled_set(
         records,
@@ -139,12 +204,17 @@ def _load_proteins_mobidb(cfg, args) -> tuple[list, dict]:
         min_disorder=cfg.min_disorder,
         min_order=cfg.min_order,
     )
+    _assert_label_set_matches_budget(stats, source.value, universe)
+
     proteins = to_pipeline_proteins(labelled)
     # Same filter the DisProt path applies. Must run BEFORE the content hash so
     # the resume fingerprint describes the set actually trained on.
     proteins, _ = _apply_caid_leak_free_filter(proteins, {}, cfg, args)
     meta = {
         "label_source": source.value,
+        # Which universe was actually pulled, not which flag was requested.
+        "mobidb_universe": universe,
+        "mobidb_global": use_global,
         "mobidb_proteome": args.mobidb_proteome,
         "mobidb_cache": cache,
         # Content hash of the label set, so CV resume can tell one label
@@ -1525,6 +1595,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--mobidb-proteome",
         default=os.environ.get("DISORDERNET_MOBIDB_PROTEOME", "UP000005640"),
         help="UniProt proteome id for MobiDB label sources (default: human)",
+    )
+    p.add_argument(
+        "--mobidb-global",
+        action="store_true",
+        default=os.environ.get("DISORDERNET_MOBIDB_GLOBAL", "0") not in ("", "0", "false"),
+        help="Select across all of MobiDB by missing-residue annotation rather "
+             "than one reference proteome. Human alone yields ~3.4k trainable "
+             "proteins; the cross-organism set yields ~19.8k. Overrides "
+             "--mobidb-proteome.",
     )
     p.add_argument("--mobidb-cache", default=os.environ.get("DISORDERNET_MOBIDB_CACHE", ""))
     p.add_argument(

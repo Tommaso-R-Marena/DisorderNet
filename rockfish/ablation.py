@@ -86,11 +86,20 @@ BASELINE_ENV = {
 
 # Measured evidenced-residue counts per label source (rockfish/slurm/_label_probe.py,
 # global PDB-coverage selector). Used to hold optimizer steps constant across arms.
+# These are measurements, and the epoch budget is derived from them, so they are
+# load-bearing: DISORDERNET_EXPECTED_RESIDUES ships the value to the runner,
+# which refuses to train if the label set it builds disagrees by >25%. Update
+# here only from an observed count, never by estimate.
+#
+# The pdb_missing and union figures are for the cross-organism selector
+# (--mobidb-global). Under the human reference proteome the same source yields
+# 1,218,504 residues from 3,388 proteins — 5.4x smaller — which is what an arm
+# silently got when the global flag was declared but never read.
 EVIDENCED_RESIDUES = {
     "disprot": 988_872,          # 2,340 proteins after CAID leak-free filtering
     "mobidb_curated": 781_386,   # 1,721 proteins
-    "pdb_missing": 6_611_600,    # 19,819 proteins
-    "union": 6_856_167,          # 19,908 proteins
+    "pdb_missing": 6_611_600,    # 19,819 proteins, global PDB-coverage selector
+    "union": 6_856_167,          # 19,908 proteins, global PDB-coverage selector
 }
 BASELINE_EPOCHS = 35
 
@@ -118,6 +127,11 @@ ABLATION_KEY_DEFAULTS = {
     "RUN_NO_HALLUC_WEIGHT": "0",
     "DISORDERNET_NUM_EPOCHS": str(BASELINE_EPOCHS),
 }
+
+# Keys computed per arm rather than declared above. They need the same
+# clear-before-set treatment, since a value left over from a previous arm is
+# indistinguishable from one chosen for this one.
+DERIVED_ABLATION_KEYS = ("DISORDERNET_EXPECTED_RESIDUES",)
 
 
 def compute_matched_epochs(label_source: str, baseline_epochs: int = BASELINE_EPOCHS) -> int:
@@ -346,6 +360,12 @@ def cmd_submit(args: argparse.Namespace) -> int:
         else:
             epochs = compute_matched_epochs(src)
         env["DISORDERNET_NUM_EPOCHS"] = str(epochs)
+        # Ship the count the budget was computed from, so the runner can refuse
+        # to train if the label set it actually builds is a different size. The
+        # epoch budget and the data are coupled through this constant, and a
+        # silent selector fallback once made an arm run 5 epochs on
+        # DisProt-sized data while reporting itself as step-matched.
+        env["DISORDERNET_EXPECTED_RESIDUES"] = str(EVIDENCED_RESIDUES.get(src, 0))
         if epochs != BASELINE_EPOCHS:
             print(
                 f"    {name}: {src} carries {EVIDENCED_RESIDUES.get(src, 0):,} "
@@ -354,8 +374,12 @@ def cmd_submit(args: argparse.Namespace) -> int:
             )
 
         # Drop stale ablation keys from the parent environment before applying
-        # this arm's, so nothing survives from the previous iteration.
-        for key in ABLATION_KEY_DEFAULTS:
+        # this arm's, so nothing survives from the previous iteration. Derived
+        # keys count too: DISORDERNET_EXPECTED_RESIDUES is computed per arm and
+        # is not in ABLATION_KEY_DEFAULTS, so it outlived the loop and leaked
+        # into the ambient environment — where the runner's budget guard would
+        # then read one arm's figure while checking another arm's label set.
+        for key in (*ABLATION_KEY_DEFAULTS, *DERIVED_ABLATION_KEYS):
             os.environ.pop(key, None)
         os.environ.update(env)
 
@@ -367,7 +391,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
                 ("DISORDERNET_LABEL_SOURCE", "DISORDERNET_MOBIDB_PROTEOME",
                  "DISORDERNET_MOBIDB_LIMIT", "DISORDERNET_MIN_EVIDENCE",
                  "DISORDERNET_NUM_EPOCHS", "DISORDERNET_MOBIDB_GLOBAL",
-                 "DISORDERNET_DETERMINISTIC")
+                 "DISORDERNET_EXPECTED_RESIDUES", "DISORDERNET_DETERMINISTIC")
             ),
             partition=args.partition or arm.partition,
             qos=args.qos,
