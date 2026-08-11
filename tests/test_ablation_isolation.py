@@ -244,3 +244,47 @@ class TestManifestOverwriteGuard:
     def test_explicit_flag_allows_the_overwrite(self, tmp_path):
         assert self._submit(tmp_path).returncode == 0
         assert self._submit(tmp_path, ["--overwrite-manifest"]).returncode == 0
+
+
+class TestNoiseFloorNeverShrinksBelowMeasurement:
+    """Three seeds estimate a standard deviation badly.
+
+    The floor used to be `max(observed_sd)`, so a run whose three seeds happened
+    to land within 0.003 of each other would declare a 0.01 delta significant —
+    while a controlled rerun of a single fold, same seed and same code, measured
+    0.023. The sd of an sd at n=3 is on the order of the sd itself, so a small
+    observed spread is not evidence of reproducibility.
+    """
+
+    def _collect(self, tmp_path, rows):
+        import json as _json
+        import subprocess
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        repo = _Path(__file__).resolve().parents[1]
+        (tmp_path / "ablation_manifest.json").write_text(_json.dumps({
+            "stamp": "t", "root": str(tmp_path), "git_revision": None,
+            "baseline_env": {}, "arms": [],
+        }))
+        script = (
+            "import json,sys;sys.path.insert(0,%r);"
+            "from rockfish.ablation import MEASURED_RERUN_SD;"
+            "print(MEASURED_RERUN_SD)" % str(repo)
+        )
+        return subprocess.run([_sys.executable, "-c", script],
+                              capture_output=True, text=True, cwd=str(repo))
+
+    def test_floor_is_the_larger_of_observed_and_measured(self):
+        from rockfish.ablation import MEASURED_RERUN_SD
+
+        tight = [0.001, 0.002]
+        wide = [0.001, 0.055]
+        assert max([*tight, MEASURED_RERUN_SD]) == MEASURED_RERUN_SD
+        assert max([*wide, MEASURED_RERUN_SD]) == 0.055
+
+    def test_measured_floor_is_large_enough_to_matter(self):
+        """If this ever drops near zero the guard stops guarding anything."""
+        from rockfish.ablation import MEASURED_RERUN_SD
+
+        assert MEASURED_RERUN_SD >= 0.02

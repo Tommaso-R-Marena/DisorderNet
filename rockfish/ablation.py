@@ -599,7 +599,18 @@ def cmd_collect(args: argparse.Namespace) -> int:
         r[f"{m}_sd"] for r in rows for m in ("cv_auc", "caid3_auc")
         if r.get(f"{m}_sd") is not None
     ]
-    noise_floor = max(observed_sd) if observed_sd else MEASURED_RERUN_SD
+    # Never let a lucky set of seeds shrink the floor below the independently
+    # measured rerun spread. Three seeds estimate a standard deviation very
+    # badly — the sd of an sd at n=3 is on the order of the sd itself — so an
+    # observed 0.003 is not evidence that this pipeline reproduces to 0.003
+    # when a controlled rerun of one fold measured 0.023. Take the larger.
+    noise_floor = max([*observed_sd, MEASURED_RERUN_SD])
+    if observed_sd and max(observed_sd) > MEASURED_RERUN_SD:
+        floor_source = "observed seed spread"
+    elif observed_sd:
+        floor_source = f"measured rerun sd (observed spread {max(observed_sd):.4f} is smaller, n too small to trust)"
+    else:
+        floor_source = "measured rerun sd"
     single_seed = all((r.get("n_seeds") or 1) < 2 for r in rows)
 
     for r in rows:
@@ -619,7 +630,7 @@ def cmd_collect(args: argparse.Namespace) -> int:
         "git_revision": manifest.get("git_revision"),
         "baseline_env": manifest.get("baseline_env"),
         "noise_floor_auc": round(noise_floor, 4),
-        "noise_floor_source": "observed seed spread" if observed_sd else "measured rerun sd",
+        "noise_floor_source": floor_source,
         "single_seed_warning": (
             "Every arm ran one seed. Identical reruns of this pipeline differ by "
             f"~{MEASURED_RERUN_SD} AUC, so no delta below ~{2 * MEASURED_RERUN_SD:.3f} "
@@ -635,8 +646,7 @@ def cmd_collect(args: argparse.Namespace) -> int:
     }
     (root / "ablation_results.json").write_text(json.dumps(out, indent=2) + "\n")
     _print_table(rows, noise_floor)
-    print(f"\n  noise floor (AUC): ±{noise_floor:.4f}   "
-          f"({'observed seed spread' if observed_sd else 'measured rerun sd'})")
+    print(f"\n  noise floor (AUC): ±{noise_floor:.4f}   ({floor_source})")
     if single_seed:
         print(
             "  WARNING: single seed per arm. Identical reruns of this pipeline "
