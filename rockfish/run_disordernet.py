@@ -106,6 +106,50 @@ def _apply_caid_leak_free_filter(proteins: list, meta: dict, cfg, args) -> tuple
     return proteins, meta
 
 
+def preflight_writable_space(directory: str, probe_mb: int = 128) -> None:
+    """Fail now if checkpoints will not be writable, rather than at hour four.
+
+    Three lite_frozen replicates died between 1.2 and 1.5 hours in, at fold
+    boundaries, on two different nodes, with exit code 1 and *no traceback in
+    any log*. The home directory had reached its 50 GB quota, so the checkpoint
+    write failed — and so did the write of the Python traceback reporting it.
+    A full disk is the one failure that also destroys its own evidence.
+
+    ``df`` cannot detect this: it reported 13 TB free on the filesystem while
+    the per-user quota was exhausted, and the quota itself was not visible to
+    ``quota(1)``. The only reliable test is to write. The probe is sized like a
+    real checkpoint (compact folds are ~15 MB, full ones several GB) so that
+    passing it means something.
+    """
+    os.makedirs(directory, exist_ok=True)
+    probe = os.path.join(directory, f".preflight_{os.getpid()}.tmp")
+    chunk = b"\0" * (1024 * 1024)
+    written = 0
+    try:
+        with open(probe, "wb") as fh:
+            for _ in range(probe_mb):
+                fh.write(chunk)
+                written += 1
+            fh.flush()
+            os.fsync(fh.fileno())
+    except OSError as exc:
+        raise SystemExit(
+            f"\nERROR: cannot write {probe_mb} MB to {directory} "
+            f"(failed after {written} MB): {exc}\n"
+            "\n"
+            "This job would train for hours and then die silently when it tried\n"
+            "to save a checkpoint — a full disk also prevents the traceback from\n"
+            "being logged, which is why such failures leave no evidence.\n"
+            "\n"
+            "On Rockfish the home quota is 50 GB and is not reported by df or\n"
+            "quota(1); check with `du -sh ~`. Point runs at group scratch:\n"
+            "  export DISORDERNET_RESULTS=/scratch4/<PI>/<user>_disordernet\n"
+        ) from exc
+    finally:
+        if os.path.exists(probe):
+            os.unlink(probe)
+
+
 def _assert_label_set_matches_budget(
     stats: dict, label_source: str, universe: str, tolerance: float = 0.25
 ) -> None:
@@ -1431,6 +1475,11 @@ def run_pipeline(args) -> int:
     print(f"Stage: {args.stage}  profile={args.profile}  backbone={args.backbone}")
 
     cfg = _build_cfg(args, workdir)
+    # Before loading a 650M backbone or touching a GPU: prove the checkpoint
+    # directory is writable. A run that discovers this at fold 4 has burned the
+    # GPU-hours and cannot even log why it stopped.
+    if not args.skip_space_preflight:
+        preflight_writable_space(cfg.checkpoint_dir, probe_mb=args.preflight_mb)
     proteins, disprot_meta = _load_proteins(cfg.data_cache, cfg, args=args)
     print(f"Proteins: {len(proteins):,}  residues: {sum(p['length'] for p in proteins):,}")
 
@@ -1624,6 +1673,16 @@ def build_parser() -> argparse.ArgumentParser:
              "than one reference proteome. Human alone yields ~3.4k trainable "
              "proteins; the cross-organism set yields ~19.8k. Overrides "
              "--mobidb-proteome.",
+    )
+    p.add_argument(
+        "--preflight-mb", type=int,
+        default=int(os.environ.get("DISORDERNET_PREFLIGHT_MB", "128") or 128),
+        help="Size of the writability probe taken before any GPU work (MB).",
+    )
+    p.add_argument(
+        "--skip-space-preflight", action="store_true",
+        help="Skip the checkpoint-writability probe. Only for read-only stages "
+             "on a filesystem you know is fine.",
     )
     p.add_argument("--mobidb-cache", default=os.environ.get("DISORDERNET_MOBIDB_CACHE", ""))
     p.add_argument(
