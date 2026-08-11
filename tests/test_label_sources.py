@@ -292,3 +292,65 @@ class TestCaidFilterAppliesToEveryLabelSource:
         )
         audit = json.loads((tmp_path / "caid_leakage_audit.json").read_text())
         assert audit["label_source"] == "pdb_missing"
+
+
+class TestSegmentMetricsUnderPartialEvidence:
+    """Segment metrics need contiguous predictions; residue metrics need evidence.
+
+    Masking unevidenced residues out of the metric stream shortened the arrays
+    that pooled_segment_f1 expects, and the pdb_missing arm died with
+    "Prediction length mismatch: expected 1566281, got 1306653" (83.4% — exactly
+    the evidence coverage). The two metric families need different streams: a
+    disorder segment cannot be delimited when neighbouring residues carry no
+    label, so segment scores are skipped entirely under partial evidence rather
+    than computed against fabricated labels.
+    """
+
+    def test_eval_epoch_exposes_both_streams(self):
+        import inspect
+
+        from colab.disordernet_gpu import eval_epoch
+
+        src = inspect.getsource(eval_epoch)
+        for key in ("segment_probs", "segment_labels", "partial_evidence"):
+            assert f'"{key}"' in src, f"eval_epoch must expose {key}"
+
+    def test_segment_stream_uses_the_padding_mask_not_the_evidence_mask(self):
+        import inspect
+
+        from colab.disordernet_gpu import eval_epoch
+
+        src = inspect.getsource(eval_epoch)
+        assert "seg_probs.append(probs[mask]" in src, (
+            "segment stream must use the padding mask so predictions stay "
+            "contiguous and aligned with proteins_val"
+        )
+        assert "all_probs.append(probs[metric_mask]" in src, (
+            "residue metrics must use the evidence mask"
+        )
+
+    def test_train_fold_skips_segment_score_under_partial_evidence(self):
+        import inspect
+
+        from colab.disordernet_gpu import train_fold
+
+        src = inspect.getsource(train_fold)
+        assert "partial_evidence" in src
+        assert "not partial_ev" in src, (
+            "segment early-stopping must be disabled when evidence is partial; "
+            "otherwise the composite scores fabricated labels"
+        )
+
+    def test_full_evidence_leaves_streams_identical(self):
+        """DisProt has no evidence mask, so behaviour must be unchanged."""
+        import numpy as np
+
+        from colab.label_sources import LabelSource, build_labelled_set, to_pipeline_proteins
+
+        kept, _ = build_labelled_set([_record()], LabelSource.MOBIDB_CURATED, min_len=5)
+        d = to_pipeline_proteins(kept)[0]
+        assert all(d["label_evidence"]), (
+            "curated sources evidence every residue, so the evidence mask is a "
+            "no-op and segment metrics remain valid"
+        )
+        assert np.asarray(d["label_evidence"]).sum() == d["length"]

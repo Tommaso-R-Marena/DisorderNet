@@ -265,3 +265,57 @@ class TestRescueNeedsControls:
         dn = np.clip(0.5 + 0.30 * (y - 0.5) + rng.normal(0, 0.18, n), 0, 1).astype(np.float32)
         r = compare_rescue_baselines(y, pld, {"disordernet": dn, "twin": dn.copy()})
         assert abs(r["delta_vs_best_competing"]) < 0.01
+
+
+class TestRescueVerdictIsExplicit:
+    """Measured on the real 650M run: DisorderNet rescues 8.7% of hallucinations
+    where random selection at the same budget rescues 25.1%. The report must
+    state that plainly rather than leave a reader to compare two JSON fields."""
+
+    def test_below_random_floor_is_flagged_and_explained(self):
+        import numpy as np
+
+        from colab.hallucination_benchmark import compare_rescue_baselines
+
+        rng = np.random.default_rng(5)
+        n = 20000
+        y = (rng.random(n) < 0.25).astype(np.int8)
+        pld = np.where(y == 1, rng.normal(45, 15, n), rng.normal(85, 10, n)).astype(np.float32)
+        hi = rng.choice(np.flatnonzero(y == 1), size=int(0.3 * (y == 1).sum()), replace=False)
+        pld[hi] = rng.normal(85, 5, len(hi))
+        pld = np.clip(pld, 0, 100).astype(np.float32)
+
+        # A scorer that mirrors pLDDT agreement — confident exactly where the
+        # structure is confident, so it misses hallucinations by construction.
+        agrees_with_structure = (1 - pld / 100).astype(np.float32)
+        r = compare_rescue_baselines(
+            y, pld,
+            {
+                "disordernet": agrees_with_structure,
+                "random_floor": rng.random(n).astype(np.float32),
+            },
+        )
+        assert r["below_random_floor"] is True
+        assert "REFUTED" in r["verdict"]
+
+    def test_genuine_detector_is_not_flagged(self):
+        import numpy as np
+
+        from colab.hallucination_benchmark import compare_rescue_baselines
+
+        rng = np.random.default_rng(6)
+        n = 20000
+        y = (rng.random(n) < 0.25).astype(np.int8)
+        pld = np.where(y == 1, rng.normal(45, 15, n), rng.normal(85, 10, n)).astype(np.float32)
+        hi = rng.choice(np.flatnonzero(y == 1), size=int(0.3 * (y == 1).sum()), replace=False)
+        pld[hi] = rng.normal(85, 5, len(hi))
+        pld = np.clip(pld, 0, 100).astype(np.float32)
+
+        # Scores the label directly: a real detector.
+        oracle = (y + rng.normal(0, 0.1, n)).astype(np.float32)
+        r = compare_rescue_baselines(
+            y, pld,
+            {"disordernet": oracle, "random_floor": rng.random(n).astype(np.float32)},
+        )
+        assert r["below_random_floor"] is False
+        assert "supported" in r["verdict"]

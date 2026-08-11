@@ -279,6 +279,8 @@ def compare_rescue_baselines(
         }
 
     ref = rows[reference_method]["rescue_rate"]
+    floor = (rows.get("random_floor") or {}).get("rescue_rate")
+    below_chance = None if floor is None else bool(ref < floor)
     best_other = max(
         ((n, r["rescue_rate"]) for n, r in rows.items() if n != reference_method),
         key=lambda kv: kv[1],
@@ -296,6 +298,15 @@ def compare_rescue_baselines(
         "matched_budget_residues": budget,
         "reference_method": reference_method,
         "methods": rows,
+        "below_random_floor": below_chance,
+        "verdict": (
+            "REFUTED: the model finds fewer hallucinations than random selection "
+            "at the same budget. It does not act as a distrust layer — its "
+            "confident disorder calls avoid exactly the high-pLDDT residues "
+            "where the structure prediction is wrong."
+            if below_chance
+            else "supported: rescue exceeds the random floor"
+        ) if below_chance is not None else None,
         "best_competing_method": best_other[0],
         "delta_vs_best_competing": (
             None if best_other[1] is None else round(ref - best_other[1], 4)
@@ -485,6 +496,14 @@ def print_distrust_benchmark(report: dict) -> None:
         )
         # The interval, not just the point estimate: go/no-go criterion #1 turns
         # on a difference of a few thousandths of AUC.
+        rb = base.get("rescue_baselines") or {}
+        if rb.get("enabled"):
+            print("\n  -- rescue at matched prediction budget --")
+            for name, m in (rb.get("methods") or {}).items():
+                print(f"    {name:<16s} rescue={m['rescue_rate']:.4f}  "
+                      f"precision={m['precision_on_flagged']:.4f}")
+            if rb.get("below_random_floor"):
+                print(f"\n  *** {rb.get('verdict')} ***\n")
         ci = base.get("delta_auc_ci") or {}
         if ci.get("ci_low") is not None:
             verdict = (

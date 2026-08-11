@@ -1742,6 +1742,10 @@ def eval_epoch(
 ) -> dict:
     model.eval()
     all_probs, all_labels = [], []
+    # Separate stream for segment metrics: they need contiguous per-protein
+    # predictions, so they cannot use the evidence-masked residue stream.
+    seg_probs, seg_labels = [], []
+    n_masked_total, n_evidenced_total = 0, 0
     all_fn_probs, all_fn_labels = [], []
     total_loss, n_batches = 0.0, 0
     use_fn = bool(cfg is not None and getattr(cfg, "use_function_head", False))
@@ -1795,11 +1799,21 @@ def eval_epoch(
         # an UNKNOWN position (PDB-derived labels over never-crystallised
         # residues); scoring those against a fabricated "ordered" label would
         # make the metric measure the labelling artefact rather than the model.
+        # Two streams, because they answer different questions:
+        #  * residue metrics (AUC/AP) must EXCLUDE residues with no label
+        #    evidence — scoring a fabricated "ordered" label measures the
+        #    labelling artefact, not the model.
+        #  * segment metrics need CONTIGUOUS per-protein predictions; a segment
+        #    cannot be delimited if neighbouring residues are missing. They
+        #    therefore keep the full padding-masked stream, and are reported as
+        #    unreliable when evidence is partial (see `partial_evidence` below).
         metric_mask = mask & (sample_weight > 0) if sample_weight is not None else mask
-        if not bool(metric_mask.any()):
-            continue
         all_probs.append(probs[metric_mask].float().cpu().numpy())
         all_labels.append(labels[metric_mask].cpu().numpy())
+        seg_probs.append(probs[mask].float().cpu().numpy())
+        seg_labels.append(labels[mask].cpu().numpy())
+        n_masked_total += int(mask.sum())
+        n_evidenced_total += int(metric_mask.sum())
 
         if use_fn and fn_logits is not None and proteins_by_id is not None:
             if fn_labels is None:  # cfg was None, so the loss branch never built them
@@ -1820,6 +1834,14 @@ def eval_epoch(
         )
     all_probs = np.concatenate(all_probs)
     all_labels = np.concatenate(all_labels)
+    seg_probs_arr = np.concatenate(seg_probs) if seg_probs else all_probs
+    seg_labels_arr = np.concatenate(seg_labels) if seg_labels else all_labels
+    # Partial evidence means some residues carry no label at all. Segment
+    # metrics still run on the full stream (they need contiguity) but they then
+    # score fabricated labels on the unevidenced positions, so callers must
+    # treat them as unreliable rather than silently folding them into an
+    # early-stopping score.
+    partial_evidence = n_evidenced_total < n_masked_total
     preds = (all_probs >= 0.5).astype(int)
     labels_int = all_labels.astype(int)
 
@@ -1831,6 +1853,13 @@ def eval_epoch(
         "mcc": matthews_corrcoef(labels_int, preds),
         "probs": all_probs,
         "labels": all_labels,
+        # Full padding-masked stream, aligned with proteins_val, for segment
+        # metrics. Equal to probs/labels whenever every residue is evidenced.
+        "segment_probs": seg_probs_arr,
+        "segment_labels": seg_labels_arr,
+        "partial_evidence": partial_evidence,
+        "n_evidenced_residues": n_evidenced_total,
+        "n_masked_residues": n_masked_total,
     }
     if all_fn_probs:
         result["function_probs"] = np.concatenate(all_fn_probs)
@@ -2104,11 +2133,16 @@ def train_fold(
         from colab.segment_postprocess import composite_early_stop_score, pooled_segment_f1
 
         seg_f1 = 0.0
-        if cfg.use_segment_early_stop:
+        # Segment metrics need contiguous per-protein predictions; a disorder
+        # segment cannot be delimited when neighbouring residues carry no label.
+        # Under partial evidence (PDB-derived labels) they would score fabricated
+        # labels, so they are skipped and the composite falls back to AUC/AP.
+        partial_ev = bool(val_metrics.get("partial_evidence"))
+        if cfg.use_segment_early_stop and not partial_ev:
             seg_f1 = pooled_segment_f1(
                 proteins_val,
-                val_metrics["probs"],
-                val_metrics["labels"],
+                val_metrics.get("segment_probs", val_metrics["probs"]),
+                val_metrics.get("segment_labels", val_metrics["labels"]),
                 min_region_len=cfg.segment_min_region_len,
                 postprocess_min_len=cfg.segment_postprocess_min_len,
                 postprocess_max_gap=cfg.segment_postprocess_max_gap,
