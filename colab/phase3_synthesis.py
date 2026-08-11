@@ -427,9 +427,13 @@ def run_phase3_integrated_report(
 
 
 def _build_headline(benchmark: dict, phases: dict, calibration: dict) -> str:
+    # "GPU AUC" was a misattribution: this figure is the final pipeline output
+    # after the v6 physics GBDT and meta-stack are ensembled in, not the neural
+    # model's own cross-validated score. In the 650M run it read "GPU AUC 0.788"
+    # while the GPU model's pooled OOF AUC was 0.7203 and the GBDT alone 0.7804.
     parts = [
-        f"GPU AUC {benchmark['our_auc']:.3f} "
-        f"(contextual lit. rank #{benchmark['rank_among_published']}/{benchmark['n_methods']}, not head-to-head)",
+        f"Final stacked AUC {benchmark['our_auc']:.3f} (GPU + physics GBDT + meta-stack; "
+        f"contextual lit. rank #{benchmark['rank_among_published']}/{benchmark['n_methods']}, not head-to-head)",
     ]
     if benchmark["beats_af3_plddt"]:
         parts.append(f"+{benchmark['delta_vs_af3']:.1%} vs AF3-pLDDT")

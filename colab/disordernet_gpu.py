@@ -2640,9 +2640,34 @@ def run_cross_validation(
     fold_aps = [r["best_ap"] for r in fold_results]
     total_cv_h = (time.time() - cv_t0) / 3600
 
+    # Pooled AUC ranks every OOF residue against every other, including pairs
+    # scored by different fold models. Those models are separately calibrated:
+    # in the 650M run the per-fold median probability ranged from 0.0003 to
+    # 0.6523 at near-identical disorder prevalence (0.175-0.188), which dragged
+    # pooled AUC to 0.7203 against a mean-of-folds of 0.7491.
+    #
+    # Rank-normalising within each fold removes exactly that offset and nothing
+    # else — it is monotone inside a fold, so no within-fold AUC can change. If
+    # the rank-normalised figure lands near mean-of-folds, the raw pooled/mean
+    # gap was cross-fold calibration drift rather than anything about the model.
+    rank_probs = np.empty_like(all_probs, dtype=np.float64)
+    offset = 0
+    for r in fold_results:
+        n = len(r["val_probs"])
+        chunk = np.asarray(r["val_probs"], dtype=np.float64)
+        rank_probs[offset:offset + n] = (chunk.argsort().argsort() + 0.5) / max(n, 1)
+        offset += n
+    pooled_auc_rank = roc_auc_score(all_labels, rank_probs)
+
     summary = {
         "pooled_auc": float(pooled_auc),
         "pooled_ap": float(pooled_ap),
+        "pooled_auc_fold_rank_normalized": float(pooled_auc_rank),
+        "cross_fold_calibration_drift": float(pooled_auc_rank - pooled_auc),
+        "per_fold_median_prob": [
+            float(np.median(np.asarray(r["val_probs"], dtype=np.float64)))
+            for r in fold_results
+        ],
         "fold_aucs": [float(a) for a in fold_aucs],
         "fold_aps": [float(a) for a in fold_aps],
         "mean_auc": float(np.mean(fold_aucs)),
@@ -2689,6 +2714,19 @@ def _print_cv_summary(fold_results: list, summary: dict) -> None:
     print(f"{'Std':>5} {summary['std_auc']:>8.4f}")
     print(f"{'─' * 35}")
     print(f"{'Pooled':>5} {summary['pooled_auc']:>8.4f} {summary['pooled_ap']:>8.4f}")
+    drift = summary.get("cross_fold_calibration_drift")
+    if drift is not None and abs(drift) >= 0.005:
+        meds = summary.get("per_fold_median_prob") or []
+        print(
+            f"{'':>5} rank-normalised pooled AUC "
+            f"{summary['pooled_auc_fold_rank_normalized']:.4f} ({drift:+.4f})"
+        )
+        print(
+            f"        ⚠ fold models are differently calibrated "
+            f"(median p per fold: {', '.join(f'{m:.4f}' for m in meds)}).\n"
+            f"          Pooled AUC mixes their score scales; mean-of-folds "
+            f"({summary['mean_auc']:.4f}) is the safer headline."
+        )
     print(f"{'═' * 60}")
     conf = summary.get("confidence")
     if conf:

@@ -471,9 +471,17 @@ def stage_stack(args, cfg, proteins, fold_results, cv_summary) -> tuple[list, di
         os.path.join(cfg.checkpoint_dir, "sota_stack_report.json"),
     )
 
+    # Do NOT overwrite pooled_auc here. It used to be reassigned to the stacked
+    # result, so the field kept its name while changing meaning: it stopped
+    # being the neural model's cross-validated AUC and became the score of an
+    # ensemble with a gradient-boosted tree on physics features. Everything
+    # downstream inherited that — eval_summary.pooled_auc, and a phase3 headline
+    # reading "GPU AUC 0.788" for a number the GPU model did not produce. In the
+    # 650M run the model's own pooled OOF AUC was 0.7203 and the stack's 0.7876.
     if sota_report.get("after", {}).get("pooled"):
-        cv_summary["pooled_auc"] = sota_report["after"]["pooled"]["auc"]
-        cv_summary["pooled_ap"] = sota_report["after"]["pooled"]["ap"]
+        cv_summary["stacked_pooled_auc"] = sota_report["after"]["pooled"]["auc"]
+        cv_summary["stacked_pooled_ap"] = sota_report["after"]["pooled"]["ap"]
+        cv_summary["stacked_components"] = "gpu + v6_pro GBDT + meta_ensemble"
     cv_summary["gpu_v6_ensemble"] = ensemble_report
     cv_summary["sota_stack"] = sota_report
 
@@ -1200,7 +1208,19 @@ def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
             except Exception as exc:
                 print(f"Distrust figures skipped: {exc}")
 
+    # Name what each figure is. "pooled_auc" previously meant whichever stage
+    # last touched fold_results, and was read downstream as the model's score.
     eval_summary = {
+        "final_pooled_auc": cv_pooled["auc"],
+        "final_pooled_ap": cv_pooled["ap"],
+        "final_components": "gpu + v6_pro GBDT + meta_ensemble + fusion",
+        # The neural model on its own, cross-validated — the number that is
+        # comparable to a published sequence-only predictor.
+        "model_pooled_auc": (cv_summary or {}).get("pooled_auc"),
+        "model_mean_fold_auc": (cv_summary or {}).get("mean_auc"),
+        "model_fold_auc_sd": (cv_summary or {}).get("std_auc"),
+        # Retained so older readers do not KeyError. Same value as
+        # final_pooled_auc, which is what it always actually held.
         "pooled_auc": cv_pooled["auc"],
         "pooled_ap": cv_pooled["ap"],
         "phase3_headline": phase3.get("headline"),
