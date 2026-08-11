@@ -201,3 +201,46 @@ class TestDeterminismIsNotSilentlyOverridden:
             "ablation arms must be reproducible; otherwise a delta cannot be "
             "distinguished from run-to-run divergence"
         )
+
+
+class TestManifestOverwriteGuard:
+    """`--root-workdir` is a literal path, not a parent to stamp under.
+
+    Two submissions pointed at the same root used to overwrite the manifest, and
+    since `collect` reads the manifest to find the arms, the earlier batch kept
+    running on the cluster with nothing left that could collect it.
+    """
+
+    def _submit(self, tmp_path, extra=()):
+        import subprocess
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        repo = _Path(__file__).resolve().parents[1]
+        return subprocess.run(
+            [_sys.executable, str(repo / "rockfish" / "ablation.py"), "submit",
+             "--arms", "lite_frozen", "--root-workdir", str(tmp_path), "--dry-run",
+             *extra],
+            capture_output=True, text=True, cwd=str(repo),
+        )
+
+    def test_second_submit_into_the_same_root_is_refused(self, tmp_path):
+        assert self._submit(tmp_path).returncode == 0
+        again = self._submit(tmp_path)
+        assert again.returncode == 2
+        assert "already exists" in again.stderr
+        assert "orphan" in again.stderr
+
+    def test_the_prior_manifest_survives_the_refusal(self, tmp_path):
+        import json as _json
+
+        self._submit(tmp_path)
+        before = (tmp_path / "ablation_manifest.json").read_text()
+        self._submit(tmp_path)
+        after = (tmp_path / "ablation_manifest.json").read_text()
+        assert before == after
+        assert _json.loads(after)["arms"]
+
+    def test_explicit_flag_allows_the_overwrite(self, tmp_path):
+        assert self._submit(tmp_path).returncode == 0
+        assert self._submit(tmp_path, ["--overwrite-manifest"]).returncode == 0

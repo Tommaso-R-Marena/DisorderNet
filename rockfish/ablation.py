@@ -237,7 +237,10 @@ ARMS: dict[str, Arm] = {
         env={"PROFILE": "lite"},
         # No backward pass through the backbone, so activation memory is a
         # fraction of ultra's and the arm is by far the cheapest in the matrix.
-        gpu_mem="32000M",
+        # Still 40G rather than 32G: the profile raises the batch to 16 to spend
+        # the freed memory on throughput, and an OOM at hour three costs far more
+        # than the wait for a slightly larger allocation.
+        gpu_mem="40000M",
     ),
     # ---- Compound: the combination worth trying if the levers hold ----------
     "scaled_task_matched": Arm(
@@ -283,6 +286,26 @@ def cmd_submit(args: argparse.Namespace) -> int:
     stamp = args.stamp or utc_stamp()
     root = Path(args.root_workdir) if args.root_workdir else default_results_root() / f"ablation_{stamp}"
     root.mkdir(parents=True, exist_ok=True)
+
+    # --root-workdir is a literal path, not a parent to stamp under, so pointing
+    # two submissions at the same root overwrites the manifest. `collect` reads
+    # the manifest to find the arms, so the earlier batch would still be running
+    # on the cluster with nothing left that knows how to collect it. Refuse.
+    manifest_path = root / "ablation_manifest.json"
+    if manifest_path.exists() and not args.overwrite_manifest:
+        try:
+            prior = json.loads(manifest_path.read_text())
+            prior_arms = ", ".join(a["arm"] for a in prior.get("arms", []))
+        except (OSError, ValueError, KeyError):
+            prior_arms = "unreadable"
+        print(
+            f"ERROR: {manifest_path} already exists (arms: {prior_arms}).\n"
+            "  Overwriting it would orphan those jobs from `collect`.\n"
+            "  Use a fresh --root-workdir, drop the flag to get a stamped dir,\n"
+            "  or pass --overwrite-manifest if the prior batch is finished with.",
+            file=sys.stderr,
+        )
+        return 2
     defaults = env_defaults()
     mail = mail_sbatch_args(os.environ.get("DISORDERNET_MAIL_USER"))
 
@@ -659,6 +682,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--partition", default=None)
     sp.add_argument("--root-workdir", default=None)
     sp.add_argument("--stamp", default=None)
+    sp.add_argument(
+        "--overwrite-manifest", action="store_true",
+        help="Replace an existing manifest in --root-workdir. Only safe once the "
+             "batch it describes has been collected — `collect` reads the "
+             "manifest to find the arms, so replacing it orphans those jobs.",
+    )
     sp.add_argument("--num-epochs", type=int, default=None,
                     help="Force an epoch budget for every arm")
     sp.add_argument("--epochs-fixed", action="store_true",
