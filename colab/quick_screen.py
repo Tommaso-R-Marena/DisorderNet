@@ -24,10 +24,38 @@ from colab.ensemble_v6 import apply_gpu_v6_ensemble, run_v6_lite_oof
 from colab.inference_fusion import compute_pooled_metrics
 from colab.statistical_validation import _bootstrap_mean_ci
 
-BREAKTHROUGH_TARGET = 0.90
-ESMDISPRED_REFERENCE = 0.895
-VERIFIED_GPU_BASELINE = 0.817
-VERIFIED_V6_BASELINE = 0.831
+# Baselines, and the scale they live on
+# --------------------------------------
+# The screen reports pooled CV AUC over a DisProt subset. So must its reference
+# points: ESMDisPred's 0.895 is a CAID3 number and comparing a CV AUC to it is
+# the category error this project already had to correct once.
+#
+# The previous values here (GPU 0.817, v6 0.831) predate the leakage fixes. They
+# came from random protein splits with a fold soup and in-sample thresholds, and
+# they do not describe any run this repo can currently reproduce. Under
+# homology-aware splits the same code measures substantially lower — which is
+# the point of having fixed the splits.
+MEASURED_GPU_CV_AUC = 0.7454      # ultra / 650M / LoRA, homology-split pooled
+MEASURED_V6_CV_AUC = 0.7804       # v6-pro physics GBDT, homology-split pooled
+MEASURED_STACKED_CV_AUC = 0.7920  # GPU + v6 stack, homology-split pooled
+
+# CAID3 numbers. Kept separate and never compared to the CV values above.
+ESMDISPRED_REFERENCE = 0.895      # published, CAID3 Disorder-PDB
+MEASURED_CAID3 = 0.8155           # this pipeline, CAID3 Disorder-PDB
+
+# Two identical reruns of one fold differ by this much (rockfish/ablation.py).
+# A screen result inside one of these of the baseline is not a signal.
+NOISE_FLOOR_AUC = 0.023
+
+# Deprecated aliases. The old names are still read by saved reports and by
+# notebooks that predate the leakage fixes; they now resolve to the measured
+# values so nothing silently keeps comparing against the inflated ones.
+VERIFIED_GPU_BASELINE = MEASURED_GPU_CV_AUC
+VERIFIED_V6_BASELINE = MEASURED_V6_CV_AUC
+# There is no CV-scale "breakthrough target": 0.90 was a CAID3 aspiration being
+# applied to CV AUC. Tiers below are expressed as margins over the measured
+# stacked baseline, in units of the measured noise floor.
+BREAKTHROUGH_TARGET = ESMDISPRED_REFERENCE
 
 # Expected uplift from this screen recipe → full ultra + 7b–7d meta-stack.
 # Weak recipes (flash) can jump more; mini-ultra (standard) and paradigm less.
@@ -187,49 +215,57 @@ def assess_breakthrough_potential(
             proj_hi = capped
             v6_ceiling_note = " Coarse v6 subset caps ensemble headroom."
 
-    # Tier by projected full-CV band + stacked floor (anti false-approve).
-    if proj_hi >= 0.90 and stacked_pooled_auc >= 0.84 and uplift >= 0.01:
+    # Tier by margin over the measured full-CV stacked baseline, in units of the
+    # measured rerun noise floor. The old ladder used absolute cuts (0.90/0.84,
+    # 0.88/0.80) calibrated against the pre-leakage-fix numbers, so on the
+    # corrected scale every screen graded STOP regardless of what it showed.
+    #
+    # A projection is not a measurement: `expected_ultra_uplift` was itself
+    # fitted under the leaking evaluation and has never been validated against a
+    # homology-split full run. Tiers therefore lead with the margin actually
+    # observed and treat the projected band as supporting context only.
+    margin = stacked_pooled_auc - MEASURED_STACKED_CV_AUC
+    base = f"Screen stacked AUC {stacked_pooled_auc:.3f} vs measured full-CV baseline {MEASURED_STACKED_CV_AUC:.3f} ({margin:+.3f})"
+    unvalidated = (
+        " Projection band is unvalidated on homology splits — treat as a prior, "
+        "not a forecast."
+    )
+
+    if margin >= 2 * NOISE_FLOOR_AUC and uplift >= 0.01:
         tier = "HIGH"
-        headline = (
-            f"Screen stacked AUC {stacked_pooled_auc:.3f} — paradigm can likely reach "
-            f"0.88–0.92 full CV (projected {proj_lo:.3f}–{proj_hi:.3f})"
+        headline = f"{base} — beats baseline by >2 noise floors ({2 * NOISE_FLOOR_AUC:.3f})"
+        rec = (
+            "Proceed with full QUALITY_PROFILE='ultra' 5-fold CV + 7b–7d stack. "
+            "Confirm with >=3 seeds before claiming the gain." + unvalidated
         )
-        rec = "Proceed with full QUALITY_PROFILE='ultra' 5-fold CV + 7b–7d stack."
         proceed = True
-    elif proj_hi >= 0.88 and stacked_pooled_auc >= 0.80:
+    elif margin >= NOISE_FLOOR_AUC:
         tier = "MODERATE"
-        headline = (
-            f"Screen stacked AUC {stacked_pooled_auc:.3f} — breakthrough possible "
-            f"but not assured (projected {proj_lo:.3f}–{proj_hi:.3f})"
-        )
+        headline = f"{base} — clears the {NOISE_FLOOR_AUC:.3f} noise floor, but by less than 2x"
         rec = (
-            "Full ultra run is reasonable if you have GPU budget; otherwise run "
-            "SCREEN_MODE='paradigm' or SCREEN_BACKBONE='3B' first."
-            + v6_ceiling_note
+            "Real but small. A single-seed delta this size is not publishable; "
+            "re-run with >=3 seeds, or try SCREEN_MODE='paradigm' / "
+            "SCREEN_BACKBONE='3B' first." + v6_ceiling_note + unvalidated
         )
-        proceed = proj_hi >= 0.88 and stacked_pooled_auc >= 0.82
-    elif proj_hi >= 0.85 and stacked_pooled_auc >= 0.78:
+        proceed = False
+    elif margin > -NOISE_FLOOR_AUC:
         tier = "LOW"
-        headline = (
-            f"Screen stacked AUC {stacked_pooled_auc:.3f} — unlikely to hit "
-            f"{BREAKTHROUGH_TARGET:.2f} without changes "
-            f"(projected {proj_lo:.3f}–{proj_hi:.3f})"
-        )
+        headline = f"{base} — inside the {NOISE_FLOOR_AUC:.3f} noise floor, i.e. indistinguishable from baseline"
         rec = (
-            "Current 650M screen projects below breakthrough. Try paradigm mode, "
-            "ESM-2 3B, or architecture changes before a 24h ultra run."
-            + v6_ceiling_note
+            "This screen shows no effect. Two identical reruns of this pipeline "
+            "differ by this much, so nothing here is attributable. Change "
+            "something structural (labels, backbone, architecture) rather than "
+            "committing GPU budget to a repeat." + v6_ceiling_note
         )
         proceed = False
     else:
         tier = "STOP"
         headline = (
-            f"Screen stacked AUC {stacked_pooled_auc:.3f} — paradigm not competitive "
-            f"(baseline GPU {VERIFIED_GPU_BASELINE:.3f}; "
-            f"projected {proj_lo:.3f}–{proj_hi:.3f})"
+            f"{base} — below baseline by more than the noise floor "
+            f"(GPU-only reference {MEASURED_GPU_CV_AUC:.3f})"
         )
         rec = (
-            "Do not commit to full ultra CV yet. Confirm you used standard/paradigm "
+            "Do not commit to full ultra CV. Confirm you used standard/paradigm "
             "(mini-ultra), then fix data/profile/backbone."
         )
         proceed = False
@@ -438,6 +474,33 @@ def run_paradigm_quick_screen(
             "proceed_full_ultra": verdict.proceed_full_ultra,
         },
         "references": {
+            # CV-AUC scale — directly comparable to this screen's numbers.
+            "cv_scale": {
+                "gpu_baseline": MEASURED_GPU_CV_AUC,
+                "v6_baseline": MEASURED_V6_CV_AUC,
+                "stacked_baseline": MEASURED_STACKED_CV_AUC,
+                "noise_floor": NOISE_FLOOR_AUC,
+                "split": "homology",
+            },
+            # CAID3 scale — NOT comparable to the CV values above. Kept apart
+            # deliberately: comparing a CV AUC to ESMDisPred's CAID3 number is a
+            # category error this project has already had to correct once.
+            "caid3_scale": {
+                "esmdispred": ESMDISPRED_REFERENCE,
+                "this_pipeline": MEASURED_CAID3,
+            },
+            "provenance": (
+                "CV baselines are homology-split measurements from this repo "
+                "after the leakage fixes. They replace the earlier 0.817/0.831, "
+                "which came from random splits with a fold soup and in-sample "
+                "thresholds and are not reproducible here."
+            ),
+            "tier_model": (
+                "Tiers are margins over stacked_baseline in units of noise_floor. "
+                "The projected band comes from an uplift prior fitted under the "
+                "old leaking evaluation and is unvalidated on homology splits."
+            ),
+            # Deprecated flat keys, kept so older readers do not KeyError.
             "breakthrough_target": BREAKTHROUGH_TARGET,
             "esmdispred_caid3": ESMDISPRED_REFERENCE,
             "verified_gpu_baseline": VERIFIED_GPU_BASELINE,
