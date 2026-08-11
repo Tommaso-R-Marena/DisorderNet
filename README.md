@@ -84,6 +84,40 @@ Two observations worth stating plainly: the trained model is the **weakest singl
 component**, and AlphaFold pLDDT alone outperforms it. The gains come from
 combining streams, not from the language model on its own.
 
+#### These are single-run numbers, and reruns move them
+
+Four runs of this exact configuration (same seed, same code, same splits) exist
+in the results tree. `rockfish/rerun_stability.py` compares them:
+
+| run | GPU pooled | GPU mean-of-folds | v6 pooled | stacked |
+|---|---:|---:|---:|---:|
+| j29682871 | 0.7454 | 0.7551 | 0.7804 | 0.7999 |
+| j29683037 | 0.7234 | 0.7405 | 0.7804 | 0.7920 |
+| j29683038 | 0.7137 | 0.7514 | 0.7804 | 0.7909 |
+| j29683091 | 0.7203 | 0.7491 | 0.7804 | 0.7876 |
+| | **sd 0.0138** | **sd 0.0062** | (cached) | sd 0.0052 |
+
+The table above reports j29682871. Another run of the same code puts the GPU
+component at 0.7137 — a 0.032 spread with nothing changed. **Pooled AUC is about
+twice as irreproducible as mean-of-folds**, which is what the cross-fold
+calibration analysis predicts: pooled AUC ranks residues scored by five
+separately-calibrated fold models and so inherits their calibration variance,
+while mean-of-folds never compares across folds. In one run the per-fold median
+predicted probability ranged from 0.0003 to 0.6523 at near-identical disorder
+prevalence, and pooled AUC landed 0.029 *below* mean-of-folds as a result;
+rank-normalising within folds recovered mean-of-folds almost exactly.
+
+Prefer mean-of-folds as the headline. Quote pooled only alongside its
+rank-normalised counterpart, which CV now reports automatically.
+
+Caveat: v6 is identical across all four runs because they share one cached OOF
+prediction file. That is one measurement reused, not four — the GBDT's own
+reproducibility is unmeasured. What the four runs do establish is that the
+physics GBDT beats the 69.9M-parameter neural model **in every one of them**, by
++0.035 to +0.067 (mean +0.055). That gap is the motivation for the frozen-backbone
+`lite` profile (`colab/lite_head.py`), which tests whether it is a
+capacity/data mismatch rather than a weak backbone.
+
 The v8 ensemble is also the best-**calibrated** config: isotonic calibration lowers
 Expected Calibration Error from ~0.041 to **~0.0025** (ranking preserved), and the
 split-conformal layer holds its coverage guarantee (empirical coverage ~0.90–0.91 at
