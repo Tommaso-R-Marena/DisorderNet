@@ -217,6 +217,28 @@ ARMS: dict[str, Arm] = {
         env={"PROFILE": "ultra3b", "BACKBONE": "3B"},
         gpu_mem="64000M",
     ),
+    # ---- Lever 5: capacity, in the other direction --------------------------
+    "lite_frozen": Arm(
+        name="lite_frozen",
+        description="Frozen ESM-2 650M + ~1.9M-parameter dilated head (profile 'lite')",
+        hypothesis=(
+            "The one lever pointing down instead of up. Every other arm adds "
+            "data, capacity or signal; this removes capacity. ultra trains 69.9M "
+            "parameters on 988k evidenced residues from 2,340 proteins under ten "
+            "simultaneous regularisers, reaches train loss 0.069 against "
+            "validation AUC 0.66, and is beaten by a physics GBDT (0.7454 vs "
+            "0.7804) — the signature of overfitting, not of a weak backbone. "
+            "Freezing the backbone and training ~1.9M head parameters tests that "
+            "directly. Precedent: SETH (frozen ProtT5 + CNN) reaches 0.830 on "
+            "CAID above this project's 0.8155, with no fine-tuning at all. "
+            "A win reframes the whole project; a loss rules out the cheapest "
+            "explanation for the ~0.08 AUC gap to ESMDisPred."
+        ),
+        env={"PROFILE": "lite"},
+        # No backward pass through the backbone, so activation memory is a
+        # fraction of ultra's and the arm is by far the cheapest in the matrix.
+        gpu_mem="32000M",
+    ),
     # ---- Compound: the combination worth trying if the levers hold ----------
     "scaled_task_matched": Arm(
         name="scaled_task_matched",

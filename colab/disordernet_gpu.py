@@ -21,7 +21,7 @@ import sys
 import time
 from collections import Counter
 from dataclasses import dataclass, field, asdict
-from typing import Callable, Iterator, Optional
+from typing import Callable, ClassVar, Iterator, Optional
 
 import numpy as np
 import requests
@@ -345,12 +345,40 @@ class TrainConfig:
     function_loss_weight: float = 0.35
     function_on_disordered_only: bool = True
 
+    # Lite track (profile "lite"): frozen backbone + small dilated head.
+    # Rationale in colab/lite_head.py — 69.9M trainable parameters on ~1M
+    # evidenced residues is a capacity/data mismatch, and the LoRA model loses to
+    # a physics GBDT (0.7454 vs 0.7804) as a result.
+    frozen_backbone: bool = False  # ESM runs under no_grad; only the head trains
+    lite_hidden: int = 256
+    lite_blocks: int = 4
+
     # Set automatically by setup_environment()
     device: torch.device = field(default_factory=lambda: torch.device("cpu"))
     amp_dtype: torch.dtype = torch.float16
     pin_memory: bool = False
     gpu_name: str = "cpu"
     vram_gb: float = 0.0
+
+    HEAD_TYPES: ClassVar[tuple[str, ...]] = ("cnn", "sota", "lite")
+
+    def __post_init__(self) -> None:
+        # Unknown head types used to fall through to the CNN head, so a typo in a
+        # profile or a --head-type flag silently trained a different model than
+        # the one being reported.
+        if self.head_type not in self.HEAD_TYPES:
+            raise ValueError(
+                f"Unknown head_type {self.head_type!r}. Choose: {list(self.HEAD_TYPES)}"
+            )
+        if self.frozen_backbone:
+            # A frozen backbone means exactly that: no adapters, no unfrozen tail.
+            # Enforced rather than assumed so a profile override cannot produce a
+            # run that reports "frozen" while training 70M parameters.
+            self.lora_layers = 0
+            self.unfreeze_last_layers = 0
+            # Checkpointing only trades compute for activation memory on the
+            # backward pass, and there is no backward pass through a frozen ESM.
+            self.use_gradient_checkpointing = False
 
     def effective_batch(self) -> int:
         return self.batch_size * self.accum_steps
@@ -554,6 +582,59 @@ class TrainConfig:
                 "use_swa": False,
                 "use_hallucination_weighting": False,
                 "use_plddt_features": False,
+            },
+            # lite — the capacity/data hypothesis, tested directly.
+            #
+            # ultra trains 69.9M parameters on ~1M evidenced residues from 2,340
+            # proteins under ten simultaneous regularisers, reaches train loss
+            # 0.069 against validation AUC 0.66, and loses to a physics GBDT
+            # (0.7454 vs 0.7804). If that gap is overfitting rather than a weak
+            # backbone, freezing ESM and training ~2M head parameters on the same
+            # data should close some of it. Precedent: SETH, a frozen ProtT5 plus
+            # a CNN, reaches 0.830 on CAID with no fine-tuning at all.
+            #
+            # Everything optional is off. Each regulariser in ultra was tuned
+            # while the evaluation was leaking, so none has earned its place
+            # against the measured 0.023 AUC noise floor; they get added back one
+            # at a time, if and when they beat it.
+            "lite": {
+                "frozen_backbone": True,
+                "head_type": "lite",
+                "lite_hidden": 256,
+                "lite_blocks": 4,
+                # No backward pass through ESM, so activations are cheap and the
+                # batch can be far larger than ultra's 2x8.
+                "batch_size": 16,
+                "accum_steps": 1,
+                "num_epochs": 30,
+                "lr_head": 1e-3,
+                "weight_decay": 1e-2,
+                "patience": 8,
+                # Mix widely: with the backbone frozen, which depth carries the
+                # signal is the one thing left to learn about it.
+                "esm_fusion_layers": 12,
+                "fusion_type": "softmax",
+                "physico_dim": 64,
+                "use_physico_features": True,
+                "use_rich_features": False,
+                "head_dropout": 0.1,
+                # Plain weighted BCE plus the boundary term the CAID segment
+                # metrics actually reward. Nothing else.
+                "use_focal_loss": False,
+                "boundary_weight": 2.0,
+                "use_dice_loss": False,
+                "use_tversky_loss": False,
+                "use_rdrop": False,
+                "use_swa": False,
+                "use_ema": False,
+                "label_smoothing": 0.0,
+                "use_v6_distill": False,
+                "use_hallucination_weighting": False,
+                "use_plddt_features": False,
+                "early_stop_mode": "auc",
+                "split_method": "homology",
+                "homology_min_identity": 0.40,
+                "compact_checkpoints": True,
             },
         }
         # ultra_clean = ultra capacity without structure-training contamination
@@ -937,6 +1018,8 @@ def print_training_config_summary(cfg: TrainConfig, proteins: Optional[list] = N
     print(f"  Profile            : {getattr(cfg, '_profile_name', 'custom')}")
     print(f"  ESM backbone       : {getattr(cfg, 'esm_backbone', '650M')} "
           f"(dim={getattr(cfg, 'esm_embed_dim', 1280)})")
+    if getattr(cfg, "frozen_backbone", False):
+        print("  Backbone           : FROZEN (feature extractor, no_grad, 0 trainable)")
     print(f"  LoRA rank / layers : {cfg.lora_rank} / {cfg.lora_layers}")
     print(f"  Epochs / patience  : {cfg.num_epochs} / {cfg.patience}")
     print(f"  Batch × accum      : {cfg.batch_size} × {cfg.accum_steps} "
@@ -1212,7 +1295,12 @@ class DisorderNetGPU(nn.Module):
                 self.esm.set_gradient_checkpointing(True)
 
         n_layers = len(self.esm.layers)
-        start = n_layers - cfg.lora_layers
+        # Clamp: asking for more LoRA layers than the backbone has made `start`
+        # negative, and range(-8, 12) yields -8..-1 before 0..11 — so on a small
+        # backbone the deeper layers were silently wrapped twice, stacking two
+        # adapters on one projection. It only surfaced as an IndexError when the
+        # negative index also ran past the front of the stack.
+        start = max(0, n_layers - cfg.lora_layers)
         self._lora_modules: list[LoRALinear] = []
         proj_names = ["q_proj", "v_proj"]
         if cfg.lora_on_k:
@@ -1244,7 +1332,7 @@ class DisorderNetGPU(nn.Module):
 
         self._esm_tail_params: list[nn.Parameter] = []
         if cfg.unfreeze_last_layers > 0:
-            tail_start = n_layers - cfg.unfreeze_last_layers
+            tail_start = max(0, n_layers - cfg.unfreeze_last_layers)
             for layer_idx in range(tail_start, n_layers):
                 layer = self.esm.layers[layer_idx]
                 for mod_name in ("self_attn_layer_norm", "final_layer_norm"):
@@ -1269,6 +1357,7 @@ class DisorderNetGPU(nn.Module):
         else:
             self.layer_fusion = ESMLayerFusion(fusion_n, dim=esm_dim)
 
+        self.frozen_backbone = bool(getattr(cfg, "frozen_backbone", False))
         self.use_rich = cfg.use_rich_features
         self.use_physico = cfg.use_physico_features and not self.use_rich
         self.use_plddt = cfg.use_plddt_features
@@ -1300,6 +1389,14 @@ class DisorderNetGPU(nn.Module):
                 dropout=cfg.head_dropout,
                 n_transformer_layers=3 if cfg.use_rich_features else 2,
             )
+        elif cfg.head_type == "lite":
+            from colab.lite_head import LiteDisorderHead
+            self.head = LiteDisorderHead(
+                in_dim=head_in,
+                dropout=cfg.head_dropout,
+                hidden=cfg.lite_hidden,
+                n_blocks=cfg.lite_blocks,
+            )
         else:
             self.head = DisorderCNNHead(in_dim=head_in, dropout=cfg.head_dropout)
 
@@ -1329,6 +1426,9 @@ class DisorderNetGPU(nn.Module):
                 f"  Parameters: {total / 1e6:.1f}M total, "
                 f"{trainable / 1e6:.2f}M trainable ({100 * trainable / total:.2f}%)"
             )
+
+    def n_trainable_params(self) -> int:
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
     def train(self, mode: bool = True) -> "DisorderNetGPU":
         """Keep frozen ESM in eval mode (LayerNorm) while LoRA dropout is active."""
@@ -1365,10 +1465,26 @@ class DisorderNetGPU(nn.Module):
         plddt_feats: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Shared ESM fusion + optional physico/rich/plddt features → (B, L, C)."""
-        out = self.esm(tokens, repr_layers=self._fusion_layer_ids, return_contacts=False)
-        layer_hiddens = [
-            out["representations"][i][:, 1:-1, :] for i in self._fusion_layer_ids
-        ]
+        if self.frozen_backbone:
+            # No parameter in the backbone requires grad, so building the graph
+            # through it only costs activation memory. torch.no_grad (not
+            # inference_mode) — inference tensors poison the rotary cache and
+            # cannot be saved for backward, which failed a fold at 4.9 hours.
+            with torch.no_grad():
+                out = self.esm(
+                    tokens, repr_layers=self._fusion_layer_ids, return_contacts=False
+                )
+            layer_hiddens = [
+                out["representations"][i][:, 1:-1, :].detach()
+                for i in self._fusion_layer_ids
+            ]
+        else:
+            out = self.esm(
+                tokens, repr_layers=self._fusion_layer_ids, return_contacts=False
+            )
+            layer_hiddens = [
+                out["representations"][i][:, 1:-1, :] for i in self._fusion_layer_ids
+            ]
         embeddings = self.layer_fusion(layer_hiddens)
 
         if self.rich_encoder is not None:
@@ -2209,6 +2325,11 @@ def train_fold(
                 "best_ap": best_ap,
                 "best_epoch": best_epoch,
                 "profile": getattr(cfg, "_profile_name", "custom"),
+                # The cost side of the ablation: an arm that changes capacity
+                # should say by how much, in the checkpoint itself, rather than
+                # leaving it to be re-derived from the profile name.
+                "n_trainable_params": fold_model.n_trainable_params(),
+                "frozen_backbone": bool(getattr(cfg, "frozen_backbone", False)),
             }
             if cfg.compact_checkpoints:
                 from colab.compact_checkpoint import save_compact_checkpoint
