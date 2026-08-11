@@ -8,6 +8,7 @@ Frozen ESM-2 650M backbone is reloaded from fair-esm on inference.
 from __future__ import annotations
 
 import os
+import tempfile
 from typing import Any, Optional
 
 import torch
@@ -65,21 +66,51 @@ def extract_trainable_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
     return out
 
 
+def atomic_torch_save(payload: Any, path: str) -> str:
+    """Write a checkpoint so it is either complete or absent, never partial.
+
+    A job killed mid-write leaves a truncated file at the destination path. That
+    happened here: a lite_frozen replicate was killed during its fold-4 write and
+    left a 0-byte fold4_best.pt, which any resume or soup step would then find by
+    existence check and try to load. Writing to a sibling temp file and renaming
+    makes the publish atomic on POSIX — readers see the old file or the new one.
+
+    The fsync matters on a shared filesystem: without it the rename can land
+    before the data, so a node failure yields an intact-looking name over
+    unwritten blocks.
+    """
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".tmp_ckpt_", suffix=".pt")
+    os.close(fd)
+    try:
+        with open(tmp, "wb") as fh:
+            torch.save(payload, fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        # Includes KeyboardInterrupt/SystemExit: a partial temp file is litter,
+        # and leaving it behind in the checkpoint directory is its own hazard.
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+    return path
+
+
 def save_compact_checkpoint(
     path: str,
     model: nn.Module,
     metadata: Optional[dict[str, Any]] = None,
 ) -> str:
     """Save trainable weights + metadata JSON-serializable fields."""
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     payload = {
         "version": 1,
         "format": "compact_trainable",
         "trainable": extract_trainable_state_dict(model),
         "metadata": metadata or {},
     }
-    torch.save(payload, path)
-    return path
+    return atomic_torch_save(payload, path)
 
 
 def load_compact_checkpoint(
@@ -88,6 +119,14 @@ def load_compact_checkpoint(
     device: Optional[torch.device] = None,
 ) -> dict[str, Any]:
     """Load trainable weights into a built DisorderNetGPU (ESM backbone must exist)."""
+    # A truncated checkpoint from a killed job otherwise surfaces as an opaque
+    # unpickling error several frames deep, or — worse — as an empty state dict
+    # that loads without complaint.
+    if os.path.getsize(path) == 0:
+        raise RuntimeError(
+            f"Checkpoint {path} is empty — the writing job was killed mid-save. "
+            "Delete it and re-run that fold; do not treat it as a completed fold."
+        )
     payload = torch.load(path, map_location=device or "cpu", weights_only=False)
     if isinstance(payload, dict) and payload.get("format") == "compact_trainable":
         trainable = payload["trainable"]

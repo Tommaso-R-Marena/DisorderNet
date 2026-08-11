@@ -16,6 +16,7 @@ import hashlib
 import json
 import math
 import os
+import tempfile
 import subprocess
 import sys
 import time
@@ -2306,14 +2307,14 @@ def train_fold(
             best_epoch = epoch + 1
             if ema is not None:
                 ema.apply_shadow(fold_model)
-                best_state = copy.deepcopy(fold_model.state_dict())
+                best_state = _snapshot_best_state(fold_model)
                 ema.restore(fold_model)
             elif swa is not None and swa.ready and epoch >= swa_start_epoch:
                 swa_backup = swa.apply_swa(fold_model)
-                best_state = copy.deepcopy(fold_model.state_dict())
+                best_state = _snapshot_best_state(fold_model)
                 swa.restore(fold_model, swa_backup)
             else:
-                best_state = copy.deepcopy(fold_model.state_dict())
+                best_state = _snapshot_best_state(fold_model)
             best_probs = val_metrics["probs"]
             best_labels = val_metrics["labels"]
             best_fn_probs = val_metrics.get("function_probs")
@@ -2339,7 +2340,8 @@ def train_fold(
                 if ema is not None:
                     ema.restore(fold_model)
             else:
-                torch.save(best_state, ckpt_path)
+                from colab.compact_checkpoint import atomic_torch_save
+                atomic_torch_save(best_state, ckpt_path)
             marker = " ◀ BEST"
         else:
             patience_counter += 1
@@ -2366,7 +2368,21 @@ def train_fold(
     )
 
     if best_state is not None:
-        fold_model.load_state_dict(best_state)
+        # strict=False: the snapshot holds only trainable tensors, since frozen
+        # ones are unchanged from the values already in the model.
+        missing, unexpected = fold_model.load_state_dict(best_state, strict=False)
+        if unexpected:
+            raise RuntimeError(
+                f"best-epoch snapshot has {len(unexpected)} tensor(s) with no "
+                f"destination in the model: {unexpected[:5]}"
+            )
+        still_trainable = {n for n, p in fold_model.named_parameters() if p.requires_grad}
+        lost = sorted(still_trainable - set(best_state))
+        if lost:
+            raise RuntimeError(
+                f"best-epoch snapshot is missing {len(lost)} trained tensor(s), so "
+                f"the fold would return weights it never validated: {lost[:5]}"
+            )
 
     del train_dl, val_dl, fold_model
     if device.type == "cuda":
@@ -2392,6 +2408,32 @@ def train_fold(
         result["val_function_probs"] = best_fn_probs
         result["val_function_labels"] = best_fn_labels
     return result
+
+
+def _snapshot_best_state(model: nn.Module) -> dict:
+    """Copy only the tensors that can have changed during this fold.
+
+    This was ``copy.deepcopy(model.state_dict())``, which copies the whole
+    model — including the frozen ESM-2 backbone. At 650M parameters that is
+    ~2.6 GB per snapshot, taken again on every epoch that improves validation,
+    with the previous copy still referenced until the assignment lands. Under
+    the lite profile it copied 653M parameters to preserve the 1.96M that are
+    trainable, and two replicates were killed at a fold boundary with no
+    traceback — the signature of the kernel OOM killer, which loses buffered
+    output.
+
+    Restricting the snapshot to trainable tensors is not an approximation: a
+    parameter with ``requires_grad=False`` cannot be updated by the optimizer,
+    so its value at the end of the fold is its value at the start. Buffers that
+    do change without gradients (BatchNorm running statistics) are covered
+    because ``extract_trainable_state_dict`` also takes the buffers of any
+    module owning a trained parameter.
+
+    Restore with ``strict=False`` — the snapshot is deliberately partial.
+    """
+    from colab.compact_checkpoint import extract_trainable_state_dict
+
+    return extract_trainable_state_dict(model)
 
 
 def _serialize_fold_result(result: dict) -> dict:
@@ -2443,8 +2485,25 @@ def save_cv_progress(
         "disprot_meta": disprot_meta,
         "fold_results": [_serialize_fold_result(r) for r in fold_results],
     }
-    with open(path, "w") as f:
-        json.dump(payload, f)
+    # Atomic for the same reason checkpoints are: this file IS the resume
+    # record, and it is rewritten after every fold. A job killed during the
+    # write would leave truncated JSON, so a resume would fail to parse it and
+    # silently restart cross-validation from fold 1 — discarding hours of
+    # completed folds that are still sitting in the checkpoint directory.
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".tmp_cvprog_", suffix=".json")
+    os.close(fd)
+    try:
+        with open(tmp, "w") as f:
+            json.dump(payload, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
 
 def load_cv_progress(
