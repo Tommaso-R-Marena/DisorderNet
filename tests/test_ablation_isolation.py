@@ -342,3 +342,60 @@ class TestBaselineWorkdirIsReadOrRefused:
         msg = str(exc.value)
         assert "no cv_summary.json" in msg
         assert "empty row" in msg
+
+
+class TestArmDeclaredEpochBudget:
+    """An arm that declares its own epoch budget must keep it.
+
+    The budget was overwritten unconditionally by the step-matching policy, so
+    `lite_pdb_long` — whose whole purpose is a larger budget than the matched
+    one — was submitted as a byte-identical duplicate of `lite_pdb_missing` and
+    would have been collected and reported as an independent result.
+    """
+
+    def _submit(self, tmp_path, arms):
+        import subprocess
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        repo = _Path(__file__).resolve().parents[1]
+        return subprocess.run(
+            [_sys.executable, str(repo / "rockfish" / "ablation.py"), "submit",
+             "--arms", arms, "--root-workdir", str(tmp_path), "--dry-run"],
+            capture_output=True, text=True, cwd=str(repo),
+        )
+
+    def test_declared_budget_survives_step_matching(self, tmp_path):
+        from rockfish.ablation import ARMS, compute_matched_epochs
+
+        arm = ARMS["lite_pdb_long"]
+        declared = int(arm.env["DISORDERNET_NUM_EPOCHS"])
+        matched = compute_matched_epochs(arm.env["DISORDERNET_LABEL_SOURCE"])
+        assert declared != matched, "the arm must differ from the matched budget"
+
+        out = self._submit(tmp_path, "lite_pdb_long")
+        assert out.returncode == 0, out.stderr
+        assert f"{declared} epochs" in out.stdout
+
+    def test_output_says_it_is_not_a_matched_comparison(self, tmp_path):
+        """A larger budget must not be quietly presented as step-matched."""
+        out = self._submit(tmp_path, "lite_pdb_long")
+        assert "NOT a matched-budget comparison" in out.stdout
+
+    def test_arms_without_a_declared_budget_are_still_step_matched(self, tmp_path):
+        from rockfish.ablation import ARMS, compute_matched_epochs
+
+        assert "DISORDERNET_NUM_EPOCHS" not in ARMS["lite_pdb_missing"].env
+        out = self._submit(tmp_path, "lite_pdb_missing")
+        matched = compute_matched_epochs("pdb_missing")
+        assert f"{matched} epochs" in out.stdout
+        assert "step-matched" in out.stdout
+
+    def test_the_two_pdb_arms_are_not_duplicates(self, tmp_path):
+        from rockfish.ablation import ARMS, compute_matched_epochs
+
+        short = compute_matched_epochs(
+            ARMS["lite_pdb_missing"].env["DISORDERNET_LABEL_SOURCE"]
+        )
+        long = int(ARMS["lite_pdb_long"].env["DISORDERNET_NUM_EPOCHS"])
+        assert long > short

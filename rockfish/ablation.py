@@ -256,6 +256,68 @@ ARMS: dict[str, Arm] = {
         # than the wait for a slightly larger allocation.
         gpu_mem="40000M",
     ),
+    # ---- Compounds on the lite architecture ---------------------------------
+    # lite is ~13x cheaper than ultra per run (0.9 vs ~12 GPU-h), so the levers
+    # that were expensive to combine on ultra are affordable to combine here.
+    "lite_pdb_missing": Arm(
+        name="lite_pdb_missing",
+        description="lite architecture + PDB-missing labels (CAID3's own definition)",
+        hypothesis=(
+            "The two independently-supported levers, combined. lite gained "
+            "+0.074 DisProt mean-of-folds over ultra by removing capacity; "
+            "pdb_missing removes a domain shift, since CAID3 Disorder-PDB "
+            "scores crystallographic disorder while DisProt annotates curated "
+            "functional disorder. On PDB-missing labels the physics GBDT alone "
+            "reaches 0.822 against 0.780 on DisProt, so the task match is worth "
+            "something before any neural model is involved. If both levers are "
+            "real and roughly additive this is the configuration that should be "
+            "competitive with published CAID3 SOTA. Epochs are step-matched, so "
+            "any gain is the labels and not a larger optimizer budget."
+        ),
+        env={
+            "PROFILE": "lite",
+            "DISORDERNET_LABEL_SOURCE": "pdb_missing",
+            "DISORDERNET_MOBIDB_GLOBAL": "1",
+        },
+        changes_task=True,
+        compound=True,
+        gpu_mem="40000M",
+    ),
+    "lite_pdb_long": Arm(
+        name="lite_pdb_long",
+        description="lite + PDB-missing labels at 4x the step-matched budget",
+        hypothesis=(
+            "Step-matching answers 'are these labels better per gradient step'. "
+            "It does not answer 'what is the best this configuration can do', "
+            "which is the question a SOTA claim actually asks — 8.3x the "
+            "proteins can support more than 8.3x fewer epochs. Declared as a "
+            "separate arm rather than quietly replacing the matched one, so the "
+            "attribution and the performance claim stay distinguishable."
+        ),
+        env={
+            "PROFILE": "lite",
+            "DISORDERNET_LABEL_SOURCE": "pdb_missing",
+            "DISORDERNET_MOBIDB_GLOBAL": "1",
+            # 4x the step-matched budget for this source (5 -> 20).
+            "DISORDERNET_NUM_EPOCHS": "20",
+        },
+        changes_task=True,
+        compound=True,
+        gpu_mem="40000M",
+    ),
+    "lite_3b": Arm(
+        name="lite_3b",
+        description="lite head on a frozen ESM-2 3B backbone",
+        hypothesis=(
+            "Capacity in the representation rather than the head. A frozen 3B "
+            "backbone costs inference only — no optimizer state, no activation "
+            "storage for backward — so it is affordable here in a way that "
+            "fine-tuning 3B is not. Tests whether lite is limited by what ESM-2 "
+            "650M encodes or by the head that reads it."
+        ),
+        env={"PROFILE": "lite", "BACKBONE": "3B"},
+        gpu_mem="64000M",
+    ),
     # ---- Compound: the combination worth trying if the levers hold ----------
     "scaled_task_matched": Arm(
         name="scaled_task_matched",
@@ -353,8 +415,17 @@ def cmd_submit(args: argparse.Namespace) -> int:
         # Hold optimizer steps constant unless the caller overrides, so a
         # data-scale arm measures the data and not a larger step budget.
         src = env.get("DISORDERNET_LABEL_SOURCE", BASELINE_ENV["DISORDERNET_LABEL_SOURCE"])
+        # An arm that declares its own budget means it: step-matching is the
+        # default policy, not a mandate. This used to be overwritten
+        # unconditionally, so `lite_pdb_long` — whose entire purpose is a larger
+        # budget than the matched one — was submitted as a byte-identical
+        # duplicate of `lite_pdb_missing`, and would have been reported as an
+        # independent result.
+        arm_epochs = arm.env.get("DISORDERNET_NUM_EPOCHS")
         if args.num_epochs:
             epochs = int(args.num_epochs)
+        elif arm_epochs is not None:
+            epochs = int(arm_epochs)
         elif args.epochs_fixed:
             epochs = BASELINE_EPOCHS
         else:
@@ -367,10 +438,18 @@ def cmd_submit(args: argparse.Namespace) -> int:
         # DisProt-sized data while reporting itself as step-matched.
         env["DISORDERNET_EXPECTED_RESIDUES"] = str(EVIDENCED_RESIDUES.get(src, 0))
         if epochs != BASELINE_EPOCHS:
+            if args.num_epochs:
+                why = "forced by --num-epochs"
+            elif arm_epochs is not None:
+                why = (
+                    f"declared by the arm ({compute_matched_epochs(src)} would be "
+                    "step-matched) — NOT a matched-budget comparison"
+                )
+            else:
+                why = f"step-matched to {BASELINE_EPOCHS} on DisProt"
             print(
                 f"    {name}: {src} carries {EVIDENCED_RESIDUES.get(src, 0):,} "
-                f"evidenced residues → {epochs} epochs "
-                f"(step-matched to {BASELINE_EPOCHS} on DisProt)"
+                f"evidenced residues → {epochs} epochs ({why})"
             )
 
         # Drop stale ablation keys from the parent environment before applying
