@@ -128,10 +128,20 @@ def run_stratified_caid_report(
     by_length: dict[str, tuple[list, list]] = {b[0]: ([], []) for b in LENGTH_BINS}
     by_organism: dict[str, tuple[list, list]] = {}
 
+    from colab.biological_utility import evidenced
+
     for item in aligned:
         p = item["protein"]
-        labels = item["labels"]
-        probs = item["probs"]
+        # Aligned items are full-length with sentinels (-1 label, NaN prob) at
+        # residues the label source never evaluated. Every stratum below pools
+        # residues and scores them, so the sentinels must go here — not only in
+        # the final pooled call. Leaving them in made a PDB-labelled run die at
+        # `Target is multiclass but average='binary'` after 1h12 of eval.
+        keep = evidenced(item)
+        if not keep.any():
+            continue
+        labels = np.asarray(item["labels"], dtype=np.float32)[keep]
+        probs = np.asarray(item["probs"], dtype=np.float32)[keep]
 
         d_bin = _bin_label(p.get("frac_dis", 0.0), DISORDER_FRAC_BINS)
         if d_bin:

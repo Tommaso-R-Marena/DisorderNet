@@ -151,3 +151,57 @@ def test_alignment_holds_across_evidence_levels(frac):
     aligned = align_fold_predictions(proteins, folds, n_folds=1)
     labels, probs = pool_evidenced(aligned)
     assert len(labels) == len(folds[0]["val_probs"])
+
+
+class TestNoConsumerLeaksTheSentinel:
+    """Find sentinel leaks by inspection, not by crashing one stage at a time.
+
+    align_fold_predictions returns full-length arrays with -1 labels and NaN
+    probs where a label source evaluated nothing. Every consumer that *pools*
+    residues must drop those first. Each one I missed cost a multi-hour run:
+
+      ensemble_v6 / meta_ensemble     found by reading the contract
+      caid_reporting pooled call      found by reading the contract
+      caid_reporting strata           crashed at 1h12 with
+                                      "Target is multiclass but average='binary'"
+      sota_ensemble, af_hallucination found by this test
+
+    A -1 in y_true makes sklearn treat the problem as multiclass; a NaN in
+    y_score raises. Both are loud, but only after the GPU time is spent.
+    """
+
+    CONSUMERS = [
+        ("colab/ensemble_v6.py", 'labels_concat.append'),
+        ("colab/meta_ensemble.py", 'chunks_y.append'),
+        ("colab/sota_ensemble.py", 'label_chunks.append'),
+        ("colab/caid_reporting.py", 'by_disorder['),
+        ("colab/af_hallucination.py", 'labels_list.append'),
+    ]
+
+    def _source(self, rel):
+        from pathlib import Path
+        return (Path(__file__).resolve().parents[1] / rel).read_text()
+
+    @pytest.mark.parametrize("path,marker", CONSUMERS)
+    def test_pooling_sites_reference_the_evidence_mask(self, path, marker):
+        """Every file that pools aligned residues must consult `evidenced`."""
+        src = self._source(path)
+        assert marker in src, f"{path}: pooling site {marker!r} moved; re-audit"
+        assert "evidenced" in src or "pool_evidenced" in src, (
+            f"{path} pools aligned residues without consulting the evidence "
+            "mask — sentinels would be scored as real labels"
+        )
+
+    def test_helpers_are_exported_for_consumers(self):
+        from colab.biological_utility import evidenced, pool_evidenced
+
+        assert callable(evidenced) and callable(pool_evidenced)
+
+    def test_sentinels_would_actually_break_sklearn(self):
+        """Justifies the whole guard: this is the failure it prevents."""
+        from sklearn.metrics import roc_auc_score
+
+        y = np.array([0, 1, -1, 1], dtype=float)
+        s = np.array([0.1, 0.9, np.nan, 0.8])
+        with pytest.raises(Exception):
+            roc_auc_score(y, s)

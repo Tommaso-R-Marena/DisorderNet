@@ -129,10 +129,16 @@ def run_af_rescue_report(
             proteins_missing += 1
             continue
 
-        labels = item["labels"]
-        probs = item["probs"]
+        from colab.biological_utility import evidenced
+
+        keep = evidenced(item)
+        if keep.sum() < 5:
+            proteins_missing += 1
+            continue
+        labels = np.asarray(item["labels"], dtype=np.float32)[keep]
+        probs = np.asarray(item["probs"], dtype=np.float32)[keep]
         metrics = compute_hallucination_metrics(
-            labels, probs, plddt, threshold, high_plddt_threshold,
+            labels, probs, plddt[keep], threshold, high_plddt_threshold,
         )
         if metrics.get("insufficient_data"):
             proteins_missing += 1
@@ -442,11 +448,16 @@ def _collect_af_subset_arrays(
         plddt = np.asarray(plddt_by_protein[pid], dtype=np.float32)
         if len(plddt) != len(item["probs"]):
             continue
-        valid = ~np.isnan(plddt)
+        # Valid means pLDDT present AND the residue carries a real label. The
+        # pLDDT check alone let sentinel labels through once evidence became
+        # partial under PDB-derived sources.
+        from colab.biological_utility import evidenced
+
+        valid = ~np.isnan(plddt) & evidenced(item)
         if valid.sum() < 5:
             continue
-        labels_list.append(item["labels"][valid])
-        probs_list.append(item["probs"][valid])
+        labels_list.append(np.asarray(item["labels"], dtype=np.float32)[valid])
+        probs_list.append(np.asarray(item["probs"], dtype=np.float32)[valid])
         plddt_list.append(plddt[valid])
         n_proteins += 1
 
@@ -484,11 +495,13 @@ def _collect_overlap_arrays(
         p3 = np.asarray(plddt_af3[pid], dtype=np.float32)
         if len(p2) != len(item["probs"]) or len(p3) != len(p2):
             continue
-        valid = (~np.isnan(p2)) & (~np.isnan(p3))
+        from colab.biological_utility import evidenced
+
+        valid = (~np.isnan(p2)) & (~np.isnan(p3)) & evidenced(item)
         if valid.sum() < 5:
             continue
-        labels_list.append(item["labels"][valid])
-        probs_list.append(item["probs"][valid])
+        labels_list.append(np.asarray(item["labels"], dtype=np.float32)[valid])
+        probs_list.append(np.asarray(item["probs"], dtype=np.float32)[valid])
         af2_list.append(p2[valid])
         af3_list.append(p3[valid])
         n_proteins += 1

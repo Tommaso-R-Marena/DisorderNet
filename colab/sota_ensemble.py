@@ -189,10 +189,17 @@ def apply_sota_stack(
         phys_p = np.asarray(physics_by_id[pid], dtype=np.float32)
         if len(v6_p) != len(gpu_p) or len(phys_p) != len(gpu_p):
             continue
-        gpu_chunks.append(gpu_p)
-        v6_chunks.append(v6_p)
-        phys_chunks.append(phys_p)
-        label_chunks.append(item["labels"])
+        # Aligned items are full-length with sentinels at residues the label
+        # source never evaluated; the stacker must not fit on fabricated calls.
+        from colab.biological_utility import evidenced
+
+        keep = evidenced(item)
+        if not keep.any():
+            continue
+        gpu_chunks.append(gpu_p[keep])
+        v6_chunks.append(v6_p[keep])
+        phys_chunks.append(phys_p[keep])
+        label_chunks.append(np.asarray(item["labels"], dtype=np.float32)[keep])
 
     if gpu_chunks:
         gpu_all = np.concatenate(gpu_chunks)
