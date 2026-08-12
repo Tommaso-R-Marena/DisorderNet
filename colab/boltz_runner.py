@@ -305,11 +305,27 @@ def resolve_boltz_paths(boltz_root: Optional[str] = None) -> dict:
 
 
 def default_boltz_root() -> str:
-    return (
-        os.environ.get("DISORDERNET_BOLTZ_ROOT")
-        or os.environ.get("BOLTZ_ROOT")
-        or os.path.join(os.path.expanduser("~"), "boltz")
-    )
+    """Where Boltz writes inputs, outputs and downloaded weights.
+
+    Defaults to a directory under the current run, not ``~/boltz``. A shared
+    home directory is the wrong default for a stage that downloads gigabytes and
+    can leave partial files behind: an eval job invoked outside the usual sbatch
+    wrapper (which sets ``BOLTZ_MODE=ingest``) inherited ``--boltz-mode auto``,
+    ran Boltz, and left a truncated 620 MB ``mols.tar`` and a zero-byte
+    ``boltz2_conf.ckpt`` in a *shared* cache — where Boltz would then find them
+    present and fail, for anyone using that account, while consuming the home
+    quota that had already killed three training jobs.
+
+    Set ``DISORDERNET_BOLTZ_ROOT`` (or ``BOLTZ_ROOT``) to opt into a shared
+    location deliberately; the default now keeps the blast radius inside the run.
+    """
+    explicit = os.environ.get("DISORDERNET_BOLTZ_ROOT") or os.environ.get("BOLTZ_ROOT")
+    if explicit:
+        return explicit
+    workdir = os.environ.get("DISORDERNET_WORKDIR")
+    if workdir:
+        return os.path.join(workdir, "boltz")
+    return os.path.join(os.getcwd(), "boltz")
 
 
 def print_boltz_setup_instructions(paths: Optional[dict] = None) -> None:
