@@ -199,6 +199,93 @@ calibration drift. Per-fold median predicted probability spans ~3× under `lite`
 against ~2000× under `ultra`, and rank-normalisation moves pooled AUC by +0.006
 rather than +0.028.
 
+### What we do not win, and what that redirects toward
+
+Two AlphaFold signals, requiring no training and no GPU, beat both our model and
+the published CAID3 leader on Disorder-PDB:
+
+| | AUC | APS |
+|---|---:|---:|
+| DisorderNet-Lite | 0.9215 | 0.8567 |
+| AlphaFold −pLDDT | 0.9431 | 0.9062 |
+| AlphaFold rsa (window 21) | 0.9459 | 0.9168 |
+| **rsa + pLDDT** | **0.9581** | **0.9320** |
+| PUNCH2 (CAID3 #1) | 0.9550 | 0.9280 |
+| rsa + pLDDT + model *(weights fit on training data)* | 0.9554 | 0.9281 |
+
+Fusing the model into that baseline makes it **worse** (−0.0028 AUC): the
+honest fusion reports `model_earns_its_place: False`. A grid search over fusion
+weights reaches 0.9633, but those weights were fitted on the residues being
+scored, so that figure is an upper bound and not a result.
+
+Our rsa reproduces the published AlphaFold-rsa to within 0.004 (0.9459 against
+0.950), which is the strongest validation available that this harness scores
+what CAID3 scores — stronger than the composition match, because it reproduces
+another group's *method score*.
+
+So Disorder-PDB is not where this project can contribute. The other four
+benchmarks are a different matter: no AlphaFold baseline reaches the
+Disorder-NOX top ten, because NOX counts unannotated residues as **ordered**
+rather than ignoring them, and the structural shortcut stops working the moment
+absence of evidence is a negative.
+
+### One model, five benchmarks
+
+CAID3 is five benchmarks won by five specialists, and none answers another's
+question:
+
+| benchmark | targets | positives | leader | AUC | APS |
+|---|---:|---:|---|---:|---:|
+| Disorder-PDB | 319 | 31.6% | PUNCH2 | 0.955 | 0.928 |
+| Disorder-NOX | 204 | 26.4% | ESMDisPred-2PDB | 0.885 | 0.754 |
+| Linker | 31 | 6.7% | IPA-AF2-Linker | 0.897 | 0.474 |
+| Binding | 52 | 10.6% | DisoFLAG-PB | 0.776 | 0.245 |
+| Binding-IDR | 52 | 38.6% | bindEmbed21IDR | 0.641 | 0.514 |
+
+`MultiTaskLiteHead` answers all of them from **one frozen-backbone forward
+pass**: a shared dilated trunk with a linear read-out per task, **1,914,634
+trainable parameters in total and 1,538 per additional task**.
+
+Measured on an A100 over the 319 CAID3 targets:
+
+| | |
+|---|---|
+| all four tasks, 285 targets | 7.85 s |
+| per target | **27.6 ms** |
+| throughput | 36.3 targets/s, 13,565 residues/s |
+| head share of runtime | **0.9%** |
+| five separate specialists | ~31.2 s — **4.0× slower** |
+
+The head is 0.9% of runtime, so four tasks cost 1.009× one task while five
+separate models cost 4×. That is the argument for sharing the trunk, and it is
+measured rather than asserted (CUDA-synchronised, post-warmup, median of three
+passes). It is **not** comparable to the CAID3 timing table, which was collected
+on the organisers' hardware.
+
+Sharing is also a modelling choice, not only an economy. Linker has 15,683
+positive residues and binding 88,761, against disorder's 336,014 — the
+small-data regime where this head beat a 69.9M-parameter LoRA model by +0.074.
+A shared trunk carries disorder's data into tasks with a twentieth of it, and
+linear per-task read-outs stop any of them growing private capacity.
+
+**Reference reconstruction.** Only `disorder_pdb.fasta` is published, so the
+other four benchmarks were unmeasurable. `colab/caid3_references.py` derives
+them from the challenge's own generation rules, with the official 319 targets
+fixing the universe, and validates by composition:
+
+| benchmark | reconstructed | published | status |
+|---|---|---|---|
+| Linker | 31 tgt / 1,379 pos | 31 / 1,379 | **head-to-head** |
+| Binding | 45 / 2,352 | 52 / 2,991 | approximate |
+| Binding-IDR | 31 / 2,352 | 52 / 2,991 | approximate |
+| Disorder-NOX | 319 / 31,518 | 204 / 26,367 | approximate |
+
+Only Linker may be quoted beside its published leader; the code marks the rest
+"NOT comparable … must not be reported as if it were". CAID3 targets are DisProt
+entries, so training excludes them and their ≥40%-identity homologues — 358 of
+2,905 proteins — and the run fails loudly if BLAST is unavailable rather than
+reporting a filter that did not run.
+
 The v8 ensemble is also the best-**calibrated** config: isotonic calibration lowers
 Expected Calibration Error from ~0.041 to **~0.0025** (ranking preserved), and the
 split-conformal layer holds its coverage guarantee (empirical coverage ~0.90–0.91 at
@@ -208,15 +295,21 @@ layer. Its measured pooled AUC under genuine homology separation is **0.8196**
 (with AlphaFold fusion), not the ≥0.88 previously targeted here. The `lite`
 profile above supersedes this path on both benchmarks at a fraction of the cost.
 
-Compared to **literature reference points** (different protocols — not head-to-head),
-dedicated disorder predictors substantially outperform using AlphaFold pLDDT as a
-disorder proxy: AF3-pLDDT scores **0.747** on CAID3 (rank 13), while current disorder
-SOTA (ESMDisPred) reaches **0.895**. DisorderNet's distinctive contributions are
-(1) the **multi-scale PLM ensemble**, (2) a **calibrated + conformal confidence
-layer** shared by the CPU and GPU paths, and (3) the **post-structure IDR biology
-layer** quantifying AlphaFold/Boltz hallucinations in IDRs.
+DisorderNet's distinctive contributions, as the measurements now support them:
+(1) **one frozen-backbone model answering all five CAID3 tasks** at 1,538
+trainable parameters per task and 0.9% of runtime, where every published entry
+is a single-task specialist; (2) a **calibrated + conformal confidence layer**
+shared by the CPU and GPU paths; and (3) the **post-structure IDR biology layer**
+quantifying AlphaFold/Boltz hallucinations in IDRs.
 
-AlphaFold 3's diffusion architecture hallucinates structure in genuinely disordered regions — [22% of residues are hallucinations](https://arxiv.org/abs/2510.15939). AF3-pLDDT [ranks 13th on CAID3](https://pmc.ncbi.nlm.nih.gov/articles/PMC12750029/), *worse* than AF2 (rank 11th). DisorderNet exploits this fundamental weakness.
+> **A caveat on (3), from this project's own measurements.** The framing that
+> AlphaFold is something to distrust in disordered regions is only half right.
+> AF3-pLDDT does rank 13th on CAID3 and AF2-pLDDT 11th — but **AlphaFold-rsa
+> ranks 3rd at 0.950**, above every dedicated predictor except the two PUNCH2
+> variants, and rsa+pLDDT together reach 0.9581 here, above the CAID3 leader.
+> The weakness is specific to pLDDT as a disorder proxy, not to AlphaFold's
+> output as a whole. Structure-derived features are the strongest single signal
+> on Disorder-PDB, and this pipeline did not use the strongest one.
 
 ## From scratch (start here)
 
