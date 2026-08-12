@@ -148,6 +148,16 @@ Related invariants, all regression-tested:
   from shadowing the real one. Write the destination explicitly, one source at a
   time: `rsync -az colab/ host:dn_rigor/colab/`. Check for the damage with
   `ls *.py | wc -l` (should be 21 in `~/dn_rigor`).
+- **"No GPU detected" has two distinct causes here; check the banner.** Both
+  present identically — the job dies in `setup_environment` about seven seconds
+  in while `sacct` reports `gres/gpu:a100=1` allocated. Compare the `ENV_DIR=`
+  and node lines of a failing run against a working one:
+  - wrong venv (see next bullet) — `ENV_DIR` differs, any node;
+  - a bad node — `ENV_DIR` matches a working job and the node repeats. `icgpu04`
+    failed two `lite_3b` submissions this way while `icgpu03` ran the sibling
+    arm from the same `sbatch` call. Resubmit with `--exclude=<node>`.
+  Do not settle on one explanation before checking the other: both were live at
+  the same time, and each looked like the other.
 - **Do not set `DISORDERNET_VENV=~/venvs/disordernet_rigor` for GPU jobs.** That
   venv's PyTorch (2.5.1+cu121) cannot see the GPU on the ica100 nodes, and the
   job dies in `setup_environment` with "No GPU detected" about seven seconds in
