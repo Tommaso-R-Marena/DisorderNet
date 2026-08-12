@@ -140,6 +140,19 @@ Related invariants, all regression-tested:
   `-A sfried3` with no qos.
 - **Never run compute on a login node.** Even the pytest suite goes to `shared`
   (it takes ~2.5 min there).
+- **Sync one directory per `rsync`.** `rsync -az tests/ colab/ host:dn_rigor/`
+  copies the *contents of both* into the destination root — it does not create
+  `tests/` and `colab/` there. That scattered 127 modules and test files across
+  the repo root, where `pytest` then collected each test twice under two module
+  names, and a stale duplicate of an edited module sat one `sys.path` entry away
+  from shadowing the real one. Write the destination explicitly, one source at a
+  time: `rsync -az colab/ host:dn_rigor/colab/`. Check for the damage with
+  `ls *.py | wc -l` (should be 21 in `~/dn_rigor`).
+- **GPU jobs submitted with `--wrap` need `--gres=gpu:1` spelled out.** The
+  `#SBATCH` lines in `rockfish/slurm/*.sbatch` do not apply to a wrapped command,
+  and `--partition=ica100 --qos=qos_gpu` alone allocates no GPU: the job starts,
+  loads config, and dies in `setup_environment` with "No GPU detected" ten
+  seconds in. Prefer the real sbatch scripts over `--wrap`.
 - **Walltime:** Rockfish a100 max is **72 h** (not 48 h); shared ≈ 36 h; l40s 24 h.
   Fold resume via `cv_progress.json`; campaign watchdog:
   `bash rockfish/slurm/submit_publish_full.sh`.
