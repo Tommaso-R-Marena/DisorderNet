@@ -41,6 +41,7 @@ import json
 import os
 import sys
 import time
+from typing import Optional
 
 import numpy as np
 import torch
@@ -105,6 +106,70 @@ def build_union(entries: list[dict], tasks: tuple[str, ...]) -> tuple[list[dict]
     return rows, coverage
 
 
+def drop_caid_targets(
+    rows: list[dict], reference_fasta: Optional[str], min_identity: float
+) -> tuple[list[dict], dict]:
+    """Remove CAID3 targets and their homologues from the training union.
+
+    Exact id/sequence matches are removed first and unconditionally — a CAID3
+    target is literally a DisProt entry, so without this the model trains on the
+    proteins it will be scored on. Homologues above ``min_identity`` go too,
+    since a 90%-identical paralogue leaks nearly as much as the target itself.
+    """
+    from colab.caid3_eval import parse_caid_reference_fasta
+
+    if not reference_fasta or not os.path.isfile(reference_fasta):
+        return rows, {"n_before": len(rows), "n_removed": 0, "n_id_overlap": 0,
+                      "reason": "no CAID3 reference available"}
+
+    targets = parse_caid_reference_fasta(reference_fasta)
+    target_ids = {t["id"] for t in targets}
+    target_seqs = {t["sequence"] for t in targets}
+
+    kept, n_id = [], 0
+    exact_removed = []
+    for r in rows:
+        if r["id"] in target_ids or r["sequence"] in target_seqs:
+            n_id += 1
+            exact_removed.append(r["id"])
+            continue
+        kept.append(r)
+
+    # Homology pass: cluster the survivors against the targets and drop any
+    # survivor sharing a cluster with one.
+    try:
+        from colab.homology_splits import blast_cross_identity_hits
+
+        hits = blast_cross_identity_hits(
+            [{"id": r["id"], "sequence": r["sequence"]} for r in kept],
+            [{"id": t["id"], "sequence": t["sequence"]} for t in targets],
+            min_identity=min_identity,
+        )
+        if hits is None:
+            # BLAST unavailable. The pure-Python fallback cannot finish an
+            # all-vs-all here, and silently keeping homologues would leak, so
+            # say so rather than proceed as if the filter had run.
+            raise RuntimeError("BLAST unavailable; cannot verify homology")
+        # Returns (query_index, subject_index, identity) triples.
+        homologous = {kept[q]["id"] for q, _s, _i in hits}
+        kept = [r for r in kept if r["id"] not in homologous]
+    except Exception as exc:                      # pragma: no cover - env dependent
+        print(f"  WARNING: homology pass skipped ({exc}). Exact id/sequence "
+              "matches were still removed, but homologues of CAID3 targets "
+              "remain in training — benchmark numbers from this run are NOT "
+              "leak-free.")
+        homologous = set()
+
+    return kept, {
+        "n_before": len(rows),
+        "n_removed": len(rows) - len(kept),
+        "n_id_overlap": n_id,
+        "n_homology_removed": len(homologous),
+        "min_identity": min_identity,
+        "reference": reference_fasta,
+    }
+
+
 def homology_folds(rows: list[dict], n_folds: int, min_identity: float, seed: int):
     """Homology-clustered folds over the union, computed once for all tasks.
 
@@ -162,6 +227,22 @@ def main(argv=None) -> int:
     ap.add_argument("--fusion-layers", type=int, default=12)
     ap.add_argument("--max-len", type=int, default=1022)
     ap.add_argument("--stats-only", action="store_true")
+    ap.add_argument(
+        "--caid-reference", default=None,
+        help="CAID3 Disorder-PDB FASTA whose targets must be excluded from "
+             "training (defaults to <workdir>/caid3_disorder_pdb.fasta)",
+    )
+    ap.add_argument("--leak-identity", type=float, default=0.40)
+    ap.add_argument(
+        "--no-caid-filter", action="store_true",
+        help="Train on CAID3 targets too. Only for measuring the size of the "
+             "leak; any benchmark number from such a run is invalid.",
+    )
+    ap.add_argument(
+        "--final-model", action="store_true",
+        help="After CV, fit one head on all (filtered) proteins and save it for "
+             "benchmark scoring.",
+    )
     args = ap.parse_args(argv)
 
     tasks = tuple(t.strip() for t in args.tasks.split(",") if t.strip())
@@ -172,6 +253,13 @@ def main(argv=None) -> int:
 
     os.makedirs(args.workdir, exist_ok=True)
     disprot = args.disprot or os.path.join(args.workdir, "disprot_raw.json")
+    if not args.caid_reference:
+        for cand in (os.path.join(args.workdir, "caid3_disorder_pdb.fasta"),
+                     os.path.join(args.workdir, "checkpoints",
+                                  "caid3_disorder_pdb.fasta")):
+            if os.path.isfile(cand):
+                args.caid_reference = cand
+                break
     entries = load_disprot(disprot)
     print(f"DisProt entries: {len(entries):,}")
 
@@ -186,6 +274,23 @@ def main(argv=None) -> int:
     rows = [r for r in rows if 20 <= r["length"] <= args.max_len]
     print(f"\nunion: {len(rows):,} proteins within length bounds")
     print(f"coverage: { {t: coverage[t] for t in tasks} }")
+
+    # The CAID3 targets ARE DisProt entries, and this cache contains them.
+    # Training on the union without filtering means training on the evaluation
+    # set — every CAID3 number afterwards would measure memorisation. The
+    # disorder pipeline has always applied this filter; the multi-task trainer
+    # did not until it was caught, mid-run, by noticing the evaluator would have
+    # scored a model trained on its own targets.
+    if not args.no_caid_filter:
+        rows, leak = drop_caid_targets(rows, args.caid_reference, args.leak_identity)
+        print(f"CAID leak-free: removed {leak['n_removed']} / {leak['n_before']} "
+              f"proteins at identity>={args.leak_identity} "
+              f"({leak['n_id_overlap']} exact id/sequence hits)")
+        if leak["n_removed"] == 0:
+            print("  WARNING: nothing removed — is the CAID3 reference resolvable?")
+    else:
+        print("CAID leak-free filter DISABLED — results are not benchmark-valid")
+
     if args.stats_only:
         return 0
 
@@ -325,10 +430,71 @@ def main(argv=None) -> int:
             "held-out set with their own composition."
         ),
     }
+    out["caid_leak_filter"] = None if args.no_caid_filter else leak
     path = os.path.join(args.workdir, "multitask_results.json")
     with open(path, "w") as fh:
         json.dump(out, fh, indent=2)
     print(f"\nWrote {path}")
+
+    if args.final_model:
+        # Benchmark scoring needs one model, not five fold models. Fit on every
+        # protein that survived the CAID filter — the targets and their
+        # homologues are already gone, so this uses no benchmark information.
+        print(f"\nfitting final head on all {len(rows)} filtered proteins…")
+        from colab.lite_head import ScalarMix
+
+        mix = ScalarMix(len(layer_ids)).to(device)
+        head = MultiTaskLiteHead(in_dim=dim, tasks=tasks,
+                                 dropout=cfg.head_dropout).to(device)
+        params = list(head.parameters()) + list(mix.parameters())
+        opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=cfg.weight_decay)
+        for epoch in range(args.epochs):
+            head.train()
+            perm = np.random.permutation(len(rows))
+            tot, nb = 0.0, 0
+            for s in range(0, len(perm), args.batch_size):
+                batch = [rows[i] for i in perm[s:s + args.batch_size]]
+                _, _, tokens = batch_converter(
+                    [(r["id"], r["sequence"]) for r in batch])
+                tokens = tokens.to(device)
+                feats = mix(embed(esm, tokens, layer_ids))
+                logits = head(feats)
+                L = feats.shape[1]
+                lab, ev = {}, {}
+                for t in tasks:
+                    lab[t] = torch.zeros(len(batch), L, device=device)
+                    ev[t] = torch.zeros(len(batch), L, dtype=torch.bool, device=device)
+                    for bi, r in enumerate(batch):
+                        n = min(r["length"], L)
+                        lab[t][bi, :n] = torch.from_numpy(
+                            r["task_labels"][t][:n].astype(np.float32)).to(device)
+                        ev[t][bi, :n] = torch.from_numpy(
+                            r["task_evidence"][t][:n]).to(device)
+                try:
+                    loss, _ = masked_multitask_loss(logits, lab, ev)
+                except ValueError:
+                    continue
+                opt.zero_grad(); loss.backward()
+                torch.nn.utils.clip_grad_norm_(params, cfg.max_grad_norm)
+                opt.step()
+                tot += float(loss.detach()); nb += 1
+            if (epoch + 1) % 5 == 0 or epoch == args.epochs - 1:
+                print(f"   epoch {epoch+1:>3}/{args.epochs}  loss={tot/max(nb,1):.4f}",
+                      flush=True)
+
+        from colab.compact_checkpoint import atomic_torch_save
+        ckpt = os.path.join(args.workdir, "multitask_head.pt")
+        atomic_torch_save({
+            "head": head.state_dict(),
+            "mix": mix.state_dict(),
+            "tasks": list(tasks),
+            "layer_ids": layer_ids,
+            "backbone": args.backbone,
+            "embed_dim": dim,
+            "n_train_proteins": len(rows),
+            "caid_leak_filter": None if args.no_caid_filter else leak,
+        }, ckpt)
+        print(f"Wrote {ckpt}")
     return 0
 
 
