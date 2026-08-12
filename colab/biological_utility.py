@@ -304,27 +304,99 @@ def align_fold_predictions(
             _, val_idx = splits[fold_idx]
             val_proteins = [proteins[i] for i in val_idx]
 
-        val_probs = fold["val_probs"]
-        val_labels = fold["val_labels"]
+        val_probs = np.asarray(fold["val_probs"], dtype=np.float32)
+        val_labels = np.asarray(fold["val_labels"], dtype=np.float32)
         offset = 0
         for p in val_proteins:
             L = p["length"]
+            # val_probs holds only residues carrying label evidence — that is
+            # what eval_epoch scores. Consuming it as one value per residue is
+            # correct for DisProt, where evidence is ~100%, and wrong for
+            # PDB-derived labels, where it is 75-82%: a 14-GPU-hour pdb_missing
+            # run died here with "aligned 1606012 residues ... vs 1319757
+            # predicted" after cross-validation had already finished.
+            #
+            # Scatter the evidenced values back to their sequence positions and
+            # return full-length arrays, because that is the contract every
+            # consumer already assumes — pLDDT fusion indexes by residue, and
+            # af_hallucination masks with ~isnan. Unevidenced positions carry
+            # NaN (probs) and -1 (labels) so they are droppable, never scored as
+            # a fabricated "ordered" call.
+            ev = p.get("label_evidence")
+            if ev is None:
+                mask = np.ones(L, dtype=bool)
+            else:
+                mask = np.zeros(L, dtype=bool)
+                ev_arr = np.asarray(ev, dtype=bool)[:L]
+                mask[: len(ev_arr)] = ev_arr
+            n_ev = int(mask.sum())
+            # Check before scattering. A genuine fold-membership mismatch runs
+            # out of predictions partway through, and NumPy would report it as
+            # "cannot assign 0 input values to the 34 output values where the
+            # mask is true" from inside the assignment — true, but useless.
+            if offset + n_ev > len(val_probs):
+                raise AssertionError(
+                    "Prediction length mismatch in fold alignment "
+                    f"(fold {fold_idx + 1}: protein {p['id']} needs residues "
+                    f"{offset}:{offset + n_ev} but only {len(val_probs)} were "
+                    "predicted). This usually means the fold membership recorded "
+                    "at training time does not match the supplied proteins."
+                )
+
+            probs_full = np.full(L, np.nan, dtype=np.float32)
+            labels_full = np.full(L, -1.0, dtype=np.float32)
+            probs_full[mask] = val_probs[offset:offset + n_ev]
+            labels_full[mask] = val_labels[offset:offset + n_ev]
+
             aligned.append({
                 "id": p["id"],
                 "fold": fold_idx + 1,
-                "labels": np.asarray(val_labels[offset:offset + L], dtype=np.float32),
-                "probs": np.asarray(val_probs[offset:offset + L], dtype=np.float32),
+                "labels": labels_full,
+                "probs": probs_full,
+                "evidence": mask,
+                "n_evidenced": n_ev,
                 "protein": p,
             })
-            offset += L
+            offset += n_ev
         assert offset == len(val_probs), (
             "Prediction length mismatch in fold alignment "
-            f"(fold {fold_idx + 1}: aligned {offset} residues across {len(val_proteins)} "
-            f"proteins vs {len(val_probs)} predicted). This usually means the fold "
-            "membership recorded at training time does not match the supplied proteins."
+            f"(fold {fold_idx + 1}: consumed {offset} evidenced residues across "
+            f"{len(val_proteins)} proteins vs {len(val_probs)} predicted). Either "
+            "the fold membership recorded at training time does not match the "
+            "supplied proteins, or label_evidence disagrees with the mask "
+            "eval_epoch scored under."
         )
 
     return aligned
+
+
+def evidenced(item: dict) -> np.ndarray:
+    """Boolean mask of positions in an aligned item that carry a real label.
+
+    ``align_fold_predictions`` returns full-length arrays so position-indexed
+    consumers (pLDDT fusion, bedgraph export) can index them directly, with NaN
+    probs and -1 labels at residues that were never labelled. Anything that
+    *pools* residues to compute a metric must drop those first — scoring a
+    fabricated "ordered" label is exactly the error the evidence mask exists to
+    prevent, and it is invisible on DisProt where evidence is ~100%.
+    """
+    labels = np.asarray(item["labels"], dtype=np.float32)
+    probs = np.asarray(item["probs"], dtype=np.float32)
+    return (labels >= 0) & ~np.isnan(probs)
+
+
+def pool_evidenced(aligned: list[dict]) -> tuple[np.ndarray, np.ndarray]:
+    """Concatenate aligned items into (labels, probs), dropping unlabelled residues."""
+    labs, prbs = [], []
+    for item in aligned:
+        m = evidenced(item)
+        if not m.any():
+            continue
+        labs.append(np.asarray(item["labels"], dtype=np.float32)[m])
+        prbs.append(np.asarray(item["probs"], dtype=np.float32)[m])
+    if not labs:
+        return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
+    return np.concatenate(labs), np.concatenate(prbs)
 
 
 # ---------------------------------------------------------------------------

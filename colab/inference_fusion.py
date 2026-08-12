@@ -172,7 +172,13 @@ def write_fused_probs_to_fold_results(
     n_folds: int = 5,
 ) -> list:
     """Write per-protein fused probs back into fold_results val_probs arrays."""
-    by_id = {item["id"]: item["probs"] for item in aligned}
+    # val_probs holds one value per *evidenced* residue — the contract
+    # eval_epoch writes and compute_pooled_metrics reads. Aligned items are
+    # full-length with sentinels, so write back only the evidenced positions or
+    # val_probs desyncs from val_labels the moment evidence is partial.
+    from colab.biological_utility import evidenced
+
+    by_id = {item["id"]: item for item in aligned}
     updated = []
 
     # Use the partition recorded at training time. Re-deriving with the default
@@ -188,7 +194,9 @@ def write_fused_probs_to_fold_results(
         chunks = []
         for p in val_proteins:
             if p["id"] in by_id:
-                chunks.append(np.asarray(by_id[p["id"]], dtype=np.float32))
+                item = by_id[p["id"]]
+                probs = np.asarray(item["probs"], dtype=np.float32)
+                chunks.append(probs[evidenced(item)])
             else:
                 # fallback: slice original val_probs
                 raise KeyError(f"Missing aligned predictions for {p['id']}")

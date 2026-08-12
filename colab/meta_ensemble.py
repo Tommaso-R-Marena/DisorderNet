@@ -76,9 +76,16 @@ def _build_stacker_matrix(
             cols.append(arr)
         if not ok:
             continue
-        mat = np.stack(cols, axis=1)
+        # Train the stacker only on residues that carry a real label; the
+        # aligned arrays are full-length with sentinels elsewhere.
+        from colab.biological_utility import evidenced
+
+        m = evidenced(item)
+        if not m.any():
+            continue
+        mat = np.stack(cols, axis=1)[m]
         chunks_x.append(mat)
-        chunks_y.append(np.asarray(item["labels"], dtype=np.float32))
+        chunks_y.append(np.asarray(item["labels"], dtype=np.float32)[m])
         row_protein.append(np.full(mat.shape[0], len(used_ids), dtype=np.int64))
         used_ids.append(pid)
 
@@ -177,19 +184,33 @@ def apply_meta_stacker(
         "stacking": "out_of_fold" if n_meta_folds else "in_sample_fallback",
     }
 
+    # stacked_probs has one row per *evidenced* residue, in the same order the
+    # training matrix was built. Scatter it back to sequence positions so the
+    # item keeps its full-length contract, leaving unlabelled positions at their
+    # original sentinel rather than shifting every downstream residue.
+    from colab.biological_utility import evidenced
+
     offset = 0
     aligned_stacked = []
     for item in aligned:
         pid = item["id"]
-        n = len(item["probs"])
-        if all(pid in streams[k] for k in stream_names):
+        m = evidenced(item)
+        n = int(m.sum())
+        if n and all(pid in streams[k] for k in stream_names):
             new_item = dict(item)
-            new_item["probs"] = stacked_probs[offset:offset + n].copy()
+            probs_full = np.asarray(item["probs"], dtype=np.float32).copy()
+            probs_full[m] = stacked_probs[offset:offset + n]
+            new_item["probs"] = probs_full
             new_item["meta_ensemble"] = True
             aligned_stacked.append(new_item)
             offset += n
         else:
             aligned_stacked.append(item)
+    if offset != len(stacked_probs):
+        raise RuntimeError(
+            f"meta-ensemble scatter consumed {offset} of {len(stacked_probs)} "
+            "stacked rows — the write-back order does not match the fit order."
+        )
 
     fold_results_stacked = write_fused_probs_to_fold_results(
         proteins, fold_results, aligned_stacked, n_folds=n_folds,

@@ -381,9 +381,16 @@ def apply_gpu_v6_ensemble(
         v6p = np.asarray(v6_probs_by_id[pid], dtype=np.float32)
         if len(v6p) != len(item["probs"]):
             continue
-        gpu_concat.append(item["probs"])
-        v6_concat.append(v6p)
-        labels_concat.append(item["labels"])
+        # Keep only residues carrying label evidence — the arrays are
+        # full-length with sentinels at unlabelled positions.
+        from colab.biological_utility import evidenced
+
+        m = evidenced(item)
+        if not m.any():
+            continue
+        gpu_concat.append(np.asarray(item["probs"], dtype=np.float32)[m])
+        v6_concat.append(v6p[m])
+        labels_concat.append(np.asarray(item["labels"], dtype=np.float32)[m])
 
     if gpu_concat:
         gpu_all = np.concatenate(gpu_concat)

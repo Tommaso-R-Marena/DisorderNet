@@ -163,8 +163,12 @@ def run_stratified_caid_report(
     if other_labels:
         organism_strata["other"] = _aggregate_stratum(other_labels, other_probs, threshold)
 
-    pooled_labels = np.concatenate([item["labels"] for item in aligned])
-    pooled_probs = np.concatenate([item["probs"] for item in aligned])
+    # Drop residues with no label evidence. Under PDB-derived labels ~20% of
+    # residues are unlabelled and carry sentinels, and pooling them would score
+    # fabricated calls.
+    from colab.biological_utility import pool_evidenced
+
+    pooled_labels, pooled_probs = pool_evidenced(aligned)
     pooled = compute_caid_metrics(pooled_labels, pooled_probs, threshold=threshold)
 
     return {
