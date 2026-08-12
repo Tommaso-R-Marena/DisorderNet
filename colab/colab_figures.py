@@ -111,7 +111,12 @@ def generate_all_figures(
         ("flDPnn3a", 0.871, C_OTHERS),
         ("ESM2_650M-LoRA", 0.880, C_OTHERS),
         ("DisorderUnetLM", 0.881, C_OTHERS),
-        ("ESMDisPred", 0.895, C_SOTA),
+        # CAID3 Disorder-PDB official table. The chart previously topped out at
+        # ESMDisPred 0.895, which made any result near 0.90 look like a win;
+        # the actual leader is PUNCH2 at 0.955.
+        ("ESMDisPred-2PDB", 0.937, C_OTHERS),
+        ("AlphaFold-rsa", 0.950, C_OTHERS),
+        ("PUNCH2 (CAID3 #1)", 0.955, C_SOTA),
         ("DisorderNet GPU", our_auc, C_OURS),
     ]
     methods.sort(key=lambda x: x[1])
@@ -436,11 +441,13 @@ def generate_phase3_figure(phase3_report: dict, prefix: str = "") -> None:
     ax1.barh(y_pos, aucs, color=colors, edgecolor="white", alpha=0.9)
     ax1.set_yticks(y_pos)
     ax1.set_yticklabels(names, fontsize=9)
-    ax1.set_xlim(0.72, 0.92)
+    # The axis used to stop at 0.92, below the CAID3 leader, so a result near
+    # 0.90 ran off the right edge and read as topping the chart.
+    ax1.set_xlim(0.72, 0.97)
     ax1.set_xlabel("AUC-ROC")
     ax1.set_title("Benchmark Ranking")
     ax1.axvline(0.747, ls=":", color=C_AF3, lw=1, alpha=0.7)
-    ax1.axvline(0.895, ls=":", color=C_SOTA, lw=1, alpha=0.7)
+    ax1.axvline(0.955, ls=":", color=C_SOTA, lw=1, alpha=0.7)
 
     # Panel B: calibration AUC comparison
     ax2 = fig.add_subplot(gs[0, 1])

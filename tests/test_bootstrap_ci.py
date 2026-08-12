@@ -177,7 +177,11 @@ class TestCaid3ReportsAnInterval:
         assert ci["resampling_unit"] == "protein"
         assert ci["n_proteins"] == 40
         assert ci["ci_low"] <= rep["pooled"]["auc"] <= ci["ci_high"]
-        assert isinstance(rep["ci_reaches_esmdispred"], bool)
+        # Anchored on the real CAID3 leader (PUNCH2 0.955), not on the
+        # ESMDisPred abstract figure this repo used to treat as SOTA.
+        assert isinstance(rep["ci_reaches_sota"], bool)
+        assert isinstance(rep["ci_exceeds_sota"], bool)
+        assert rep["sota_reference_auc"] == 0.955
 
 
 class TestRescueNeedsControls:

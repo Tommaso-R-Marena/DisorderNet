@@ -137,30 +137,62 @@ learns a softmax mixture over its layers, and trains a ~1.96M-parameter dilated
 residual CNN head under plain weighted BCE. Three seeds, same homology splits,
 same evaluation:
 
-| | trainable | DisProt mean-of-folds | CAID3 (two-class) | 95% CI | GPU·h |
-|---|---:|---:|---:|---|---:|
-| `ultra` | 69.9M | 0.7514 | *re-measuring* | — | ~12 |
-| `lite` s42 | 1.96M | 0.8247 | 0.9042 | [0.8797, 0.9226] | ~0.9 |
-| `lite` s43 | 1.96M | 0.8266 | 0.9076 | [0.8803, 0.9277] | ~0.9 |
-| `lite` s44 | 1.96M | 0.8248 | 0.9089 | [0.8835, 0.9270] | ~0.9 |
-| **`lite` mean** | **1.96M** | **0.8254** ± 0.0011 | **0.9069** | — | **~0.9** |
+| | trainable | DisProt mean-of-folds | CAID3 Disorder-PDB | GPU·h |
+|---|---:|---:|---:|---:|
+| `ultra` | 69.9M | 0.7514 | *re-measuring* | ~12 |
+| `lite` s42 | 1.96M | 0.8247 | 0.9218 | ~0.9 |
+| `lite` s43 | 1.96M | 0.8266 | 0.9230 | ~0.9 |
+| `lite` s44 | 1.96M | 0.8248 | 0.9236 | ~0.9 |
+| **`lite` mean** | **1.96M** | **0.8254** ± 0.0011 | **0.9228** | **~0.9** |
+
+CAID3 figures use the official protocol: all 319 Disorder-PDB targets pooled,
+unannotated residues ignored. Our evaluation reproduces the benchmark's
+composition — 319 targets, 99,239 residues, 31.6% disordered (31,359 positives
+against the official 31,401) — which is the available evidence that we scored
+what CAID3 scored.
 
 **+0.074 DisProt mean-of-folds over `ultra` with 36× fewer trainable parameters
 and roughly a tenth of the GPU time.** The three seeds agree to sd 0.0011, far
 inside the 0.023 rerun noise floor. `lite` also beats the physics GBDT measured
 on its own folds (0.7774–0.7790), reversing the observation that motivated it.
 
-Two things this does **not** establish:
+### This is not state of the art, and the bar was wrong
 
-- **It is not a demonstrated win over ESMDisPred.** Every CI reaches 0.895 and
-  none exceeds it (`ci_reaches_esmdispred=True`, `ci_exceeds_esmdispred=False`).
-  ESMDisPred's 0.895 is a point estimate with no published interval, and its
-  protocol is not known to match this one.
-- **The CAID3 protocol matters.** Pooling the single-class targets as well
-  (`pooled`, n=319) gives 0.9218–0.9236, but those targets are predominantly
-  fully-disordered, so pooling them raises the disorder fraction from 20.9% to
-  31.6%. That is the metric getting easier, not the model getting better. The
-  table above uses the stricter two-class protocol throughout.
+This repo used `ESMDisPred = 0.895` as "CAID3 SOTA" in a dozen places. Both
+halves were wrong. On the official CAID3 Disorder-PDB table ESMDisPred scores
+**0.937** (0.895 is from its abstract, a different evaluation), and it is not
+the leader — **PUNCH2 at 0.955** is, with three other methods above ESMDisPred.
+Aiming at 0.895 set the bar ~0.06 AUC too low, so a run could "reach SOTA"
+while sitting outside the top ten.
+
+| rank | method | AUC | APS |
+|---:|---|---:|---:|
+| 1 | PUNCH2 | 0.955 | 0.928 |
+| 2 | PUNCH2-Light | 0.953 | 0.925 |
+| 3 | AlphaFold-rsa | 0.950 | 0.921 |
+| 4 | SPOT-Disorder2 | 0.949 | 0.920 |
+| 5 | AlphaFold3-rsa | 0.947 | 0.912 |
+| 7 | ESMDisPred-2PDB | 0.937 | 0.893 |
+| ≥11 | **DisorderNet-Lite** | **0.9228** | **0.8547** |
+| 11 | AlphaFold-pLDDT | — | — |
+
+Where that leaves us, plainly: **−0.032 AUC and −0.073 APS behind the leader**,
+and behind ESMDisPred too. The APS gap is more than double the AUC gap, and APS
+is the harder metric on a benchmark that is ~32% positive — so a claim resting
+on AUC alone would be the flattering half of a split result. Ranks are a lower
+bound; only the published top ten are transcribed in
+`colab/caid3_leaderboard.py`.
+
+Two further caveats that survive the correction:
+
+- **Nothing here is head-to-head.** Published figures carry no confidence
+  intervals and we did not run their code. Matching the benchmark's composition
+  is evidence of scoring the same targets, not of matching their implementation.
+- **AlphaFold-rsa ranks 3rd at 0.950.** Relative solvent accessibility from
+  AlphaFold beats nearly every dedicated predictor, which complicates this
+  project's framing of AlphaFold as something to distrust in disordered
+  regions. pLDDT ranks 11th; rsa is a different and far stronger signal, and
+  this pipeline does not use it.
 
 A side effect worth noting: the frozen backbone largely removes the cross-fold
 calibration drift. Per-fold median predicted probability spans ~3× under `lite`

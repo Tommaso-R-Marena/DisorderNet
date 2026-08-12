@@ -86,13 +86,35 @@ LITERATURE_REFERENCE_BENCHMARKS: list[dict] = [
         "protocol": "CAID1",
         "comparable_to_ours": False,
     },
+    # CAID3 Disorder-PDB, official assessment table. These replace a single
+    # "ESMDisPred 0.895, rank 1, CAID3 SOTA" row that was wrong twice over:
+    # ESMDisPred scores 0.937 on this benchmark (0.895 is from its abstract),
+    # and it is not the leader — PUNCH2 is, at 0.955.
     {
-        "method": "ESMDisPred",
-        "auc": 0.895,
-        "ap": 0.778,
+        "method": "PUNCH2",
+        "auc": 0.955,
+        "ap": 0.928,
         "rank": 1,
-        "source": "CAID3 SOTA",
-        "protocol": "CAID3 evaluation set",
+        "source": "CAID3 Disorder-PDB (official)",
+        "protocol": "CAID3 Disorder-PDB",
+        "comparable_to_ours": False,
+    },
+    {
+        "method": "AlphaFold-rsa",
+        "auc": 0.950,
+        "ap": 0.921,
+        "rank": 3,
+        "source": "CAID3 Disorder-PDB (official)",
+        "protocol": "CAID3 Disorder-PDB",
+        "comparable_to_ours": False,
+    },
+    {
+        "method": "ESMDisPred-2PDB",
+        "auc": 0.937,
+        "ap": 0.893,
+        "rank": 7,
+        "source": "CAID3 Disorder-PDB (official)",
+        "protocol": "CAID3 Disorder-PDB",
         "comparable_to_ours": False,
     },
 ]
@@ -276,8 +298,14 @@ def print_matched_benchmark_report(
 
     if gpu_auc is not None:
         print(f"\n── Context (not head-to-head) ──")
+        # A DisProt CV AUC is not a CAID3 AUC — different labels, proteins and
+        # protocol — so these are orientation only. The CAID3 comparison lives
+        # in caid3_eval_report.json, against the real leaderboard.
+        from colab.caid3_leaderboard import SOTA_AUC, SOTA_METHOD
+
         print(f"  GPU AUC {gpu_auc:.4f} vs literature AF3-pLDDT 0.747 (CAID3, different protocol)")
-        print(f"  GPU AUC {gpu_auc:.4f} vs literature ESMDisPred 0.895 (CAID3 SOTA, different protocol)")
+        print(f"  GPU AUC {gpu_auc:.4f} vs CAID3 leader {SOTA_METHOD} {SOTA_AUC} "
+              "(different protocol; NOT a claim)")
         if split_method == LEGACY_SPLIT_METHOD:
             print(
                 f"  GPU vs our v6 CPU: {gpu_auc - OUR_DISPROT_CPU_V6['auc']:+.4f} "

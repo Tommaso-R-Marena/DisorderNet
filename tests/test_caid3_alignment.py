@@ -128,18 +128,30 @@ class TestProtocolIsRecorded:
         assert rep["pooled"]["auc"] is not None
         assert rep["pooled_two_class_only"]["auc"] is not None
 
-    def test_sota_comparison_uses_the_stricter_protocol(self, tmp_path):
-        """Pooling single-class targets adds mostly fully-disordered ones, which
-        makes the metric easier rather than the model better."""
+    def test_sota_comparison_uses_the_official_protocol(self, tmp_path):
+        """CAID3 Disorder-PDB pools all 319 targets with unannotated residues
+        ignored, and our full pool reproduces its composition (31.6% disorder).
+        Anchoring on the two-class subset instead understated us against a
+        benchmark that includes every target."""
         rep = self._mixed(tmp_path)
-        assert rep["sota_comparison_protocol"] == "two_class_targets_only"
+        assert rep["sota_comparison_protocol"] == "all_evaluated_residues"
 
     def test_reaches_and_exceeds_are_distinct_claims(self, tmp_path):
         rep = self._mixed(tmp_path)
-        assert "ci_reaches_esmdispred" in rep
-        assert "ci_exceeds_esmdispred" in rep
+        assert "ci_reaches_sota" in rep
+        assert "ci_exceeds_sota" in rep
 
-    def test_comparison_note_flags_the_unknown_protocol(self, tmp_path):
-        """The error this project already had to correct once."""
+    def test_comparison_note_names_the_real_leader(self, tmp_path):
+        """The bar is PUNCH2 at 0.955, not ESMDisPred's abstract figure."""
         note = self._mixed(tmp_path)["comparison_note"]
-        assert "protocol is not known" in note
+        assert "PUNCH2" in note and "0.955" in note
+        assert "head-to-head" in note
+
+    def test_protocol_composition_is_checked_against_the_official_benchmark(
+        self, tmp_path
+    ):
+        """Matching target count and disorder fraction is the only available
+        evidence that we scored the benchmark they scored."""
+        pm = self._mixed(tmp_path)["protocol_match"]
+        assert pm["official_n_targets"] == 319
+        assert pm["official_disorder_fraction"] == pytest.approx(0.316, abs=1e-3)

@@ -250,14 +250,47 @@ def evaluate_caid_predictions(
                 two_class_labels, two_class_probs, metric="auc", n_boot=n_boot,
             )
 
-    ref_auc = 0.895
-    anchor = strict if strict else pooled
-    anchor_ci = strict_ci if strict_ci else auc_ci
+    from colab.caid3_leaderboard import (
+        DISORDER_FRACTION,
+        ESMDISPRED_ABSTRACT_AUC,
+        N_TARGETS,
+        SOTA_AUC,
+        SOTA_METHOD,
+        summarize,
+    )
+
+    # The SOTA anchor is the FULL pool, because that is CAID3's own protocol:
+    # 319 targets, 31.6% disordered, unannotated residues ignored. Anchoring on
+    # the two-class subset understates us against a benchmark that includes
+    # every target.
+    ref_auc = SOTA_AUC
+    anchor = pooled
+    anchor_ci = auc_ci
     reaches_sota = exceeds_sota = None
     if anchor_ci.get("ci_high") is not None:
         reaches_sota = bool(anchor_ci["ci_high"] >= ref_auc)
     if anchor_ci.get("ci_low") is not None:
         exceeds_sota = bool(anchor_ci["ci_low"] > ref_auc)
+
+    # Did we score the same benchmark they scored? Composition is checkable even
+    # though their per-residue predictions are not.
+    n_pooled = len(labels_by_protein)
+    frac = float(np.mean(labels_arr))
+    protocol_match = {
+        "official_n_targets": N_TARGETS,
+        "our_n_targets": n_pooled,
+        "official_disorder_fraction": DISORDER_FRACTION,
+        "our_disorder_fraction": round(frac, 4),
+        "composition_matches": (
+            abs(n_pooled - N_TARGETS) <= 2 and abs(frac - DISORDER_FRACTION) < 0.02
+        ),
+        "note": (
+            "CAID3 Disorder-PDB is 319 targets at 31.6% disorder with "
+            "unannotated residues ignored. Matching composition is evidence we "
+            "scored the same benchmark; it is not evidence of matching their "
+            "implementation."
+        ),
+    }
 
     return {
         "insufficient_data": False,
@@ -278,23 +311,37 @@ def evaluate_caid_predictions(
         "per_protein": per_protein[:20],
         "auc_ci": auc_ci,
         "auc_ci_two_class_only": strict_ci or None,
-        "esmdispred_reference_auc": ref_auc,
-        "sota_comparison_protocol": (
-            "two_class_targets_only" if strict else "all_evaluated_residues"
-        ),
-        "delta_vs_esmdispred": (
+        # The real bar. Anchored on the full pool, i.e. CAID3's own protocol.
+        "sota_reference_auc": ref_auc,
+        "sota_reference_method": SOTA_METHOD,
+        "sota_comparison_protocol": "all_evaluated_residues",
+        "delta_vs_sota": (
             float(anchor["auc"]) - ref_auc if anchor.get("auc") is not None else None
         ),
-        "ci_reaches_esmdispred": reaches_sota,
-        "ci_exceeds_esmdispred": exceeds_sota,
+        "ci_reaches_sota": reaches_sota,
+        "ci_exceeds_sota": exceeds_sota,
+        "leaderboard": summarize(
+            float(pooled["auc"]) if pooled.get("auc") is not None else 0.0,
+            float(pooled.get("ap")) if pooled.get("ap") is not None else None,
+        ),
+        "protocol_match": protocol_match,
+        # Deprecated. This repo cited ESMDisPred's abstract figure as "CAID3
+        # SOTA"; on Disorder-PDB it scores 0.937, and the leader is PUNCH2 at
+        # 0.955, so the old bar was ~0.06 AUC too low. Retained only so stored
+        # reports and older readers do not KeyError.
+        "esmdispred_reference_auc": ESMDISPRED_ABSTRACT_AUC,
+        "delta_vs_esmdispred": (
+            float(anchor["auc"]) - ESMDISPRED_ABSTRACT_AUC
+            if anchor.get("auc") is not None else None
+        ),
         "comparison_note": (
-            "ESMDisPred's 0.895 is a published point estimate on this benchmark "
-            "with no published interval, and its evaluation protocol is not known "
-            "to match this one. ci_reaches_esmdispred asks only whether our "
-            "sampling uncertainty is consistent with that value; "
-            "ci_exceeds_esmdispred asks whether our whole interval sits above it. "
-            "Both are anchored on the two-class protocol, which is the stricter "
-            "of the two reported here."
+            f"SOTA on CAID3 Disorder-PDB is {SOTA_METHOD} at {ref_auc}; "
+            "ESMDisPred scores 0.937 there, not the 0.895 from its abstract that "
+            "this repo previously used as the bar. ci_reaches_sota asks whether "
+            "our sampling uncertainty is consistent with the leader; "
+            "ci_exceeds_sota asks whether our whole interval sits above it. "
+            "Neither is a head-to-head test: published figures carry no "
+            "intervals and we did not run their code."
         ),
     }
 
@@ -319,17 +366,34 @@ def print_caid3_eval_report(report: dict) -> None:
     print(f"  Pooled AP       : {p.get('ap', 0):.4f}")
     print(f"  F1_max          : {p.get('f1_max', 0):.4f}")
     print(f"  MCC @ F1_max    : {p.get('mcc_at_f1_max', 0):.4f}")
-    delta = report.get("delta_vs_esmdispred")
-    if delta is not None:
-        print(f"  vs ESMDisPred   : {delta:+.4f}  (ref 0.895, CAID3 protocol)")
+    lb = report.get("leaderboard") or {}
+    if lb:
+        print(f"  vs CAID3 SOTA   : {lb['gap_to_sota_auc']:+.4f} "
+              f"({lb['sota_method']} {lb['sota_auc']})")
+        if lb.get("gap_to_sota_aps") is not None:
+            print(f"  APS gap         : {lb['gap_to_sota_aps']:+.4f}"
+                  + ("   ← larger than the AUC gap"
+                     if lb.get("aps_gap_larger_than_auc_gap") else ""))
+        print(f"  approx rank     : >= {lb['approx_rank_lower_bound']} "
+              "(lower bound; only the top ten are transcribed)")
     ci = report.get("auc_ci") or {}
     if ci.get("ci_low") is not None:
+        ref = report.get("sota_reference_auc", 0.955)
         print(
             f"  95% CI          : [{ci['ci_low']:.4f}, {ci['ci_high']:.4f}] "
             f"over {ci.get('n_proteins')} proteins (protein-clustered bootstrap)"
         )
-        if report.get("ci_reaches_esmdispred"):
-            print("                    CI reaches 0.895 — consistent with SOTA")
+        if report.get("ci_exceeds_sota"):
+            print(f"                    entire CI above {ref} — beats the leader")
+        elif report.get("ci_reaches_sota"):
+            print(f"                    CI reaches {ref} — consistent with the leader")
         else:
-            print("                    CI does not reach 0.895 — below SOTA")
+            print(f"                    CI below {ref} — NOT state of the art")
+    pm = report.get("protocol_match") or {}
+    if pm:
+        ok = "matches" if pm.get("composition_matches") else "DIFFERS FROM"
+        print(f"  benchmark comp. : {ok} official "
+              f"({pm['our_n_targets']}/{pm['official_n_targets']} targets, "
+              f"{pm['our_disorder_fraction']:.3f} vs "
+              f"{pm['official_disorder_fraction']:.3f} disordered)")
     print(f"{'═' * 64}")
