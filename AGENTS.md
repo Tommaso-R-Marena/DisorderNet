@@ -148,6 +148,15 @@ Related invariants, all regression-tested:
   from shadowing the real one. Write the destination explicitly, one source at a
   time: `rsync -az colab/ host:dn_rigor/colab/`. Check for the damage with
   `ls *.py | wc -l` (should be 21 in `~/dn_rigor`).
+- **Do not set `DISORDERNET_VENV=~/venvs/disordernet_rigor` for GPU jobs.** That
+  venv's PyTorch (2.5.1+cu121) cannot see the GPU on the ica100 nodes, and the
+  job dies in `setup_environment` with "No GPU detected" about seven seconds in
+  — while `sacct` cheerfully reports `gres/gpu:a100=1` allocated, which makes it
+  look like node flakiness. It is not: `~/venvs/disordernet` (2.7.1+cu118)
+  works on the same nodes, and the ablation submitter succeeds precisely because
+  it never sets the variable. Six jobs were lost to this before the `ENV_DIR=`
+  line in the two banners was compared side by side. `disordernet_rigor` is fine
+  for pytest and CPU analysis.
 - **GPU jobs submitted with `--wrap` need `--gres=gpu:1` spelled out.** The
   `#SBATCH` lines in `rockfish/slurm/*.sbatch` do not apply to a wrapped command,
   and `--partition=ica100 --qos=qos_gpu` alone allocates no GPU: the job starts,
