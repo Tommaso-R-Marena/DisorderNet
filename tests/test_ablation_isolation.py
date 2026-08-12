@@ -288,3 +288,57 @@ class TestNoiseFloorNeverShrinksBelowMeasurement:
         from rockfish.ablation import MEASURED_RERUN_SD
 
         assert MEASURED_RERUN_SD >= 0.02
+
+
+class TestBaselineWorkdirIsReadOrRefused:
+    """A borrowed baseline that cannot be read must not become an empty row.
+
+    Ablation arms write reports to <workdir>/checkpoints; publish and pipeline
+    runs write to <workdir> directly. _arm_accuracy assumed the former, so
+    pointing --baseline-workdir at a pipeline run produced a baseline row with
+    every field blank — and every delta column in the table silently blank with
+    it, which reads as "no difference" rather than "not measured".
+    """
+
+    def _write_reports(self, d, auc, caid):
+        import json as _json
+
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "cv_summary.json").write_text(_json.dumps({"fold_aucs": [auc]}))
+        (d / "sota_postprocess_report.json").write_text(
+            _json.dumps({"final_pooled": {"auc": auc, "ap": 0.5, "n_residues": 10}})
+        )
+        (d / "caid3_eval_report.json").write_text(
+            _json.dumps({"pooled": {"auc": caid, "ap": 0.6}})
+        )
+
+    def test_reads_the_ablation_arm_layout(self, tmp_path):
+        from rockfish.ablation import _arm_accuracy
+
+        self._write_reports(tmp_path / "checkpoints", 0.75, 0.81)
+        acc = _arm_accuracy(tmp_path)
+        assert acc["cv_auc"] == 0.75 and acc["caid3_auc"] == 0.81
+
+    def test_reads_the_pipeline_run_layout(self, tmp_path):
+        """The layout that silently produced an empty row."""
+        from rockfish.ablation import _arm_accuracy
+
+        self._write_reports(tmp_path, 0.72, 0.80)
+        acc = _arm_accuracy(tmp_path)
+        assert acc["cv_auc"] == 0.72 and acc["caid3_auc"] == 0.80
+
+    def test_prefers_the_checkpoints_layout_when_both_exist(self, tmp_path):
+        from rockfish.ablation import _arm_accuracy
+
+        self._write_reports(tmp_path, 0.10, 0.10)
+        self._write_reports(tmp_path / "checkpoints", 0.75, 0.81)
+        assert _arm_accuracy(tmp_path)["cv_auc"] == 0.75
+
+    def test_an_unreadable_baseline_raises_instead_of_blanking(self, tmp_path):
+        from rockfish.ablation import _require_reports
+
+        with pytest.raises(SystemExit) as exc:
+            _require_reports(tmp_path / "nothing_here", "baseline (external)")
+        msg = str(exc.value)
+        assert "no cv_summary.json" in msg
+        assert "empty row" in msg

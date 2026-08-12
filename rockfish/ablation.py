@@ -478,6 +478,37 @@ def _read_json(path: Path) -> Optional[dict]:
         return None
 
 
+REPORT_MARKER = "cv_summary.json"
+
+
+def _resolve_report_dir(workdir: Path) -> Path:
+    """Find where a run actually put its reports.
+
+    Ablation arms write to ``<workdir>/checkpoints``; the publish and pipeline
+    runs write to ``<workdir>`` directly. Assuming the former meant that
+    ``--baseline-workdir`` pointed at a pipeline run silently produced an empty
+    baseline row — every delta column blank, nothing said — instead of either
+    working or failing.
+    """
+    for candidate in (workdir / "checkpoints", workdir):
+        if (candidate / REPORT_MARKER).is_file():
+            return candidate
+    # Neither layout matched. Return the conventional one so callers still get a
+    # dict; _require_reports below is what turns this into a visible error.
+    return workdir / "checkpoints"
+
+
+def _require_reports(workdir: Path, label: str) -> None:
+    """Fail loudly when a workdir holds no reports to collect."""
+    if not (_resolve_report_dir(workdir) / REPORT_MARKER).is_file():
+        raise SystemExit(
+            f"\nERROR: no {REPORT_MARKER} under {workdir} for '{label}'.\n"
+            f"  Looked in {workdir / 'checkpoints'} and {workdir}.\n"
+            "  A baseline that cannot be read must not become an empty row: every\n"
+            "  delta in the table would silently read as blank."
+        )
+
+
 def _arm_accuracy(workdir: Path) -> dict:
     """Pull accuracy from the run's own reports.
 
@@ -485,7 +516,7 @@ def _arm_accuracy(workdir: Path) -> dict:
     internal comparison, CAID3 is the only figure comparable across label
     sources and to published methods.
     """
-    ckpt = workdir / "checkpoints"
+    ckpt = _resolve_report_dir(workdir)
     acc: dict = {}
 
     post = _read_json(ckpt / "sota_postprocess_report.json")
@@ -585,6 +616,7 @@ def cmd_collect(args: argparse.Namespace) -> int:
     # git_revision for exactly this check.
     base = next((r for r in rows if r["arm"] == "baseline"), None)
     if base is None and args.baseline_workdir:
+        _require_reports(Path(args.baseline_workdir), "baseline (external)")
         base = {
             "arm": "baseline (external)",
             "description": f"borrowed from {args.baseline_workdir}",
