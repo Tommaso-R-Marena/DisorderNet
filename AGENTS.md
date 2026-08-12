@@ -148,6 +148,15 @@ Related invariants, all regression-tested:
   from shadowing the real one. Write the destination explicitly, one source at a
   time: `rsync -az colab/ host:dn_rigor/colab/`. Check for the damage with
   `ls *.py | wc -l` (should be 21 in `~/dn_rigor`).
+- **Always export `TORCH_HOME` to scratch. One omission killed four jobs.**
+  `fair-esm` downloads into `$TORCH_HOME` (default `~/.cache/torch`), and
+  ESM-2 3B is **5.7 GB**. A `lite_3b` submission that forgot the variable took
+  home from 45 GB to 51 GB, past the 50 GB quota, and killed every other job
+  running at the time — `lite_pdb_missing` at fold 5, `lite_pdb_long` at fold 2,
+  and an `ultra` recovery at 1h16 — with empty `.err` files, because the quota
+  also blocks writing the traceback. The 650M model is 2.6 GB and 3B is 5.7 GB,
+  so two backbones alone exceed a fifth of the quota:
+  `export TORCH_HOME=/scratch4/<PI>/<user>_disordernet/torch_home`.
 - **"No GPU detected" has two distinct causes here; check the banner.** Both
   present identically — the job dies in `setup_environment` about seven seconds
   in while `sacct` reports `gres/gpu:a100=1` allocated. Compare the `ENV_DIR=`
