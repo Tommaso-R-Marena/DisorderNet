@@ -209,3 +209,85 @@ class TestMaskedLoss:
         for t in ("disorder", "linker"):
             g = head.out[t].weight.grad
             assert g is not None and g.abs().sum() > 0
+
+
+class TestStructureAwareness:
+    """Structure as an INPUT, not as something to average with afterwards.
+
+    Post-hoc fusion failed: weights fit on training data made rsa+pLDDT worse,
+    0.9581 -> 0.9554, because averaging lets a task-agnostic signal override the
+    model wherever they disagree, including where the model is right. The top
+    CAID3 methods are structure-aware rather than structure-ensembled, and the
+    difference is that a learned gate can decide *when* to trust structure.
+
+    This matters most on Disorder-NOX, where no AlphaFold baseline reaches the
+    top ten: NOX counts unannotated residues as ordered, so the structural
+    shortcut inverts and a model must learn to discount it.
+    """
+
+    def _head(self, **kw):
+        from colab.lite_head import MultiTaskLiteHead
+        return MultiTaskLiteHead(in_dim=64, tasks=("disorder_nox", "linker"), **kw)
+
+    def test_structure_channels_are_cheap(self):
+        plain = self._head()
+        aware = self._head(structure_dim=16)
+        assert aware.n_trainable() - plain.n_trainable() < 10_000
+
+    def test_absent_structure_is_representable_not_imputed(self):
+        """An absent AlphaFold entry is not 'buried and confident'. A model that
+        cannot tell absence from low accessibility will read absence as order,
+        and 109 of 2,340 training proteins have no AlphaFold entry."""
+        head = self._head(structure_dim=16)
+        x = torch.randn(2, 30, 64)
+        zeros = torch.zeros(2, 30)
+        present = head(x, rsa=zeros, plddt=zeros, structure_available=torch.ones(2, 30))
+        absent = head(x, rsa=zeros, plddt=zeros, structure_available=zeros)
+        assert not torch.allclose(present["disorder_nox"], absent["disorder_nox"])
+
+    def test_structure_changes_the_prediction(self):
+        head = self._head(structure_dim=16)
+        x = torch.randn(2, 30, 64)
+        ones = torch.ones(2, 30)
+        buried = head(x, rsa=torch.zeros(2, 30), plddt=ones * 95,
+                      structure_available=ones)
+        exposed = head(x, rsa=ones, plddt=ones * 30, structure_available=ones)
+        assert not torch.allclose(buried["disorder_nox"], exposed["disorder_nox"])
+
+    def test_missing_channels_raise_rather_than_pass_a_constant(self):
+        """Silently feeding zeros would make the learned gate meaningless while
+        still producing plausible output."""
+        head = self._head(structure_dim=16)
+        with pytest.raises(ValueError, match="structural channels"):
+            head(torch.randn(1, 20, 64))
+
+    def test_sequence_only_head_ignores_structure_arguments(self):
+        head = self._head()
+        out = head(torch.randn(1, 20, 64))
+        assert set(out) == {"disorder_nox", "linker"}
+
+    def test_skip_path_spans_the_structural_channels(self):
+        """rsa alone scores 0.9459 on Disorder-PDB, so the linear fallback each
+        task degrades to should include structure, not sequence alone."""
+        head = self._head(structure_dim=16)
+        assert head.skip["linker"].in_channels == 64 + 16
+
+    def test_gradients_reach_the_structure_encoder(self):
+        head = self._head(structure_dim=16)
+        ones = torch.ones(2, 30)
+        out = head(torch.randn(2, 30, 64), rsa=ones * 0.5, plddt=ones * 70,
+                   structure_available=ones)
+        out["linker"].sum().backward()
+        g = head.structure.encode[0].weight.grad
+        assert g is not None and g.abs().sum() > 0
+
+    def test_rsa_gradient_channel_is_length_preserving(self):
+        """Disorder boundaries appear as accessibility transitions, so the
+        local rsa gradient is supplied — and must not shift the sequence."""
+        from colab.lite_head import StructureChannels
+
+        block = StructureChannels.assemble(
+            torch.rand(2, 37), torch.rand(2, 37) * 100, torch.ones(2, 37),
+            length=37, batch=2, device=torch.device("cpu"),
+        )
+        assert block.shape == (2, 4, 37)

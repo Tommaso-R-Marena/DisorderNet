@@ -97,6 +97,7 @@ def build_union(entries: list[dict], tasks: tuple[str, ...]) -> tuple[list[dict]
             "id": pid,
             "sequence": base["sequence"],
             "length": n,
+            "uniprot_acc": base.get("uniprot_acc"),
             "task_labels": labels,
             "task_evidence": evidence,
         })
@@ -104,6 +105,56 @@ def build_union(entries: list[dict], tasks: tuple[str, ...]) -> tuple[list[dict]
         t: sum(1 for r in rows if r["task_evidence"][t].any()) for t in tasks
     }
     return rows, coverage
+
+
+def attach_structure(rows: list[dict], cache_dir: str) -> None:
+    """Attach cached AlphaFold rsa/pLDDT to each row, in place.
+
+    Absence is recorded, not imputed. 109 of 2,340 training proteins have no
+    AlphaFold entry, and filling those with zeros would tell the model they are
+    fully buried — which reads as ordered, exactly backwards for a protein we
+    know nothing about.
+    """
+    from colab.structure_rsa import structure_features
+
+    for r in rows:
+        n = r["length"]
+        feats = None
+        acc = r.get("uniprot_acc")
+        if acc:
+            feats = structure_features(acc, r["sequence"], cache_dir,
+                                       allow_fetch=False)
+        if feats is None:
+            r["rsa"] = np.zeros(n, dtype=np.float32)
+            r["plddt"] = np.zeros(n, dtype=np.float32)
+            r["structure_available"] = np.zeros(n, dtype=np.float32)
+        else:
+            r["rsa"] = np.asarray(feats["rsa"], dtype=np.float32)[:n]
+            r["plddt"] = np.asarray(feats["plddt"], dtype=np.float32)[:n]
+            r["structure_available"] = np.ones(n, dtype=np.float32)
+            # A structure shorter than the sequence leaves the tail unknown.
+            if len(r["rsa"]) < n:
+                pad = n - len(r["rsa"])
+                r["rsa"] = np.concatenate([r["rsa"], np.zeros(pad, np.float32)])
+                r["plddt"] = np.concatenate([r["plddt"], np.zeros(pad, np.float32)])
+                r["structure_available"][n - pad:] = 0.0
+
+
+
+def structure_batch(batch, L, device):
+    """(rsa, plddt, available) tensors for a batch, or (None, None, None)."""
+    if "rsa" not in batch[0]:
+        return None, None, None
+    import torch as _t
+    rsa = _t.zeros(len(batch), L, device=device)
+    pl = _t.zeros(len(batch), L, device=device)
+    av = _t.zeros(len(batch), L, device=device)
+    for bi, r in enumerate(batch):
+        n = min(r["length"], L)
+        rsa[bi, :n] = _t.from_numpy(r["rsa"][:n]).to(device)
+        pl[bi, :n] = _t.from_numpy(r["plddt"][:n]).to(device)
+        av[bi, :n] = _t.from_numpy(r["structure_available"][:n]).to(device)
+    return rsa, pl, av
 
 
 def drop_caid_targets(
@@ -243,6 +294,18 @@ def main(argv=None) -> int:
         help="After CV, fit one head on all (filtered) proteins and save it for "
              "benchmark scoring.",
     )
+    ap.add_argument(
+        "--structure-dim", type=int, default=0,
+        help="Width of the AlphaFold rsa/pLDDT input block (0 = sequence only). "
+             "Structure as an INPUT, not a post-hoc ensemble: fusing a trained "
+             "model with rsa+pLDDT made the baseline worse (0.9581 -> 0.9554), "
+             "while the top CAID3 methods are structure-aware.",
+    )
+    ap.add_argument(
+        "--structure-cache",
+        default="/scratch4/sfried3/jbeale3_disordernet/af_structures",
+        help="Directory of cached AlphaFold mmCIF files.",
+    )
     args = ap.parse_args(argv)
 
     tasks = tuple(t.strip() for t in args.tasks.split(",") if t.strip())
@@ -273,6 +336,18 @@ def main(argv=None) -> int:
     rows, coverage = build_union(entries, tasks)
     rows = [r for r in rows if 20 <= r["length"] <= args.max_len]
     print(f"\nunion: {len(rows):,} proteins within length bounds")
+
+    if args.structure_dim:
+        attach_structure(rows, args.structure_cache)
+        have = sum(1 for r in rows if r.get("structure_available") is not None
+                   and r["structure_available"].any())
+        print(f"structural channels: {have}/{len(rows)} proteins have an "
+              f"AlphaFold entry ({have/max(len(rows),1):.1%})")
+        if have == 0:
+            print("  ERROR: no cached structures found — run the structure "
+                  "fetch first, or the gate trains on a constant block",
+                  file=sys.stderr)
+            return 2
     print(f"coverage: { {t: coverage[t] for t in tasks} }")
 
     # The CAID3 targets ARE DisProt entries, and this cache contains them.
@@ -327,7 +402,8 @@ def main(argv=None) -> int:
         from colab.lite_head import ScalarMix
         mix = ScalarMix(len(layer_ids)).to(device)
         head = MultiTaskLiteHead(in_dim=dim, tasks=tasks,
-                                 dropout=cfg.head_dropout).to(device)
+                                 dropout=cfg.head_dropout,
+                                 structure_dim=args.structure_dim).to(device)
         params = list(head.parameters()) + list(mix.parameters())
         opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=cfg.weight_decay)
         print(f"\n── fold {fold_idx+1}/{args.n_folds}  train={len(train_rows)} "
@@ -343,8 +419,9 @@ def main(argv=None) -> int:
                 _, _, tokens = batch_converter(data)
                 tokens = tokens.to(device)
                 feats = mix(embed(esm, tokens, layer_ids))
-                logits = head(feats)
                 L = feats.shape[1]
+                sr, sp, sa = structure_batch(batch, L, device)
+                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa)
                 lab, ev = {}, {}
                 for t in tasks:
                     lab[t] = torch.zeros(len(batch), L, device=device)
@@ -376,7 +453,9 @@ def main(argv=None) -> int:
                 data = [(r["id"], r["sequence"]) for r in batch]
                 _, _, tokens = batch_converter(data)
                 tokens = tokens.to(device)
-                logits = head(mix(embed(esm, tokens, layer_ids)))
+                feats = mix(embed(esm, tokens, layer_ids))
+                sr, sp, sa = structure_batch(batch, feats.shape[1], device)
+                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa)
                 for t in tasks:
                     p = torch.sigmoid(logits[t]).float().cpu().numpy()
                     for bi, r in enumerate(batch):
@@ -445,7 +524,8 @@ def main(argv=None) -> int:
 
         mix = ScalarMix(len(layer_ids)).to(device)
         head = MultiTaskLiteHead(in_dim=dim, tasks=tasks,
-                                 dropout=cfg.head_dropout).to(device)
+                                 dropout=cfg.head_dropout,
+                                 structure_dim=args.structure_dim).to(device)
         params = list(head.parameters()) + list(mix.parameters())
         opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=cfg.weight_decay)
         for epoch in range(args.epochs):
@@ -458,8 +538,9 @@ def main(argv=None) -> int:
                     [(r["id"], r["sequence"]) for r in batch])
                 tokens = tokens.to(device)
                 feats = mix(embed(esm, tokens, layer_ids))
-                logits = head(feats)
                 L = feats.shape[1]
+                sr, sp, sa = structure_batch(batch, L, device)
+                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa)
                 lab, ev = {}, {}
                 for t in tasks:
                     lab[t] = torch.zeros(len(batch), L, device=device)
@@ -491,6 +572,7 @@ def main(argv=None) -> int:
             "layer_ids": layer_ids,
             "backbone": args.backbone,
             "embed_dim": dim,
+            "structure_dim": args.structure_dim,
             "n_train_proteins": len(rows),
             "caid_leak_filter": None if args.no_caid_filter else leak,
         }, ckpt)

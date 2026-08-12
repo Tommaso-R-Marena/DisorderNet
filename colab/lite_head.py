@@ -252,6 +252,61 @@ class DisorderNetLite(nn.Module):
         }
 
 
+class StructureChannels(nn.Module):
+    """Encode AlphaFold rsa and pLDDT into a small learned feature block.
+
+    Post-hoc fusion of a structural signal with this model *failed*: weights fit
+    on training data made rsa+pLDDT worse, 0.9581 -> 0.9554, because averaging
+    lets a task-agnostic signal dominate wherever the model disagrees, including
+    where the model is right. Feeding structure as an input instead lets the
+    trunk learn *when* to trust it — which is the difference between the top
+    CAID3 methods (explicitly structure-aware) and an ensemble.
+
+    That distinction is the whole thesis of this project, stated correctly for
+    the first time: AlphaFold's pLDDT is a weak disorder proxy (rank 11) while
+    its solvent accessibility is a strong one (rank 3), so a learned gate over
+    both beats trusting or distrusting either wholesale.
+
+    Missing structure is explicit rather than imputed. An absent AlphaFold entry
+    is not "buried and confident"; it is no information, and a model that cannot
+    tell the difference will read absence as order.
+    """
+
+    def __init__(self, out_dim: int = 16):
+        super().__init__()
+        # 4 inputs: rsa, pLDDT (scaled), an availability flag, and rsa's local
+        # gradient — disorder boundaries show up as accessibility transitions.
+        self.encode = nn.Sequential(
+            nn.Conv1d(4, out_dim, 1),
+            nn.GELU(),
+            nn.Conv1d(out_dim, out_dim, 1),
+        )
+        self.out_dim = out_dim
+
+    @staticmethod
+    def assemble(
+        rsa: Optional[torch.Tensor],
+        plddt: Optional[torch.Tensor],
+        available: Optional[torch.Tensor],
+        length: int,
+        batch: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Build the (B, 4, L) input, zero-filled and flagged where absent."""
+        zeros = torch.zeros(batch, length, device=device)
+        r = zeros if rsa is None else rsa
+        p = zeros if plddt is None else plddt / 100.0
+        a = torch.ones(batch, length, device=device) if available is None else available
+        # Local rsa gradient; padded to preserve length.
+        grad = torch.zeros_like(r)
+        if length > 1:
+            grad[:, 1:] = r[:, 1:] - r[:, :-1]
+        return torch.stack([r, p, a, grad], dim=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.encode(x)
+
+
 class MultiTaskLiteHead(nn.Module):
     """One shared trunk, one linear read-out per CAID3 task.
 
@@ -282,6 +337,7 @@ class MultiTaskLiteHead(nn.Module):
         hidden: int = 256,
         n_blocks: int = 4,
         dilations: Optional[Sequence[int]] = None,
+        structure_dim: int = 0,
     ):
         super().__init__()
         if not tasks:
@@ -289,9 +345,13 @@ class MultiTaskLiteHead(nn.Module):
         if len(set(tasks)) != len(tasks):
             raise ValueError(f"duplicate task names: {tasks}")
         self.tasks = tuple(tasks)
+        self.structure_dim = int(structure_dim)
+        self.structure = (
+            StructureChannels(self.structure_dim) if self.structure_dim else None
+        )
 
         dil = list(dilations) if dilations is not None else list(DEFAULT_DILATIONS)
-        self.proj = nn.Conv1d(in_dim, hidden, 1)
+        self.proj = nn.Conv1d(in_dim + self.structure_dim, hidden, 1)
         self.blocks = nn.ModuleList(
             DilatedResidualBlock(hidden, dil[i % len(dil)], dropout)
             for i in range(n_blocks)
@@ -300,12 +360,41 @@ class MultiTaskLiteHead(nn.Module):
         # head uses, so each task degrades to logistic regression rather than to
         # noise if the trunk fails to learn it.
         self.out = nn.ModuleDict({t: nn.Conv1d(hidden, 1, 1) for t in self.tasks})
-        self.skip = nn.ModuleDict({t: nn.Conv1d(in_dim, 1, 1) for t in self.tasks})
+        # The skip spans the structural channels too, so each task keeps a
+        # direct linear path from rsa/pLDDT to its logit. That matters here:
+        # rsa alone scores 0.9459 on Disorder-PDB, so the linear fallback a task
+        # degrades to should be the structural baseline, not sequence alone.
+        self.skip = nn.ModuleDict({
+            t: nn.Conv1d(in_dim + self.structure_dim, 1, 1) for t in self.tasks
+        })
         self.receptive_field = receptive_field(dil, n_blocks)
 
-    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
-        """(B, L, C) -> {task: (B, L)} logits, one shared trunk pass."""
-        x = x.transpose(1, 2)
+    def forward(
+        self,
+        x: torch.Tensor,
+        rsa: Optional[torch.Tensor] = None,
+        plddt: Optional[torch.Tensor] = None,
+        structure_available: Optional[torch.Tensor] = None,
+    ) -> dict[str, torch.Tensor]:
+        """(B, L, C) -> {task: (B, L)} logits, one shared trunk pass.
+
+        Structural channels, when configured, are concatenated before the trunk
+        so the model can learn where to trust them rather than being averaged
+        with them after the fact.
+        """
+        x = x.transpose(1, 2)                       # (B, C, L)
+        if self.structure is not None:
+            if rsa is None and plddt is None:
+                raise ValueError(
+                    "this head was built with structural channels; pass rsa "
+                    "and/or plddt, or the trunk sees a constant block and the "
+                    "learned gate is meaningless"
+                )
+            block = StructureChannels.assemble(
+                rsa, plddt, structure_available,
+                length=x.shape[2], batch=x.shape[0], device=x.device,
+            )
+            x = torch.cat([x, self.structure(block)], dim=1)
         h = self.proj(x)
         for blk in self.blocks:
             h = blk(h)
