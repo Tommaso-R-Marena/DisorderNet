@@ -45,6 +45,16 @@ decisions that most disorder predictors do not provide.
 > `tests/test_checkpoint_roundtrip.py`). **Treat every AUC in this README as
 > provisional until re-measured.** Expect corrected figures to be lower.
 > See [`docs/HOMOLOGY_HOLDOUT.md`](docs/HOMOLOGY_HOLDOUT.md).
+>
+> **A sixth defect, found later, ran the other way.** `parse_caid_reference_fasta`
+> gave `labels` an entry only at unmasked positions while building `eval_mask`
+> over the whole sequence, so the two indexed different spaces; the evaluator
+> then matched predictions (indexed by sequence position) to labels (indexed by
+> labelled-position index). On the CAID3 Disorder-PDB reference **239 of 319
+> targets had mismatched lengths and 69.8% of scored residues were compared
+> against another residue's prediction**. Every CAID3 figure this project has
+> ever reported is therefore wrong — and *understated*. Fixed and pinned in
+> `tests/test_caid3_alignment.py`; the CAID3 rows below are the corrected ones.
 
 ### Headline results — legacy, NOT homology-separated
 
@@ -118,13 +128,53 @@ physics GBDT beats the 69.9M-parameter neural model **in every one of them**, by
 `lite` profile (`colab/lite_head.py`), which tests whether it is a
 capacity/data mismatch rather than a weak backbone.
 
+### DisorderNet-Lite — the capacity hypothesis, tested
+
+If the neural model loses to a GBDT because 69.9M trainable parameters on 988k
+evidenced residues is a mismatch — and not because ESM-2 is a weak backbone —
+then *removing* capacity should help. `lite` freezes the backbone entirely,
+learns a softmax mixture over its layers, and trains a ~1.96M-parameter dilated
+residual CNN head under plain weighted BCE. Three seeds, same homology splits,
+same evaluation:
+
+| | trainable | DisProt mean-of-folds | CAID3 (two-class) | 95% CI | GPU·h |
+|---|---:|---:|---:|---|---:|
+| `ultra` | 69.9M | 0.7514 | *re-measuring* | — | ~12 |
+| `lite` s42 | 1.96M | 0.8247 | 0.9042 | [0.8797, 0.9226] | ~0.9 |
+| `lite` s43 | 1.96M | 0.8266 | 0.9076 | [0.8803, 0.9277] | ~0.9 |
+| `lite` s44 | 1.96M | 0.8248 | 0.9089 | [0.8835, 0.9270] | ~0.9 |
+| **`lite` mean** | **1.96M** | **0.8254** ± 0.0011 | **0.9069** | — | **~0.9** |
+
+**+0.074 DisProt mean-of-folds over `ultra` with 36× fewer trainable parameters
+and roughly a tenth of the GPU time.** The three seeds agree to sd 0.0011, far
+inside the 0.023 rerun noise floor. `lite` also beats the physics GBDT measured
+on its own folds (0.7774–0.7790), reversing the observation that motivated it.
+
+Two things this does **not** establish:
+
+- **It is not a demonstrated win over ESMDisPred.** Every CI reaches 0.895 and
+  none exceeds it (`ci_reaches_esmdispred=True`, `ci_exceeds_esmdispred=False`).
+  ESMDisPred's 0.895 is a point estimate with no published interval, and its
+  protocol is not known to match this one.
+- **The CAID3 protocol matters.** Pooling the single-class targets as well
+  (`pooled`, n=319) gives 0.9218–0.9236, but those targets are predominantly
+  fully-disordered, so pooling them raises the disorder fraction from 20.9% to
+  31.6%. That is the metric getting easier, not the model getting better. The
+  table above uses the stricter two-class protocol throughout.
+
+A side effect worth noting: the frozen backbone largely removes the cross-fold
+calibration drift. Per-fold median predicted probability spans ~3× under `lite`
+against ~2000× under `ultra`, and rank-normalisation moves pooled AUC by +0.006
+rather than +0.028.
+
 The v8 ensemble is also the best-**calibrated** config: isotonic calibration lowers
 Expected Calibration Error from ~0.041 to **~0.0025** (ranking preserved), and the
 split-conformal layer holds its coverage guarantee (empirical coverage ~0.90–0.91 at
 α=0.1) with ~0.86 selective accuracy on the residues it is confident about. The GPU
 LoRA path (ESM-2 650M/3B) inherits the same calibrated + conformal confidence
 layer. Its measured pooled AUC under genuine homology separation is **0.8196**
-(with AlphaFold fusion), not the ≥0.88 previously targeted here.
+(with AlphaFold fusion), not the ≥0.88 previously targeted here. The `lite`
+profile above supersedes this path on both benchmarks at a fraction of the cost.
 
 Compared to **literature reference points** (different protocols — not head-to-head),
 dedicated disorder predictors substantially outperform using AlphaFold pLDDT as a
