@@ -158,7 +158,8 @@ def structure_batch(batch, L, device):
 
 
 def drop_caid_targets(
-    rows: list[dict], reference_fasta: Optional[str], min_identity: float
+    rows: list[dict], reference_fasta: Optional[str], min_identity: float,
+    allow_missing_homology: bool = False,
 ) -> tuple[list[dict], dict]:
     """Remove CAID3 targets and their homologues from the training union.
 
@@ -205,10 +206,21 @@ def drop_caid_targets(
         homologous = {kept[q]["id"] for q, _s, _i in hits}
         kept = [r for r in kept if r["id"] not in homologous]
     except Exception as exc:                      # pragma: no cover - env dependent
-        print(f"  WARNING: homology pass skipped ({exc}). Exact id/sequence "
-              "matches were still removed, but homologues of CAID3 targets "
-              "remain in training — benchmark numbers from this run are NOT "
-              "leak-free.")
+        # A warning was not enough. One run lost its BLAST module and kept 75
+        # homologues of CAID3 targets, which both inflated its benchmark
+        # numbers and silently confounded a paired A/B against a run that had
+        # removed them — two arms differing in the training set as well as the
+        # architecture being compared. Fail instead, unless explicitly waived.
+        if not allow_missing_homology:
+            raise RuntimeError(
+            f"homology filtering unavailable ({exc}). Exact id/sequence matches "
+            "were removed, but homologues of CAID3 targets would remain in "
+            "training, so benchmark numbers would not be leak-free and any "
+            "paired comparison would differ in its training set. Load a BLAST "
+            "module, or pass --allow-missing-homology-filter to accept that."
+        ) from exc
+        print(f"  WARNING: homology pass skipped ({exc}) and explicitly "
+              "waived; homologues of CAID3 targets remain in training.")
         homologous = set()
 
     return kept, {
@@ -285,6 +297,13 @@ def main(argv=None) -> int:
     )
     ap.add_argument("--leak-identity", type=float, default=0.40)
     ap.add_argument(
+        "--allow-missing-homology-filter", action="store_true",
+        help="Proceed when BLAST is unavailable. Exact CAID3 targets are still "
+             "removed, but their homologues are not, so benchmark numbers from "
+             "such a run are not leak-free and must not be compared against a "
+             "run that filtered them.",
+    )
+    ap.add_argument(
         "--no-caid-filter", action="store_true",
         help="Train on CAID3 targets too. Only for measuring the size of the "
              "leak; any benchmark number from such a run is invalid.",
@@ -357,7 +376,9 @@ def main(argv=None) -> int:
     # did not until it was caught, mid-run, by noticing the evaluator would have
     # scored a model trained on its own targets.
     if not args.no_caid_filter:
-        rows, leak = drop_caid_targets(rows, args.caid_reference, args.leak_identity)
+        rows, leak = drop_caid_targets(
+            rows, args.caid_reference, args.leak_identity,
+            allow_missing_homology=args.allow_missing_homology_filter)
         print(f"CAID leak-free: removed {leak['n_removed']} / {leak['n_before']} "
               f"proteins at identity>={args.leak_identity} "
               f"({leak['n_id_overlap']} exact id/sequence hits)")

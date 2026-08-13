@@ -33,6 +33,21 @@ from colab.caid3_eval import parse_caid_reference_fasta  # noqa: E402
 from colab.caid3_references import PUBLISHED  # noqa: E402
 
 
+
+def _load_accessions(disprot_path):
+    """DisProt id -> UniProt accession, for locating AlphaFold structures."""
+    if not disprot_path or not os.path.isfile(disprot_path):
+        return {}
+    with open(disprot_path) as fh:
+        data = json.load(fh)
+    entries = data if isinstance(data, list) else data.get("data", [])
+    out = {}
+    for e in entries:
+        if isinstance(e, dict) and e.get("disprot_id") and e.get("acc"):
+            out[str(e["disprot_id"])] = e["acc"]
+    return out
+
+
 def bootstrap_ci(labels_by_target, probs_by_target, n_boot=1000, seed=0):
     """Protein-clustered bootstrap: residues within a target are correlated."""
     from sklearn.metrics import average_precision_score, roc_auc_score
@@ -108,6 +123,11 @@ def main(argv=None) -> int:
     ap.add_argument("--backbone", default="650M")
     ap.add_argument("--batch-size", type=int, default=8)
     ap.add_argument("--n-boot", type=int, default=1000)
+    ap.add_argument("--disprot", default=None,
+                    help="disprot_raw.json, for DisProt-id to UniProt mapping "
+                         "when scoring a structure-aware checkpoint")
+    ap.add_argument("--structure-cache",
+                    default="/scratch4/sfried3/jbeale3_disordernet/af_structures")
     args = ap.parse_args(argv)
 
     ckpt_path = os.path.join(args.checkpoint, "multitask_head.pt")
@@ -129,11 +149,41 @@ def main(argv=None) -> int:
     freeze_backbone(esm)
     mix = ScalarMix(len(layer_ids)).to(device)
     mix.load_state_dict(payload["mix"])
-    head = MultiTaskLiteHead(in_dim=spec.embed_dim, tasks=tasks).to(device)
+    structure_dim = int(payload.get("structure_dim", 0))
+    head = MultiTaskLiteHead(in_dim=spec.embed_dim, tasks=tasks,
+                             structure_dim=structure_dim).to(device)
     head.load_state_dict(payload["head"])
     head.eval(); mix.eval()
     print(f"loaded multi-task head: tasks={list(tasks)}  "
-          f"trainable={sum(p.numel() for p in head.parameters()):,}")
+          f"trainable={sum(p.numel() for p in head.parameters()):,}  "
+          f"structure_dim={structure_dim}")
+
+    # A structure-aware checkpoint must be scored WITH structure. Falling back
+    # to a constant block would evaluate a different model than the one trained
+    # and would quietly report the sequence-only behaviour of a gate that has
+    # no input.
+    structures: dict[str, dict] = {}
+    if structure_dim:
+        from colab.structure_rsa import structure_features
+        acc_by_id = _load_accessions(args.disprot)
+        n_have = 0
+        for path in sorted(os.listdir(args.refs)):
+            if not path.startswith("caid3_") or not path.endswith(".fasta"):
+                continue
+            for p in parse_caid_reference_fasta(os.path.join(args.refs, path)):
+                if p["id"] in structures:
+                    continue
+                acc = acc_by_id.get(p["id"])
+                feats = (structure_features(acc, p["sequence"], args.structure_cache,
+                                            allow_fetch=False) if acc else None)
+                structures[p["id"]] = feats or {}
+                n_have += 1 if feats else 0
+        print(f"structural features: {n_have}/{len(structures)} targets have an "
+              f"AlphaFold entry")
+        if n_have == 0:
+            print("ERROR: structure-aware checkpoint but no cached structures; "
+                  "refusing to score it on a constant block", file=sys.stderr)
+            return 2
 
     validation = {}
     vpath = os.path.join(args.refs, "reference_validation.json")
@@ -155,7 +205,23 @@ def main(argv=None) -> int:
                 tokens = tokens.to(device)
                 out = esm(tokens, repr_layers=layer_ids, return_contacts=False)
                 feats = mix([out["representations"][i][:, 1:-1, :] for i in layer_ids])
-                logits = head(feats)[task]
+                sr = sp = sa = None
+                if structure_dim:
+                    L = feats.shape[1]
+                    sr = torch.zeros(len(batch), L, device=device)
+                    sp = torch.zeros(len(batch), L, device=device)
+                    sa = torch.zeros(len(batch), L, device=device)
+                    for bi, p in enumerate(batch):
+                        f = structures.get(p["id"]) or {}
+                        if not f:
+                            continue
+                        r = np.asarray(f["rsa"], dtype=np.float32)
+                        q = np.asarray(f["plddt"], dtype=np.float32)
+                        k = min(len(r), len(q), L)
+                        sr[bi, :k] = torch.from_numpy(r[:k]).to(device)
+                        sp[bi, :k] = torch.from_numpy(q[:k]).to(device)
+                        sa[bi, :k] = 1.0
+                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa)[task]
                 probs = torch.sigmoid(logits).float().cpu().numpy()
                 for bi, p in enumerate(batch):
                     lab = np.asarray(p["labels"], dtype=np.int8)
