@@ -199,17 +199,40 @@ calibration drift. Per-fold median predicted probability spans ~3× under `lite`
 against ~2000× under `ultra`, and rank-normalisation moves pooled AUC by +0.006
 rather than +0.028.
 
-### What we do not win, and what that redirects toward
+### Structural baselines are competitive, not superior — and the difference is a benchmarking artifact
 
-Two AlphaFold signals, requiring no training and no GPU, beat both our model and
-the published CAID3 leader on Disorder-PDB:
+An earlier version of this section claimed rsa+pLDDT *beat* the CAID3 leader at
+0.9581 against 0.9550. That claim was wrong, in a way worth recording because it
+is a trap any structure-based method can fall into.
+
+The 0.9581 was measured on the **304 targets that have an AlphaFold entry**, not
+on all 319, and quoted without an interval. Measured properly:
+
+| framing | AUC | 95% CI | vs PUNCH2 0.955 |
+|---|---:|---|---|
+| 304 structure-available targets | 0.9581 | [0.9395, 0.9724] | CI **includes** it |
+| all 319, unscorable at base rate | 0.9382 | [0.9098, 0.9614] | CI includes it |
+
+Neither beats the leader — the interval contains 0.955 both ways, and the
+margin claimed (0.0031) was a fifth of the sampling uncertainty (±0.017).
+
+**Dropping the 15 unscorable targets is worth +0.0199 AUC**, six times the
+claimed effect. That is the finding worth keeping: a structure-based predictor
+that silently skips targets without structures gains about +0.02 AUC that is not
+real, and on this benchmark that exceeds the gaps separating ranks 1 through 5.
+Structural methods should be benchmarked on every target, with unscorable ones
+counted, or the comparison flatters whichever method has the narrowest coverage.
+
+It also states our own position more fairly: **DisorderNet scores all 319
+targets**, because a sequence model does not need a structure to run.
 
 | | AUC | APS |
 |---|---:|---:|
 | DisorderNet-Lite | 0.9215 | 0.8567 |
 | AlphaFold −pLDDT | 0.9431 | 0.9062 |
 | AlphaFold rsa (window 21) | 0.9459 | 0.9168 |
-| **rsa + pLDDT** | **0.9581** | **0.9320** |
+| rsa + pLDDT *(304 structure-available targets)* | 0.9581 | 0.9320 |
+| **rsa + pLDDT *(all 319, honest)*** | **0.9382** | **0.8880** |
 | PUNCH2 (CAID3 #1) | 0.9550 | 0.9280 |
 | rsa + pLDDT + model *(weights fit on training data)* | 0.9554 | 0.9281 |
 
@@ -306,7 +329,8 @@ quantifying AlphaFold/Boltz hallucinations in IDRs.
 > AlphaFold is something to distrust in disordered regions is only half right.
 > AF3-pLDDT does rank 13th on CAID3 and AF2-pLDDT 11th — but **AlphaFold-rsa
 > ranks 3rd at 0.950**, above every dedicated predictor except the two PUNCH2
-> variants, and rsa+pLDDT together reach 0.9581 here, above the CAID3 leader.
+> variants, and rsa+pLDDT together reach 0.9382 across all 319 targets —
+> competitive with the CAID3 leader, not above it.
 > The weakness is specific to pLDDT as a disorder proxy, not to AlphaFold's
 > output as a whole. Structure-derived features are the strongest single signal
 > on Disorder-PDB, and this pipeline did not use the strongest one.
