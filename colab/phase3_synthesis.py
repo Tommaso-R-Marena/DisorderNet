@@ -65,9 +65,33 @@ def calibrate_plddt(
     return np.clip(plddt * (1.0 - strength * dn), 0.0, 100.0)
 
 
+def _reject_evidence_sentinels(labels: np.ndarray, scores: np.ndarray) -> None:
+    """Fail loudly, and legibly, if unevaluated residues reached a metric.
+
+    ``align_fold_predictions`` marks residues with no evidence as label ``-1``
+    and probability ``NaN`` so that forgetting to mask cannot be mistaken for a
+    real score. Every caller is supposed to drop them via ``evidenced(item)``.
+    When one does not, sklearn raises "Input contains NaN" from four frames deep
+    with no hint of which array or which caller — a message that has twice cost
+    a multi-hour GPU run to diagnose. Name the actual problem instead.
+    """
+    n_lab = int(np.count_nonzero(labels < 0))
+    n_scr = int(np.count_nonzero(~np.isfinite(scores)))
+    if not (n_lab or n_scr):
+        return
+    raise ValueError(
+        f"unevaluated residues reached a metric: {n_lab} label==-1 and "
+        f"{n_scr} non-finite score(s) out of {len(labels)}. These are evidence "
+        f"sentinels, not data. The caller must drop them with "
+        f"colab.biological_utility.evidenced(item) before scoring; masking here "
+        f"would silently change the denominator and inflate the metric."
+    )
+
+
 def _safe_auc_ap(labels: np.ndarray, scores: np.ndarray) -> tuple[Optional[float], Optional[float]]:
     labels = np.asarray(labels, dtype=np.int8)
     scores = np.asarray(scores, dtype=np.float32)
+    _reject_evidence_sentinels(labels, scores)
     if len(labels) < 5 or len(np.unique(labels)) < 2:
         return None, None
     return float(roc_auc_score(labels, scores)), float(average_precision_score(labels, scores))

@@ -278,6 +278,8 @@ def apply_plddt_fusion_to_cv(
 
     # Optimize α on AF-covered OOF residues
     if alpha is None:
+        from colab.biological_utility import evidenced
+
         af_probs, af_labels, af_plddt = [], [], []
         for item in aligned:
             pid = item["id"]
@@ -286,7 +288,7 @@ def apply_plddt_fusion_to_cv(
             plddt = np.asarray(plddt_by_protein[pid], dtype=np.float32)
             if len(plddt) != len(item["probs"]):
                 continue
-            valid = ~np.isnan(plddt)
+            valid = ~np.isnan(plddt) & evidenced(item)
             if valid.sum() < 10:
                 continue
             af_probs.append(item["probs"][valid])

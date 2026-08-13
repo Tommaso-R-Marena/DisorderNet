@@ -279,3 +279,105 @@ class TestMasksAreNotComposedTwice:
             "evidenced(item)" in line and ("isnan" in line or "&" in line)
             for line in src.splitlines()
         ), f"{fn} applies evidence separately from pLDDT validity"
+
+
+class TestTheRealPipelineSurvivesPartialEvidence:
+    """Run the actual entry points, not a syntactic scan of them.
+
+    Seven sentinel leaks were found here, one crash at a time, each costing a
+    multi-hour GPU run. Six were direct reads of ``item["probs"]`` and a
+    file-enumerating audit caught them. The seventh was not: in
+    ``apply_plddt_fusion_to_cv`` the NaN was masked only against pLDDT validity,
+    then handed to ``find_optimal_fusion_alpha`` as a plain array. Once the
+    sentinel crosses a function boundary it stops looking like a sentinel, and
+    no amount of grepping for ``item["probs"]`` will see it.
+
+    So drive the real functions with partially-evidenced input. A leak anywhere
+    downstream — however many frames deep, however the array was renamed —
+    surfaces here in milliseconds instead of after the queue wait.
+    """
+
+    @staticmethod
+    def _plddt_for(proteins):
+        rng = np.random.default_rng(7)
+        return {p["id"]: rng.uniform(20.0, 95.0, p["length"]).astype(np.float32)
+                for p in proteins}
+
+    def test_plddt_fusion_runs_end_to_end(self):
+        from colab.inference_fusion import apply_plddt_fusion_to_cv
+
+        proteins, folds = make_case(0.75, n_proteins=12, length=40)
+        report, fused = apply_plddt_fusion_to_cv(
+            proteins, folds, self._plddt_for(proteins), n_folds=1,
+        )
+        assert np.isfinite(report["before"]["pooled"]["auc"])
+        assert np.isfinite(report["after"]["pooled"]["auc"])
+        assert np.isfinite(report["fusion_alpha"])
+        for f in fused:
+            assert np.isfinite(np.asarray(f["val_probs"], dtype=float)).all()
+
+    def test_alpha_search_scores_only_evidenced_residues(self):
+        """The α grid must be optimised on real labels, not on -1 sentinels."""
+        from colab.inference_fusion import apply_plddt_fusion_to_cv
+
+        proteins, folds = make_case(0.5, n_proteins=12, length=40)
+        report, _ = apply_plddt_fusion_to_cv(
+            proteins, folds, self._plddt_for(proteins), n_folds=1,
+        )
+        n_ev = sum(int(np.sum(p["label_evidence"])) for p in proteins)
+        assert report["before"]["pooled"]["n_residues"] == n_ev
+
+    @pytest.mark.parametrize("frac", [0.3, 0.6, 0.9, 1.0])
+    def test_fusion_holds_across_evidence_levels(self, frac):
+        from colab.inference_fusion import apply_plddt_fusion_to_cv
+
+        proteins, folds = make_case(frac, n_proteins=12, length=40)
+        report, _ = apply_plddt_fusion_to_cv(
+            proteins, folds, self._plddt_for(proteins), n_folds=1,
+        )
+        assert np.isfinite(report["after"]["pooled"]["auc"])
+
+
+class TestTheMetricBoundaryNamesTheProblem:
+    """sklearn's "Input contains NaN" says nothing about which array or caller.
+
+    That message appeared three separate times, each after hours of compute, and
+    each time cost a full stack-trace bisect to attribute. The choke point now
+    states what leaked and what the caller should have done.
+    """
+
+    def test_nan_scores_are_rejected_by_name(self):
+        from colab.phase3_synthesis import _safe_auc_ap
+
+        labels = np.array([0, 1, 0, 1, 0, 1], dtype=np.int8)
+        scores = np.array([0.1, 0.9, np.nan, 0.8, 0.2, 0.7], dtype=np.float32)
+        with pytest.raises(ValueError, match="unevaluated residues reached a metric"):
+            _safe_auc_ap(labels, scores)
+
+    def test_sentinel_labels_are_rejected_by_name(self):
+        from colab.phase3_synthesis import _safe_auc_ap
+
+        labels = np.array([0, 1, -1, 1, 0, 1], dtype=np.int8)
+        scores = np.array([0.1, 0.9, 0.5, 0.8, 0.2, 0.7], dtype=np.float32)
+        with pytest.raises(ValueError, match="unevaluated residues reached a metric"):
+            _safe_auc_ap(labels, scores)
+
+    def test_the_message_says_how_to_fix_it(self):
+        from colab.phase3_synthesis import _safe_auc_ap
+
+        labels = np.array([0, 1, 0, 1], dtype=np.int8)
+        scores = np.array([0.1, np.nan, 0.3, 0.4], dtype=np.float32)
+        with pytest.raises(ValueError) as e:
+            _safe_auc_ap(labels, scores)
+        assert "evidenced(item)" in str(e.value)
+        # and must not suggest masking here, which would move the denominator
+        assert "inflate" in str(e.value)
+
+    def test_clean_input_is_untouched(self):
+        from colab.phase3_synthesis import _safe_auc_ap
+
+        labels = np.array([0, 1, 0, 1, 1, 0], dtype=np.int8)
+        scores = np.array([0.1, 0.9, 0.2, 0.8, 0.7, 0.3], dtype=np.float32)
+        auc, ap = _safe_auc_ap(labels, scores)
+        assert auc == pytest.approx(1.0)
+        assert 0.0 < ap <= 1.0
