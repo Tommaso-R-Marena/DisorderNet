@@ -205,3 +205,57 @@ class TestNoConsumerLeaksTheSentinel:
         s = np.array([0.1, 0.9, np.nan, 0.8])
         with pytest.raises(Exception):
             roc_auc_score(y, s)
+
+
+class TestMasksAreNotComposedTwice:
+    """Two masks over the same array live in different spaces once one is applied.
+
+    Fixing the sentinel leak in af_hallucination introduced exactly that: labels
+    were first selected by label evidence (329 residues) and then re-indexed by
+    a pLDDT-validity mask still built over the full 340. NumPy caught it, but
+    only after 27 minutes of a recovery run:
+
+        IndexError: boolean index did not match indexed array along axis 0;
+        size of axis is 329 but size of corresponding boolean axis is 340
+
+    The rule is one combined mask, applied once, to every array.
+    """
+
+    def test_two_stage_masking_is_a_length_error(self):
+        """The failure mode itself, so the reason for the rule is on record."""
+        labels = np.arange(10, dtype=float)
+        evidence = np.array([1, 1, 1, 1, 1, 1, 0, 0, 0, 0], dtype=bool)
+        plddt_valid = np.array([1, 1, 1, 1, 0, 0, 1, 1, 1, 1], dtype=bool)
+        kept = labels[evidence]                      # 6 elements
+        with pytest.raises(IndexError):
+            _ = kept[plddt_valid]                    # 10-element mask
+
+    def test_combined_mask_is_consistent(self):
+        labels = np.arange(10, dtype=float)
+        evidence = np.array([1, 1, 1, 1, 1, 1, 0, 0, 0, 0], dtype=bool)
+        plddt_valid = np.array([1, 1, 1, 1, 0, 0, 1, 1, 1, 1], dtype=bool)
+        keep = evidence & plddt_valid
+        assert len(labels[keep]) == len(np.arange(10.0)[keep]) == int(keep.sum())
+
+    @pytest.mark.parametrize("fn", [
+        "run_af_rescue_report",
+        "run_labeled_distrust_benchmark",
+    ])
+    def test_hallucination_sites_build_one_mask(self, fn):
+        """Each site must combine evidence with pLDDT validity before indexing,
+        never index twice."""
+        import inspect
+
+        from colab import af_hallucination
+
+        target = getattr(af_hallucination, fn, None)
+        if target is None:
+            pytest.skip(f"{fn} not present")
+        src = inspect.getsource(target)
+        if "evidenced(" not in src:
+            pytest.skip("site does not consume aligned items")
+        # A combined mask contains both terms on one line.
+        assert any(
+            "evidenced(item)" in line and ("isnan" in line or "&" in line)
+            for line in src.splitlines()
+        ), f"{fn} applies evidence separately from pLDDT validity"

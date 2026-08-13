@@ -58,6 +58,13 @@ import torch.nn as nn
 # comfortably wider than a typical IDR, without a transformer's parameter cost.
 DEFAULT_DILATIONS: tuple[int, ...] = (1, 2, 4, 8)
 
+# Wider schedule for disorder specifically. The default gives a 61-residue
+# receptive field over four blocks; IDRs frequently run past 100, and the rsa
+# signal itself needed a 21-residue smoothing window to work at all (0.8688 raw
+# against 0.9459 smoothed). This reaches 213 residues for the same parameter
+# count — dilation buys context, not weights.
+WIDE_DILATIONS: tuple[int, ...] = (1, 4, 16, 32)
+
 
 def receptive_field(dilations: Sequence[int], n_blocks: int) -> int:
     """Residues visible to one output position.
@@ -272,12 +279,24 @@ class StructureChannels(nn.Module):
     tell the difference will read absence as order.
     """
 
+    N_CHANNELS = 5
+
     def __init__(self, out_dim: int = 16):
         super().__init__()
-        # 4 inputs: rsa, pLDDT (scaled), an availability flag, and rsa's local
-        # gradient — disorder boundaries show up as accessibility transitions.
+        # Five inputs: rsa, pLDDT (scaled), contact density, an availability
+        # flag, and rsa's local gradient.
+        #
+        # Contact density earns its place by being orthogonal to accessibility
+        # rather than a restatement of it. An exposed loop on a folded domain is
+        # accessible AND densely contacted; a disordered residue is accessible
+        # and uncontacted. Either channel alone confuses those two cases, and
+        # they are precisely the false positives a disorder predictor makes.
+        #
+        # The gradient channel exists because a 1x1 convolution cannot see a
+        # transition its input does not encode, and IDR boundaries are
+        # accessibility transitions.
         self.encode = nn.Sequential(
-            nn.Conv1d(4, out_dim, 1),
+            nn.Conv1d(self.N_CHANNELS, out_dim, 1),
             nn.GELU(),
             nn.Conv1d(out_dim, out_dim, 1),
         )
@@ -291,17 +310,19 @@ class StructureChannels(nn.Module):
         length: int,
         batch: int,
         device: torch.device,
+        contacts: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        """Build the (B, 4, L) input, zero-filled and flagged where absent."""
+        """Build the (B, 5, L) input, zero-filled and flagged where absent."""
         zeros = torch.zeros(batch, length, device=device)
         r = zeros if rsa is None else rsa
         p = zeros if plddt is None else plddt / 100.0
+        c = zeros if contacts is None else contacts
         a = torch.ones(batch, length, device=device) if available is None else available
         # Local rsa gradient; padded to preserve length.
         grad = torch.zeros_like(r)
         if length > 1:
             grad[:, 1:] = r[:, 1:] - r[:, :-1]
-        return torch.stack([r, p, a, grad], dim=1)
+        return torch.stack([r, p, c, a, grad], dim=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.encode(x)
@@ -375,6 +396,7 @@ class MultiTaskLiteHead(nn.Module):
         rsa: Optional[torch.Tensor] = None,
         plddt: Optional[torch.Tensor] = None,
         structure_available: Optional[torch.Tensor] = None,
+        contacts: Optional[torch.Tensor] = None,
     ) -> dict[str, torch.Tensor]:
         """(B, L, C) -> {task: (B, L)} logits, one shared trunk pass.
 
@@ -393,6 +415,7 @@ class MultiTaskLiteHead(nn.Module):
             block = StructureChannels.assemble(
                 rsa, plddt, structure_available,
                 length=x.shape[2], batch=x.shape[0], device=x.device,
+                contacts=contacts,
             )
             x = torch.cat([x, self.structure(block)], dim=1)
         h = self.proj(x)

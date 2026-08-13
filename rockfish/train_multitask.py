@@ -50,6 +50,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from colab.caid_tasks import TASKS, build_task_dataset, task_statistics  # noqa: E402
 from colab.lite_head import (  # noqa: E402
+    WIDE_DILATIONS,
     MultiTaskLiteHead,
     freeze_backbone,
     masked_multitask_loss,
@@ -107,6 +108,91 @@ def build_union(entries: list[dict], tasks: tuple[str, ...]) -> tuple[list[dict]
     return rows, coverage
 
 
+def load_pdb_missing_rows(cache_path: str, max_len: int, limit: int = 0) -> list[dict]:
+    """Training rows for CAID3 Disorder-PDB's own label definition.
+
+    Everything else here learns DisProt's curated *functional* disorder, while
+    Disorder-PDB scores *crystallographic* disorder — residues unobserved in a
+    structure. That mismatch is the most likely explanation for the transfer gap
+    we measured: the structure-aware model gained on every DisProt CV task and
+    then lost on three of four held-out CAID3 benchmarks.
+
+    MobiDB's derived missing-residue annotation is that definition directly, over
+    19,421 proteins rather than DisProt's 2,905, with observed regions supplying
+    real negatives instead of masked ones.
+    """
+    from colab.label_sources import LabelSource, build_labelled_set
+
+    records = []
+    with open(cache_path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+            if limit and len(records) >= limit:
+                break
+
+    labelled, stats = build_labelled_set(
+        records, LabelSource.PDB_MISSING, min_len=20, max_len=max_len,
+        min_evidence_fraction=0.10, min_disorder=3, min_order=3,
+    )
+    print(f"  pdb_missing: {stats['n_proteins']} proteins, "
+          f"{stats['n_evidenced_residues']:,} evidenced residues, "
+          f"disorder {stats['disorder_fraction_of_evidenced']:.1%}")
+
+    rows = []
+    for p in labelled:
+        labels = p.labels.astype(np.int8)
+        rows.append({
+            "id": f"MB:{p.id}",
+            "sequence": p.sequence,
+            "length": p.length,
+            "uniprot_acc": p.uniprot_acc,
+            "task_labels": {"disorder_pdb": labels},
+            "task_evidence": {"disorder_pdb": p.evidence.astype(bool)},
+        })
+    return rows
+
+
+def merge_task_rows(base: list[dict], extra: list[dict],
+                    all_tasks: tuple[str, ...]) -> list[dict]:
+    """Union two row sets, filling absent tasks with empty evidence.
+
+    A protein present in one source and not the other must contribute no
+    gradient to the tasks it has no labels for — otherwise the 19k pdb_missing
+    proteins would train the linker head on 19k fabricated negatives against its
+    real 15,683 positives.
+    """
+    by_seq: dict[str, dict] = {}
+    for row in base + extra:
+        key = row["sequence"]
+        if key not in by_seq:
+            merged = dict(row)
+            merged["task_labels"] = dict(row["task_labels"])
+            merged["task_evidence"] = dict(row["task_evidence"])
+            by_seq[key] = merged
+        else:
+            tgt = by_seq[key]
+            for t, lab in row["task_labels"].items():
+                if t not in tgt["task_labels"]:
+                    tgt["task_labels"][t] = lab
+                    tgt["task_evidence"][t] = row["task_evidence"][t]
+
+    out = []
+    for row in by_seq.values():
+        n = row["length"]
+        for t in all_tasks:
+            if t not in row["task_labels"]:
+                row["task_labels"][t] = np.zeros(n, dtype=np.int8)
+                row["task_evidence"][t] = np.zeros(n, dtype=bool)
+        out.append(row)
+    return out
+
+
 def attach_structure(rows: list[dict], cache_dir: str) -> None:
     """Attach cached AlphaFold rsa/pLDDT to each row, in place.
 
@@ -127,34 +213,41 @@ def attach_structure(rows: list[dict], cache_dir: str) -> None:
         if feats is None:
             r["rsa"] = np.zeros(n, dtype=np.float32)
             r["plddt"] = np.zeros(n, dtype=np.float32)
+            r["contacts"] = np.zeros(n, dtype=np.float32)
             r["structure_available"] = np.zeros(n, dtype=np.float32)
         else:
             r["rsa"] = np.asarray(feats["rsa"], dtype=np.float32)[:n]
             r["plddt"] = np.asarray(feats["plddt"], dtype=np.float32)[:n]
+            r["contacts"] = np.asarray(
+                feats.get("contacts", np.zeros(n)), dtype=np.float32)[:n]
             r["structure_available"] = np.ones(n, dtype=np.float32)
             # A structure shorter than the sequence leaves the tail unknown.
             if len(r["rsa"]) < n:
                 pad = n - len(r["rsa"])
                 r["rsa"] = np.concatenate([r["rsa"], np.zeros(pad, np.float32)])
                 r["plddt"] = np.concatenate([r["plddt"], np.zeros(pad, np.float32)])
+                r["contacts"] = np.concatenate(
+                    [r["contacts"], np.zeros(pad, np.float32)])
                 r["structure_available"][n - pad:] = 0.0
 
 
 
 def structure_batch(batch, L, device):
-    """(rsa, plddt, available) tensors for a batch, or (None, None, None)."""
+    """(rsa, plddt, available, contacts) tensors, or all None."""
     if "rsa" not in batch[0]:
-        return None, None, None
+        return None, None, None, None
     import torch as _t
     rsa = _t.zeros(len(batch), L, device=device)
     pl = _t.zeros(len(batch), L, device=device)
     av = _t.zeros(len(batch), L, device=device)
+    ct = _t.zeros(len(batch), L, device=device)
     for bi, r in enumerate(batch):
         n = min(r["length"], L)
         rsa[bi, :n] = _t.from_numpy(r["rsa"][:n]).to(device)
         pl[bi, :n] = _t.from_numpy(r["plddt"][:n]).to(device)
         av[bi, :n] = _t.from_numpy(r["structure_available"][:n]).to(device)
-    return rsa, pl, av
+        ct[bi, :n] = _t.from_numpy(r["contacts"][:n]).to(device)
+    return rsa, pl, av, ct
 
 
 def drop_caid_targets(
@@ -314,6 +407,18 @@ def main(argv=None) -> int:
              "benchmark scoring.",
     )
     ap.add_argument(
+        "--pdb-missing-cache", default=None,
+        help="MobiDB ndjson (mobidb_pdbcov.ndjson) adding a disorder_pdb task "
+             "trained on CAID3 Disorder-PDB's own missing-residue definition "
+             "rather than DisProt's curated functional disorder.",
+    )
+    ap.add_argument("--pdb-missing-limit", type=int, default=0)
+    ap.add_argument(
+        "--wide-receptive-field", action="store_true",
+        help="Dilations 1/4/16/32 give a 213-residue field instead of 61, for "
+             "the same parameter count. IDRs frequently run past 100.",
+    )
+    ap.add_argument(
         "--structure-dim", type=int, default=0,
         help="Width of the AlphaFold rsa/pLDDT input block (0 = sequence only). "
              "Structure as an INPUT, not a post-hoc ensemble: fusing a trained "
@@ -356,6 +461,16 @@ def main(argv=None) -> int:
     rows = [r for r in rows if 20 <= r["length"] <= args.max_len]
     print(f"\nunion: {len(rows):,} proteins within length bounds")
 
+    if args.pdb_missing_cache and os.path.isfile(args.pdb_missing_cache):
+        print("adding disorder_pdb task from MobiDB missing-residue labels…")
+        extra = load_pdb_missing_rows(args.pdb_missing_cache, args.max_len,
+                                      args.pdb_missing_limit)
+        tasks = tasks + ("disorder_pdb",)
+        rows = merge_task_rows(rows, extra, tasks)
+        coverage["disorder_pdb"] = sum(
+            1 for r in rows if r["task_evidence"]["disorder_pdb"].any())
+        print(f"  union now {len(rows):,} proteins across {len(tasks)} tasks")
+
     if args.structure_dim:
         attach_structure(rows, args.structure_cache)
         have = sum(1 for r in rows if r.get("structure_available") is not None
@@ -375,7 +490,11 @@ def main(argv=None) -> int:
     # disorder pipeline has always applied this filter; the multi-task trainer
     # did not until it was caught, mid-run, by noticing the evaluator would have
     # scored a model trained on its own targets.
-    if not args.no_caid_filter:
+    # --stats-only trains nothing, so requiring BLAST there would block a
+    # read-only coverage check on any machine without the module.
+    if args.stats_only:
+        leak = {"skipped": "stats-only"}
+    elif not args.no_caid_filter:
         rows, leak = drop_caid_targets(
             rows, args.caid_reference, args.leak_identity,
             allow_missing_homology=args.allow_missing_homology_filter)
@@ -424,7 +543,9 @@ def main(argv=None) -> int:
         mix = ScalarMix(len(layer_ids)).to(device)
         head = MultiTaskLiteHead(in_dim=dim, tasks=tasks,
                                  dropout=cfg.head_dropout,
-                                 structure_dim=args.structure_dim).to(device)
+                                 structure_dim=args.structure_dim,
+                                 dilations=(WIDE_DILATIONS
+                                            if args.wide_receptive_field else None)).to(device)
         params = list(head.parameters()) + list(mix.parameters())
         opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=cfg.weight_decay)
         print(f"\n── fold {fold_idx+1}/{args.n_folds}  train={len(train_rows)} "
@@ -441,8 +562,8 @@ def main(argv=None) -> int:
                 tokens = tokens.to(device)
                 feats = mix(embed(esm, tokens, layer_ids))
                 L = feats.shape[1]
-                sr, sp, sa = structure_batch(batch, L, device)
-                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa)
+                sr, sp, sa, sc = structure_batch(batch, L, device)
+                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa, contacts=sc)
                 lab, ev = {}, {}
                 for t in tasks:
                     lab[t] = torch.zeros(len(batch), L, device=device)
@@ -475,8 +596,8 @@ def main(argv=None) -> int:
                 _, _, tokens = batch_converter(data)
                 tokens = tokens.to(device)
                 feats = mix(embed(esm, tokens, layer_ids))
-                sr, sp, sa = structure_batch(batch, feats.shape[1], device)
-                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa)
+                sr, sp, sa, sc = structure_batch(batch, feats.shape[1], device)
+                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa, contacts=sc)
                 for t in tasks:
                     p = torch.sigmoid(logits[t]).float().cpu().numpy()
                     for bi, r in enumerate(batch):
@@ -546,7 +667,9 @@ def main(argv=None) -> int:
         mix = ScalarMix(len(layer_ids)).to(device)
         head = MultiTaskLiteHead(in_dim=dim, tasks=tasks,
                                  dropout=cfg.head_dropout,
-                                 structure_dim=args.structure_dim).to(device)
+                                 structure_dim=args.structure_dim,
+                                 dilations=(WIDE_DILATIONS
+                                            if args.wide_receptive_field else None)).to(device)
         params = list(head.parameters()) + list(mix.parameters())
         opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=cfg.weight_decay)
         for epoch in range(args.epochs):
@@ -560,8 +683,8 @@ def main(argv=None) -> int:
                 tokens = tokens.to(device)
                 feats = mix(embed(esm, tokens, layer_ids))
                 L = feats.shape[1]
-                sr, sp, sa = structure_batch(batch, L, device)
-                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa)
+                sr, sp, sa, sc = structure_batch(batch, L, device)
+                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa, contacts=sc)
                 lab, ev = {}, {}
                 for t in tasks:
                     lab[t] = torch.zeros(len(batch), L, device=device)
@@ -594,6 +717,7 @@ def main(argv=None) -> int:
             "backbone": args.backbone,
             "embed_dim": dim,
             "structure_dim": args.structure_dim,
+            "wide_receptive_field": args.wide_receptive_field,
             "n_train_proteins": len(rows),
             "caid_leak_filter": None if args.no_caid_filter else leak,
         }, ckpt)

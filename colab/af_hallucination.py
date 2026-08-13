@@ -131,14 +131,20 @@ def run_af_rescue_report(
 
         from colab.biological_utility import evidenced
 
-        keep = evidenced(item)
+        # ONE mask, applied to every array. Selecting labels by label evidence
+        # and then re-selecting by pLDDT validity indexes a 329-element array
+        # with a 340-element mask — the two masks live in different spaces the
+        # moment the first one is applied.
+        plddt = np.asarray(plddt, dtype=np.float32)
+        keep = evidenced(item) & ~np.isnan(plddt)
         if keep.sum() < 5:
             proteins_missing += 1
             continue
         labels = np.asarray(item["labels"], dtype=np.float32)[keep]
         probs = np.asarray(item["probs"], dtype=np.float32)[keep]
+        plddt_kept = plddt[keep]
         metrics = compute_hallucination_metrics(
-            labels, probs, plddt[keep], threshold, high_plddt_threshold,
+            labels, probs, plddt_kept, threshold, high_plddt_threshold,
         )
         if metrics.get("insufficient_data"):
             proteins_missing += 1
@@ -146,10 +152,9 @@ def run_af_rescue_report(
 
         proteins_with_plddt += 1
         per_protein.append({"id": pid, **metrics})
-        valid = ~np.isnan(plddt)
-        all_labels.append(labels[valid])
-        all_probs.append(probs[valid])
-        all_plddt.append(plddt[valid])
+        all_labels.append(labels)
+        all_probs.append(probs)
+        all_plddt.append(plddt_kept)
 
     if not all_labels:
         return {

@@ -76,6 +76,27 @@ def smooth_window(x: np.ndarray, window: int = RSA_SMOOTH_WINDOW) -> np.ndarray:
     return out
 
 
+def contact_density(coords: np.ndarray, cutoff: float = 10.0) -> np.ndarray:
+    """Neighbours within ``cutoff`` Angstroms of each residue's CB.
+
+    Complementary to solvent accessibility rather than a restatement of it.
+    Accessibility is a surface property — an exposed loop on a folded domain
+    scores high — whereas contact density measures how much structure a residue
+    is embedded in. A disordered residue in an AlphaFold model is typically both
+    exposed *and* uncontacted, while an ordered surface residue is exposed and
+    densely contacted, so the pair separates cases either alone confuses.
+
+    Counting is O(L^2) in distance but L is capped at 1022 here, so this is
+    milliseconds per protein and needs no neighbour structure.
+    """
+    n = len(coords)
+    if n == 0:
+        return np.zeros(0, dtype=np.float32)
+    d = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=-1)
+    within = (d < cutoff).sum(axis=1) - 1          # exclude self
+    return within.astype(np.float32)
+
+
 def rsa_from_structure(path: str) -> tuple[np.ndarray, str, np.ndarray]:
     """Per-residue (rsa, sequence, pLDDT) from an AlphaFold mmCIF.
 
@@ -95,6 +116,7 @@ def rsa_from_structure(path: str) -> tuple[np.ndarray, str, np.ndarray]:
         rsa: list[float] = []
         seq: list[str] = []
         plddt: list[float] = []
+        centres: list[np.ndarray] = []
         for residue in next(iter(model)):
             aa = THREE_TO_ONE.get(residue.get_resname())
             if aa is None:
@@ -103,11 +125,20 @@ def rsa_from_structure(path: str) -> tuple[np.ndarray, str, np.ndarray]:
             rsa.append(float(residue.sasa) / MAX_ASA_TIEN[aa])
             bfactors = [atom.get_bfactor() for atom in residue]
             plddt.append(float(np.mean(bfactors)) if bfactors else float("nan"))
+            # CB where present, CA otherwise (glycine has no CB).
+            atom = residue["CB"] if "CB" in residue else (
+                residue["CA"] if "CA" in residue else None)
+            centres.append(
+                np.asarray(atom.get_coord(), dtype=np.float32)
+                if atom is not None else np.full(3, np.nan, dtype=np.float32)
+            )
 
+    coords = np.asarray(centres, dtype=np.float32) if centres else np.zeros((0, 3))
     return (
         np.asarray(rsa, dtype=np.float32),
         "".join(seq),
         np.asarray(plddt, dtype=np.float32),
+        contact_density(coords),
     )
 
 
@@ -178,15 +209,21 @@ def structure_features(
         if path is None:
             return None
     try:
-        rsa, seq, plddt = rsa_from_structure(path)
+        rsa, seq, plddt, contacts = rsa_from_structure(path)
     except Exception:
         return None
     if seq != target_sequence:
         return None
+    # Contacts are smoothed on the same window as rsa: both are regional
+    # properties, and an unsmoothed count is as noisy per-residue as raw
+    # accessibility was (0.8688 against 0.9459 smoothed).
     return {
         "rsa": smooth_window(rsa, window).astype(np.float32),
         "rsa_raw": rsa,
         "plddt": plddt,
+        # Scaled by a typical globular-core count so the channel arrives at
+        # roughly unit range, like rsa and pLDDT/100.
+        "contacts": (smooth_window(contacts, window) / 20.0).astype(np.float32),
         "window": int(window),
         "uniprot_acc": uniprot_acc.upper(),
     }

@@ -290,4 +290,35 @@ class TestStructureAwareness:
             torch.rand(2, 37), torch.rand(2, 37) * 100, torch.ones(2, 37),
             length=37, batch=2, device=torch.device("cpu"),
         )
-        assert block.shape == (2, 4, 37)
+        assert block.shape == (2, StructureChannels.N_CHANNELS, 37)
+
+    def test_contact_density_is_a_separate_channel_from_accessibility(self):
+        """An exposed loop on a folded domain is accessible AND densely
+        contacted; a disordered residue is accessible and uncontacted. Either
+        channel alone confuses those two, and they are exactly the false
+        positives a disorder predictor makes."""
+        from colab.lite_head import StructureChannels
+
+        ones = torch.ones(1, 20)
+        loop = StructureChannels.assemble(ones, ones * 80, ones, 20, 1,
+                                          torch.device("cpu"), contacts=ones)
+        idr = StructureChannels.assemble(ones, ones * 80, ones, 20, 1,
+                                         torch.device("cpu"),
+                                         contacts=torch.zeros(1, 20))
+        assert not torch.allclose(loop, idr)
+
+    def test_wide_receptive_field_covers_a_long_idr(self):
+        """IDRs frequently run past 100 residues; the default field is 61."""
+        from colab.lite_head import DEFAULT_DILATIONS, WIDE_DILATIONS, receptive_field
+
+        assert receptive_field(DEFAULT_DILATIONS, 4) == 61
+        assert receptive_field(WIDE_DILATIONS, 4) > 200
+
+    def test_wide_field_costs_no_extra_parameters(self):
+        """Dilation buys context, not weights."""
+        from colab.lite_head import MultiTaskLiteHead, WIDE_DILATIONS
+
+        narrow = MultiTaskLiteHead(in_dim=64, tasks=("linker",))
+        wide = MultiTaskLiteHead(in_dim=64, tasks=("linker",),
+                                 dilations=WIDE_DILATIONS)
+        assert narrow.n_trainable() == wide.n_trainable()
