@@ -154,42 +154,62 @@ def test_alignment_holds_across_evidence_levels(frac):
 
 
 class TestNoConsumerLeaksTheSentinel:
-    """Find sentinel leaks by inspection, not by crashing one stage at a time.
+    """Every consumer of aligned predictions must drop the sentinels.
 
     align_fold_predictions returns full-length arrays with -1 labels and NaN
-    probs where a label source evaluated nothing. Every consumer that *pools*
-    residues must drop those first. Each one I missed cost a multi-hour run:
+    probs where a label source evaluated nothing. Any consumer that pools those
+    residues must mask them first, or sklearn rejects the NaN / treats -1 as a
+    third class — always loudly, always after the GPU time is spent.
 
-      ensemble_v6 / meta_ensemble     found by reading the contract
-      caid_reporting pooled call      found by reading the contract
-      caid_reporting strata           crashed at 1h12 with
-                                      "Target is multiclass but average='binary'"
-      sota_ensemble, af_hallucination found by this test
-
-    A -1 in y_true makes sklearn treat the problem as multiclass; a NaN in
-    y_score raises. Both are loud, but only after the GPU time is spent.
+    This test ENUMERATES the importers rather than listing them. A hand-written
+    list is exactly how colab/inference_fusion.py was missed: five files were
+    audited, it was the sixth, and it cost another 27-minute run.
     """
 
-    CONSUMERS = [
-        ("colab/ensemble_v6.py", 'labels_concat.append'),
-        ("colab/meta_ensemble.py", 'chunks_y.append'),
-        ("colab/sota_ensemble.py", 'label_chunks.append'),
-        ("colab/caid_reporting.py", 'by_disorder['),
-        ("colab/af_hallucination.py", 'labels_list.append'),
-    ]
-
-    def _source(self, rel):
+    @staticmethod
+    def _consumers():
         from pathlib import Path
-        return (Path(__file__).resolve().parents[1] / rel).read_text()
 
-    @pytest.mark.parametrize("path,marker", CONSUMERS)
-    def test_pooling_sites_reference_the_evidence_mask(self, path, marker):
-        """Every file that pools aligned residues must consult `evidenced`."""
-        src = self._source(path)
-        assert marker in src, f"{path}: pooling site {marker!r} moved; re-audit"
-        assert "evidenced" in src or "pool_evidenced" in src, (
-            f"{path} pools aligned residues without consulting the evidence "
-            "mask — sentinels would be scored as real labels"
+        root = Path(__file__).resolve().parents[1] / "colab"
+        out = []
+        for path in sorted(root.glob("*.py")):
+            src = path.read_text()
+            if "align_fold_predictions(" not in src:
+                continue
+            if path.name == "biological_utility.py":     # defines it
+                continue
+            out.append((path.name, src))
+        return out
+
+    def test_consumers_are_discovered(self):
+        names = [n for n, _ in self._consumers()]
+        assert len(names) >= 5, f"expected several consumers, found {names}"
+
+    def test_every_consumer_consults_the_evidence_mask(self):
+        """Fails on any NEW file that aligns predictions and pools them without
+        masking — which is the case a fixed list cannot catch."""
+        offenders = []
+        for name, src in self._consumers():
+            uses_evidence = "evidenced" in src or "pool_evidenced" in src
+            # Only READS count. `new_item["probs"] = ...` is a substitution,
+            # not pooling, and its write-back path masks separately — counting
+            # assignments made fold_model_soup a false positive.
+            pools = False
+            for line in src.splitlines():
+                body = line.split("#", 1)[0]
+                for pat in ('item["labels"]', 'item["probs"]',
+                            '["labels"] for item', '["probs"] for item'):
+                    if pat not in body:
+                        continue
+                    lhs = body.split("=", 1)[0] if "=" in body else ""
+                    if pat in lhs and "==" not in body:
+                        continue          # assignment target, not a read
+                    pools = True
+            if pools and not uses_evidence:
+                offenders.append(name)
+        assert not offenders, (
+            f"{offenders} pool aligned residues without consulting the evidence "
+            "mask; sentinels would be scored as real labels"
         )
 
     def test_helpers_are_exported_for_consumers(self):
@@ -198,7 +218,7 @@ class TestNoConsumerLeaksTheSentinel:
         assert callable(evidenced) and callable(pool_evidenced)
 
     def test_sentinels_would_actually_break_sklearn(self):
-        """Justifies the whole guard: this is the failure it prevents."""
+        """Justifies the guard: this is the failure it prevents."""
         from sklearn.metrics import roc_auc_score
 
         y = np.array([0, 1, -1, 1], dtype=float)

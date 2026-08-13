@@ -237,11 +237,17 @@ def compute_af_subset_metrics(
         plddt = np.asarray(plddt_by_protein[pid], dtype=np.float32)
         if len(plddt) != len(item["probs"]):
             continue
-        valid = ~np.isnan(plddt)
+        # One combined mask: pLDDT present AND the residue carries a real
+        # label. Masking on pLDDT alone let the alignment sentinels through
+        # (NaN prob, -1 label) once evidence became partial under PDB-derived
+        # sources, and sklearn rejected the NaN 27 minutes into a recovery run.
+        from colab.biological_utility import evidenced
+
+        valid = ~np.isnan(plddt) & evidenced(item)
         if valid.sum() < 5:
             continue
-        probs_list.append(item["probs"][valid])
-        labels_list.append(item["labels"][valid])
+        probs_list.append(np.asarray(item["probs"], dtype=np.float32)[valid])
+        labels_list.append(np.asarray(item["labels"], dtype=np.float32)[valid])
 
     if not probs_list:
         return {"auc": None, "ap": None, "n_residues": 0}

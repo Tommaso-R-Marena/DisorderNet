@@ -391,9 +391,16 @@ def run_labeled_distrust_benchmark(
         pld = np.asarray(plddt_by_id[pid], dtype=np.float32).ravel()
         if len(pld) < L:
             continue
-        all_y.append(np.asarray(item["labels"], dtype=np.int8).ravel()[:L])
-        all_p.append(np.asarray(item["probs"], dtype=np.float32).ravel()[:L])
-        all_plddt.append(pld[:L])
+        # Drop residues the label source never evaluated; aligned items carry
+        # NaN probs and -1 labels there.
+        from colab.biological_utility import evidenced
+
+        keep = evidenced(item)[:L]
+        if keep.sum() < 5:
+            continue
+        all_y.append(np.asarray(item["labels"], dtype=np.int8).ravel()[:L][keep])
+        all_p.append(np.asarray(item["probs"], dtype=np.float32).ravel()[:L][keep])
+        all_plddt.append(pld[:L][keep])
 
     if not all_y:
         baselines = {"enabled": False, "insufficient_data": True}

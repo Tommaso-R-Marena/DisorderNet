@@ -585,7 +585,13 @@ def run_function_prediction_report(
     try:
         from colab.biological_utility import align_fold_predictions
         aligned = align_fold_predictions(proteins, fold_results, n_folds=n_folds)
-        dis_parts = [item["labels"] for item in aligned]
+        # Unevaluated residues carry -1, which is not "ordered"; comparing
+        # `dis > 0.5` on them is harmless but concatenating them misaligns the
+        # mask against y_true, so drop them consistently.
+        from colab.biological_utility import evidenced
+
+        dis_parts = [np.asarray(item["labels"], dtype=np.float32)[evidenced(item)]
+                     for item in aligned]
         if dis_parts:
             dis = np.concatenate([np.asarray(d, dtype=np.float32).ravel() for d in dis_parts])
             if len(dis) == len(y_true):

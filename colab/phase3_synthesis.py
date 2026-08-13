@@ -277,13 +277,16 @@ def run_structure_calibration_report(
         plddt = plddt_by_protein[pid]
         if len(plddt) != item["protein"]["length"]:
             continue
-        valid = ~np.isnan(plddt)
+        # One combined mask — pLDDT present AND a real label.
+        from colab.biological_utility import evidenced
+
+        valid = ~np.isnan(plddt) & evidenced(item)
         if valid.sum() == 0:
             continue
         proteins_used += 1
-        all_labels.append(item["labels"][valid])
-        all_probs.append(item["probs"][valid])
-        all_plddt.append(plddt[valid])
+        all_labels.append(np.asarray(item["labels"], dtype=np.float32)[valid])
+        all_probs.append(np.asarray(item["probs"], dtype=np.float32)[valid])
+        all_plddt.append(np.asarray(plddt, dtype=np.float32)[valid])
 
     if not all_labels:
         return {
