@@ -205,12 +205,13 @@ def main(argv=None) -> int:
                 tokens = tokens.to(device)
                 out = esm(tokens, repr_layers=layer_ids, return_contacts=False)
                 feats = mix([out["representations"][i][:, 1:-1, :] for i in layer_ids])
-                sr = sp = sa = None
+                sr = sp = sa = sc = None
                 if structure_dim:
                     L = feats.shape[1]
                     sr = torch.zeros(len(batch), L, device=device)
                     sp = torch.zeros(len(batch), L, device=device)
                     sa = torch.zeros(len(batch), L, device=device)
+                    sc = torch.zeros(len(batch), L, device=device)
                     for bi, p in enumerate(batch):
                         f = structures.get(p["id"]) or {}
                         if not f:
@@ -221,7 +222,12 @@ def main(argv=None) -> int:
                         sr[bi, :k] = torch.from_numpy(r[:k]).to(device)
                         sp[bi, :k] = torch.from_numpy(q[:k]).to(device)
                         sa[bi, :k] = 1.0
-                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa)[task]
+                        ct = np.asarray(f.get("contacts", np.zeros(k)),
+                                        dtype=np.float32)
+                        sc[bi, :min(len(ct), k)] = torch.from_numpy(
+                            ct[:k]).to(device)
+                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa,
+                              contacts=sc)[task]
                 probs = torch.sigmoid(logits).float().cpu().numpy()
                 for bi, p in enumerate(batch):
                     lab = np.asarray(p["labels"], dtype=np.int8)
