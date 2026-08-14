@@ -184,6 +184,7 @@ def main(argv=None) -> int:
     os.makedirs(subs, exist_ok=True)
 
     results = {}
+    predictions_by_task: dict[str, dict] = {}
     for task in TASKS:
         if task not in tasks:
             continue
@@ -217,8 +218,11 @@ def main(argv=None) -> int:
                   f"meaningless.", file=sys.stderr)
             return 2
 
+        # One file per task. A single {OURS}.caid was overwritten by each task
+        # in turn, so the archived submission was whichever task ran last.
         our_path = write_caid_submission(
-            os.path.join(subs, f"{OURS}.caid"), preds, ref)
+            os.path.join(subs, f"{OURS}-{task}.caid"), preds, ref)
+        predictions_by_task[task] = preds
         ours = score_method(ref, {k: np.asarray(v) for k, v in preds.items()})
 
         board = official_leaderboard(task, args.refs, args.predictions)
@@ -234,6 +238,7 @@ def main(argv=None) -> int:
             if not os.path.exists(dst):
                 os.symlink(os.path.join(args.predictions, fn), dst)
         shutil.copy(our_path, os.path.join(staged, f"{OURS}.caid"))
+        our_name = OURS
 
         leader = LEADERS[task][0]
         paired = {}
@@ -254,6 +259,37 @@ def main(argv=None) -> int:
             "seconds_per_target": round(wall / max(len(ref), 1), 4),
             "submission": our_path,
         }
+
+    # Binding-IDR is not a separate task. Its labels are the Binding labels,
+    # identical on every evaluated residue, restricted to the residues
+    # Disorder-NOX evaluates. CAID scores one submission against both
+    # references, and its entrants submit one file — bindEmbed21IDR and ESpritz-D
+    # each appear in both tables from a single prediction. Training a separate
+    # head against a reconstructed "disordered-and-not-binding" convention
+    # produced a predictor for a different question, which is how it landed
+    # below chance. Score the binding head where the binding head belongs.
+    if "binding" in predictions_by_task:
+        idr_ref = read_reference(os.path.join(args.refs, "binding_idr.fasta"))
+        shared = {t: v for t, v in predictions_by_task["binding"].items()
+                  if t in idr_ref}
+        if shared:
+            cross_path = write_caid_submission(
+                os.path.join(subs, f"{OURS}-binding-on-idr.caid"), shared, idr_ref)
+            scored = score_method(idr_ref,
+                                  {k: np.asarray(v) for k, v in shared.items()})
+            if scored:
+                results["binding_idr_from_binding_head"] = {
+                    "ours": scored,
+                    "note": ("the binding head scored on the Binding-IDR "
+                             "reference, which is how CAID scores its own "
+                             "entrants"),
+                    "submission": cross_path,
+                }
+                own = (results.get("binding_idr") or {}).get("ours")
+                if own:
+                    print(f"\nbinding_idr: dedicated head {own['auc']:.4f} vs "
+                          f"binding head scored on the same reference "
+                          f"{scored['auc']:.4f}")
 
     print(f"\n{'=' * 92}\n OFFICIAL CAID3 — all comparisons paired on shared "
           f"targets\n{'=' * 92}")
