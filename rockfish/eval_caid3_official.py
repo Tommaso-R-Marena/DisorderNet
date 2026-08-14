@@ -353,7 +353,7 @@ def main(argv=None) -> int:
     print(f"{'benchmark':<14}{'opponent':<26}{'delta':>9}{'95% CI':>20}"
           f"{'p':>8}{'targets':>9}")
     for task, r in results.items():
-        for opp, pr in r["paired"].items():
+        for opp, pr in (r.get("paired") or {}).items():
             if "error" in pr:
                 print(f"{task:<14}{opp:<26}  {pr['error']}")
                 continue

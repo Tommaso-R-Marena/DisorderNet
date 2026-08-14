@@ -260,3 +260,96 @@ class TestAgainstTheRealChallenge:
                              "PUNCH2", "SPOT-Disorder2", n_boot=200)
         assert r["n_common_targets"] < full["n_scored_targets"]
         assert r["auc_a"] > full["auc"]
+
+
+class TestCoverageBias:
+    """Declining targets is worth AUC, and the report has to show it."""
+
+    def _setup(self, tmp_path):
+        """Two targets: one easy and short, one hard and long. The 'skipper'
+        predicts only the easy one, which is the whole phenomenon in miniature."""
+        rng = np.random.default_rng(0)
+        easy_lab = np.array([0, 0, 1, 1] * 6)
+        hard_lab = np.array([0, 1] * 40)
+        recs = [("EASY", "A" * len(easy_lab), "".join(map(str, easy_lab))),
+                ("HARD", "A" * len(hard_lab), "".join(map(str, hard_lab)))]
+        refs = tmp_path / "refs"
+        refs.mkdir()
+        (refs / "linker.fasta").write_text(
+            "".join(f">{i}\n{s}\n{l}\n" for i, s, l in recs))
+        preds = tmp_path / "preds"
+        preds.mkdir()
+
+        def emit(name, rows):
+            (preds / f"{name}.caid").write_text("".join(
+                f">{t}\n" + "".join(f"{j}\tA\t{v:.4f}\t0\n"
+                                    for j, v in enumerate(s, 1))
+                for t, s in rows))
+
+        # Yardstick answers both: sharp on EASY, near-random on HARD.
+        emit("yardstick", [
+            ("EASY", easy_lab * 2.0 + rng.normal(0, 0.1, len(easy_lab))),
+            ("HARD", hard_lab * 0.05 + rng.normal(0, 1.0, len(hard_lab))),
+        ])
+        # Skipper answers only EASY.
+        emit("skipper", [("EASY", easy_lab * 2.0 + rng.normal(0, 0.1, len(easy_lab)))])
+        return str(refs), str(preds)
+
+    def test_it_finds_the_skipper_and_prices_the_skip(self, tmp_path):
+        from colab.caid3_official import coverage_bias_report
+
+        refs, preds = self._setup(tmp_path)
+        rep = coverage_bias_report("linker", refs, preds, "yardstick",
+                                   min_skipped=1)
+        rows = {m["method"]: m for m in rep["methods"]}
+        assert "skipper" in rows
+        r = rows["skipper"]
+        assert r["n_skipped"] == 1
+        assert r["yardstick_on_attempted"] > r["yardstick_on_skipped"]
+        assert r["skipping_worth"] > 0
+
+    def test_a_fully_covering_method_is_not_reported(self, tmp_path):
+        from colab.caid3_official import coverage_bias_report
+
+        refs, preds = self._setup(tmp_path)
+        rep = coverage_bias_report("linker", refs, preds, "yardstick",
+                                   min_skipped=1)
+        assert "yardstick" not in {m["method"] for m in rep["methods"]}
+
+    def test_it_records_the_length_of_what_was_skipped(self, tmp_path):
+        """The mechanism is length: skipped targets are the long ones."""
+        from colab.caid3_official import coverage_bias_report
+
+        refs, preds = self._setup(tmp_path)
+        rep = coverage_bias_report("linker", refs, preds, "yardstick",
+                                   min_skipped=1)
+        r = next(m for m in rep["methods"] if m["method"] == "skipper")
+        assert r["median_length_skipped"] == 80
+        assert r["median_length_all"] in (24, 52, 80)
+
+
+@pytest.mark.skipif(not (has_refs and has_preds),
+                    reason="set CAID3_OFFICIAL_DIR and CAID3_PREDICTIONS_DIR")
+class TestRankFusionOnTheRealChallenge:
+    def test_fusion_leaves_a_single_input_unchanged(self):
+        """Ranking is monotone on the pooled vector, so one input in, same AUC
+        out. If this drifts, the fusion is altering the metric rather than the
+        prediction — which is what per-target normalisation did."""
+        from colab.caid3_official import rank_fuse
+
+        ref = read_reference(os.path.join(CACHE, "disorder_nox.fasta"))
+        p = read_caid_predictions(os.path.join(PREDS, "AlphaFold-rsa.caid"))
+        alone = score_method(ref, p)
+        fused = rank_fuse([p], ref)
+        assert score_method(ref, fused)["auc"] == pytest.approx(alone["auc"],
+                                                               abs=1e-6)
+
+    def test_fusion_is_order_independent(self):
+        from colab.caid3_official import rank_fuse
+
+        ref = read_reference(os.path.join(CACHE, "linker.fasta"))
+        a = read_caid_predictions(os.path.join(PREDS, "AlphaFold-rsa.caid"))
+        b = read_caid_predictions(os.path.join(PREDS, "AlphaFold3-rsa.caid"))
+        ab = score_method(ref, rank_fuse([a, b], ref))["auc"]
+        ba = score_method(ref, rank_fuse([b, a], ref))["auc"]
+        assert ab == pytest.approx(ba, abs=1e-9)

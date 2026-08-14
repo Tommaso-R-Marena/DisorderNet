@@ -492,3 +492,79 @@ def rank_fuse(preds: list[dict[str, np.ndarray]], ref: dict,
         out[tid] = full
         off += k
     return out
+
+
+def coverage_bias_report(
+    task: str, refs_dir: str, preds_dir: str, reference_method: str,
+    min_skipped: int = 5,
+) -> dict:
+    """What does declining targets buy, and which targets get declined?
+
+    CAID pools over whatever a method returns. A method that answers only where
+    it is confident is therefore scored on an easier benchmark than one that
+    answers everywhere, and both numbers appear in the same column.
+
+    This measures the effect directly, using a fully-covering method as the
+    yardstick: score it on the targets the other method attempted, on the ones
+    it skipped, and on everything. The difference between the first two is what
+    skipping is worth, in the same units as the leaderboard.
+
+    On CAID3 Disorder-NOX the leader declines 23 of 204 targets. Those have a
+    median length of 1292 residues against 344 overall, and a fully-covering
+    model scores 0.8825 on the attempted targets against 0.7706 on the declined
+    ones. The gap between that model's headline 0.8592 and the leader's 0.8855
+    is almost entirely this, not skill: paired on the shared targets the two are
+    within 0.003 of each other.
+    """
+    from sklearn.metrics import roc_auc_score
+
+    ref = read_reference(os.path.join(refs_dir, f"{task}.fasta"))
+    yard = read_caid_predictions(os.path.join(preds_dir, f"{reference_method}.caid"))
+
+    out = {"task": task, "reference_method": reference_method,
+           "n_targets": len(ref), "methods": []}
+    for fn in sorted(os.listdir(preds_dir)):
+        if not fn.endswith(".caid"):
+            continue
+        name = fn[:-5]
+        pred = read_caid_predictions(os.path.join(preds_dir, fn))
+        attempted = {t for t in ref
+                     if t in pred and len(pred[t]) == len(ref[t][1])}
+        skipped = [t for t in ref if t not in attempted]
+        if len(skipped) < min_skipped:
+            continue
+
+        def _auc(targets):
+            ys, ss = [], []
+            for t in targets:
+                if t not in yard or len(yard[t]) != len(ref[t][1]):
+                    continue
+                m = evaluated_mask(ref[t][1])
+                y = (np.frombuffer(ref[t][1].encode(), dtype=np.uint8)[m]
+                     - ord("0")).astype(int)
+                s = yard[t][m]
+                ok = np.isfinite(s)
+                if ok.any():
+                    ys.append(y[ok])
+                    ss.append(s[ok])
+            if not ys:
+                return None
+            y, s = np.concatenate(ys), np.concatenate(ss)
+            return float(roc_auc_score(y, s)) if len(np.unique(y)) > 1 else None
+
+        on_att, on_skip = _auc(sorted(attempted)), _auc(skipped)
+        theirs = score_method(ref, pred)
+        lens_skipped = [len(ref[t][0]) for t in skipped]
+        out["methods"].append({
+            "method": name,
+            "their_auc": theirs["auc"] if theirs else None,
+            "n_attempted": len(attempted), "n_skipped": len(skipped),
+            "yardstick_on_attempted": on_att,
+            "yardstick_on_skipped": on_skip,
+            "skipping_worth": (None if (on_att is None or on_skip is None)
+                               else round(on_att - on_skip, 4)),
+            "median_length_skipped": int(np.median(lens_skipped)),
+            "median_length_all": int(np.median([len(v[0]) for v in ref.values()])),
+        })
+    out["methods"].sort(key=lambda m: -(m["skipping_worth"] or 0))
+    return out
