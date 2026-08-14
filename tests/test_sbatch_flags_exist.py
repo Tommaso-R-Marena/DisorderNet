@@ -154,5 +154,30 @@ def test_gpu_jobs_request_a_gpu(path):
         f"model means a run that never finishes rather than one that fails.")
 
 
+
+@pytest.mark.parametrize("path", sbatch_files(),
+                         ids=[os.path.basename(p) for p in sbatch_files()] or None)
+def test_scripts_running_their_own_python_disable_the_autorun(path):
+    """_common.sh dispatches the publish pipeline at the end of sourcing.
+
+    A batch script that sources it and then runs its own python gets both: the
+    sourcing fires run_disordernet.py with STAGE, argparse rejects the stage,
+    `bash -ue` aborts, and the script's own command never runs. Two GPU
+    submissions were spent on this before the cause was visible, because the
+    error names run_disordernet.py — a file the batch script never mentions.
+    """
+    text = open(path).read()
+    if "_common.sh" not in text:
+        pytest.skip("does not source _common.sh")
+    own_python = INVOCATION.search(text)
+    if not own_python:
+        pytest.skip("relies on the autorun, as intended")
+    assert re.search(r"DISORDERNET_COMMON_AUTORUN=0", text), (
+        f"{os.path.basename(path)} sources _common.sh and also runs "
+        f"{own_python.group(1)}. Set DISORDERNET_COMMON_AUTORUN=0 before "
+        f"sourcing, or the autorun fires run_disordernet.py first and this "
+        f"script's python is never reached.")
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))

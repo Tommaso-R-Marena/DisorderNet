@@ -49,6 +49,10 @@ else
   echo "ERROR: cannot locate rockfish/slurm/_common.sh" >&2
   exit 1
 fi
+# _common.sh runs the whole publish pipeline at the end of sourcing unless this
+# is set. Without it, sourcing dispatches run_disordernet.py with STAGE — which
+# is not one of its stages — and this script's own python is never reached.
+export DISORDERNET_COMMON_AUTORUN=0
 # shellcheck source=_common.sh
 source "${COMMON_SH}"
 
