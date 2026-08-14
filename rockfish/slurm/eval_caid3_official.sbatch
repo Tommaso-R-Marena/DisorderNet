@@ -26,7 +26,13 @@
 : "${EVAL_NBOOT:=2000}"
 export STAGE EVAL_CKPT EVAL_REFS EVAL_PREDS EVAL_STRUCTURES EVAL_NBOOT
 
-PROJECT_DIR="${DISORDERNET_REPO:-${HOME}/DisorderNet}"
+# No default. DISORDERNET_REPO silently defaulting to ~/DisorderNet sent this
+# job into a different checkout, whose older _common.sh dispatches the pipeline
+# at source time — so it ran run_disordernet.py with a stage that does not exist
+# instead of the script named below, and created directories in a repo it was
+# never meant to touch. A wrong checkout is not a condition to guess at.
+: "${DISORDERNET_REPO:?Set DISORDERNET_REPO to the checkout to run from}"
+PROJECT_DIR="${DISORDERNET_REPO}"
 ENV_DIR="${DISORDERNET_VENV:-${HOME}/venvs/disordernet}"
 RESULTS_DIR="${DISORDERNET_RESULTS:-${HOME}/disordernet_runs}"
 export DISORDERNET_REPO="${PROJECT_DIR}"
