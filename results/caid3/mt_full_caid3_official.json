@@ -1,0 +1,651 @@
+{
+  "disorder_pdb": {
+    "ours": {
+      "auc": 0.9602611921287791,
+      "aps": 0.9328465091979466,
+      "n_residues": 99239,
+      "prevalence": 0.3164179405274136,
+      "n_reference_targets": 319,
+      "n_scored_targets": 319,
+      "missing_targets": [],
+      "length_mismatch_targets": [],
+      "coverage": 1.0
+    },
+    "rank": 1,
+    "fused": {
+      "auc": 0.9628204534792221,
+      "aps": 0.937054666675547,
+      "n_residues": 99239,
+      "prevalence": 0.3164179405274136,
+      "n_reference_targets": 319,
+      "n_scored_targets": 319,
+      "missing_targets": [],
+      "length_mismatch_targets": [],
+      "coverage": 1.0
+    },
+    "fused_rank": 1,
+    "n_methods": 115,
+    "leader": "PUNCH2",
+    "leader_auc": 0.955,
+    "top_by_auc": [
+      {
+        "method": "PUNCH2",
+        "auc": 0.955152600039246,
+        "aps": 0.9290125139902771,
+        "coverage": 1.0
+      },
+      {
+        "method": "PUNCH2-Light",
+        "auc": 0.9524923550183252,
+        "aps": 0.9254728966983649,
+        "coverage": 1.0
+      },
+      {
+        "method": "AlphaFold-rsa",
+        "auc": 0.9497720505481281,
+        "aps": 0.9207925639104091,
+        "coverage": 1.0
+      },
+      {
+        "method": "SPOT-Disorder2",
+        "auc": 0.9491737244032901,
+        "aps": 0.9201356231437708,
+        "coverage": 0.9341692789968652
+      },
+      {
+        "method": "AlphaFold3-rsa",
+        "auc": 0.9476489016610992,
+        "aps": 0.9132305956789921,
+        "coverage": 1.0
+      }
+    ],
+    "paired": {
+      "PUNCH2": {
+        "task": "disorder_pdb",
+        "method_a": "DisorderNet",
+        "method_b": "PUNCH2",
+        "auc_a": 0.9602616169752987,
+        "auc_b": 0.955152600039246,
+        "delta_auc": 0.005109016936052702,
+        "aps_a": 0.9328150925554546,
+        "aps_b": 0.9290125139902771,
+        "delta_aps": 0.003802578565177517,
+        "delta_ci": [
+          -0.002428675338455971,
+          0.013392030137696787
+        ],
+        "p_two_sided": 0.2048975512243878,
+        "n_common_targets": 319,
+        "n_residues": 99239,
+        "n_boot_used": 2000
+      },
+      "AlphaFold-rsa": {
+        "task": "disorder_pdb",
+        "method_a": "DisorderNet",
+        "method_b": "AlphaFold-rsa",
+        "auc_a": 0.9602616169752987,
+        "auc_b": 0.9497720505481281,
+        "delta_auc": 0.010489566427170582,
+        "aps_a": 0.9328150925554546,
+        "aps_b": 0.9207925639104091,
+        "delta_aps": 0.012022528645045494,
+        "delta_ci": [
+          0.0019389662869606305,
+          0.02011167879345139
+        ],
+        "p_two_sided": 0.012993503248375811,
+        "n_common_targets": 319,
+        "n_residues": 99239,
+        "n_boot_used": 2000
+      },
+      "AlphaFold-rsa(fused-vs-leader)": {
+        "task": "disorder_pdb",
+        "method_a": "DisorderNet-fused",
+        "method_b": "PUNCH2",
+        "auc_a": 0.9628205041791382,
+        "auc_b": 0.955152600039246,
+        "delta_auc": 0.007667904139892268,
+        "aps_a": 0.9370367771103316,
+        "aps_b": 0.9290125139902771,
+        "delta_aps": 0.008024263120054553,
+        "delta_ci": [
+          0.0019163074406220975,
+          0.014416031216304548
+        ],
+        "p_two_sided": 0.005997001499250375,
+        "n_common_targets": 319,
+        "n_residues": 99239,
+        "n_boot_used": 2000
+      }
+    },
+    "inference_seconds": 15.7,
+    "seconds_per_target": 0.0492,
+    "submission": "/scratch4/sfried3/jbeale3_disordernet/multitask_full/caid_submissions/DisorderNet-disorder_pdb.caid"
+  },
+  "disorder_nox": {
+    "ours": {
+      "auc": 0.842162141034883,
+      "aps": 0.6116725718181812,
+      "n_residues": 99977,
+      "prevalence": 0.2637306580513518,
+      "n_reference_targets": 204,
+      "n_scored_targets": 204,
+      "missing_targets": [],
+      "length_mismatch_targets": [],
+      "coverage": 1.0
+    },
+    "rank": 13,
+    "fused": {
+      "auc": 0.8644532140807203,
+      "aps": 0.6605052988411183,
+      "n_residues": 99977,
+      "prevalence": 0.2637306580513518,
+      "n_reference_targets": 204,
+      "n_scored_targets": 204,
+      "missing_targets": [],
+      "length_mismatch_targets": [],
+      "coverage": 1.0
+    },
+    "fused_rank": 5,
+    "n_methods": 115,
+    "leader": "ESMDisPred-2PDB",
+    "leader_auc": 0.885,
+    "top_by_auc": [
+      {
+        "method": "ESMDisPred-2PDB",
+        "auc": 0.8854639060132607,
+        "aps": 0.7541724131882384,
+        "coverage": 0.8872549019607843
+      },
+      {
+        "method": "ESMDisPred-1",
+        "auc": 0.8763483565603908,
+        "aps": 0.7450185440661744,
+        "coverage": 0.8823529411764706
+      },
+      {
+        "method": "ESMDisPred-2",
+        "auc": 0.8723169864296217,
+        "aps": 0.7430918565338438,
+        "coverage": 0.8872549019607843
+      },
+      {
+        "method": "DisoFLAG-IDR",
+        "auc": 0.8682569691657609,
+        "aps": 0.7139327051364759,
+        "coverage": 0.9754901960784313
+      },
+      {
+        "method": "EBIND-protein",
+        "auc": 0.8643493170180845,
+        "aps": 0.6844758293731621,
+        "coverage": 0.8774509803921569
+      }
+    ],
+    "paired": {
+      "ESMDisPred-2PDB": {
+        "task": "disorder_nox",
+        "method_a": "DisorderNet",
+        "method_b": "ESMDisPred-2PDB",
+        "auc_a": 0.8783141656700171,
+        "auc_b": 0.8854639060132607,
+        "delta_auc": -0.007149740343243671,
+        "aps_a": 0.7505212709756213,
+        "aps_b": 0.7541724131882384,
+        "delta_aps": -0.0036511422126170867,
+        "delta_ci": [
+          -0.02419716287063487,
+          0.01044078628020953
+        ],
+        "p_two_sided": 0.4607696151924038,
+        "n_common_targets": 181,
+        "n_residues": 64231,
+        "n_boot_used": 2000
+      },
+      "AlphaFold-rsa": {
+        "task": "disorder_nox",
+        "method_a": "DisorderNet",
+        "method_b": "AlphaFold-rsa",
+        "auc_a": 0.8421581783889036,
+        "auc_b": 0.8356925093785155,
+        "delta_auc": 0.006465669010388142,
+        "aps_a": 0.6100845480687682,
+        "aps_b": 0.5792827864937271,
+        "delta_aps": 0.03080176157504111,
+        "delta_ci": [
+          -0.028628738939297703,
+          0.04315898749275534
+        ],
+        "p_two_sided": 0.7156421789105447,
+        "n_common_targets": 204,
+        "n_residues": 99977,
+        "n_boot_used": 2000
+      },
+      "AlphaFold-rsa(fused-vs-leader)": {
+        "task": "disorder_nox",
+        "method_a": "DisorderNet-fused",
+        "method_b": "ESMDisPred-2PDB",
+        "auc_a": 0.8878073959754073,
+        "auc_b": 0.8854639060132607,
+        "delta_auc": 0.0023434899621465055,
+        "aps_a": 0.755190013227068,
+        "aps_b": 0.7541724131882384,
+        "delta_aps": 0.001017600038829669,
+        "delta_ci": [
+          -0.012844820824341867,
+          0.017506643719878465
+        ],
+        "p_two_sided": 0.7326336831584208,
+        "n_common_targets": 181,
+        "n_residues": 64231,
+        "n_boot_used": 2000
+      }
+    },
+    "inference_seconds": 9.69,
+    "seconds_per_target": 0.0475,
+    "submission": "/scratch4/sfried3/jbeale3_disordernet/multitask_full/caid_submissions/DisorderNet-disorder_nox.caid"
+  },
+  "binding": {
+    "ours": {
+      "auc": 0.7649173515058207,
+      "aps": 0.21505986068319607,
+      "n_residues": 28263,
+      "prevalence": 0.10582740685702155,
+      "n_reference_targets": 52,
+      "n_scored_targets": 52,
+      "missing_targets": [],
+      "length_mismatch_targets": [],
+      "coverage": 1.0
+    },
+    "rank": 11,
+    "fused": {
+      "auc": 0.7452554323305466,
+      "aps": 0.17923556136049507,
+      "n_residues": 28263,
+      "prevalence": 0.10582740685702155,
+      "n_reference_targets": 52,
+      "n_scored_targets": 52,
+      "missing_targets": [],
+      "length_mismatch_targets": [],
+      "coverage": 1.0
+    },
+    "fused_rank": 24,
+    "n_methods": 115,
+    "leader": "DisoFLAG-PB",
+    "leader_auc": 0.776,
+    "top_by_auc": [
+      {
+        "method": "ESpritz-D",
+        "auc": 0.797226496679021,
+        "aps": 0.24626775610473095,
+        "coverage": 1.0
+      },
+      {
+        "method": "rawMSA",
+        "auc": 0.7808561804438323,
+        "aps": 0.27162100711349596,
+        "coverage": 1.0
+      },
+      {
+        "method": "DisoFLAG-PB",
+        "auc": 0.7759503784666183,
+        "aps": 0.24539291639774236,
+        "coverage": 0.9807692307692307
+      },
+      {
+        "method": "IPA-AF2-Protein-bind",
+        "auc": 0.7755051520379574,
+        "aps": 0.24877336477363488,
+        "coverage": 0.8076923076923077
+      },
+      {
+        "method": "DisoPred",
+        "auc": 0.7750200331678536,
+        "aps": 0.21985838237439514,
+        "coverage": 0.9423076923076923
+      }
+    ],
+    "paired": {
+      "DisoFLAG-PB": {
+        "task": "binding",
+        "method_a": "DisorderNet",
+        "method_b": "DisoFLAG-PB",
+        "auc_a": 0.7487181143382144,
+        "auc_b": 0.7759503784666183,
+        "delta_auc": -0.02723226412840385,
+        "aps_a": 0.21918149082160618,
+        "aps_b": 0.24539291639774236,
+        "delta_aps": -0.026211425576136177,
+        "delta_ci": [
+          -0.06931855289799967,
+          0.030078324872818644
+        ],
+        "p_two_sided": 0.3758120939530235,
+        "n_common_targets": 51,
+        "n_residues": 25253,
+        "n_boot_used": 2000
+      },
+      "AlphaFold-rsa": {
+        "task": "binding",
+        "method_a": "DisorderNet",
+        "method_b": "AlphaFold-rsa",
+        "auc_a": 0.7649160087098904,
+        "auc_b": 0.7049937535514637,
+        "delta_auc": 0.05992225515842675,
+        "aps_a": 0.21496544491709474,
+        "aps_b": 0.15891382070840254,
+        "delta_aps": 0.0560516242086922,
+        "delta_ci": [
+          0.004135275653335219,
+          0.14780545988819865
+        ],
+        "p_two_sided": 0.04097951024487756,
+        "n_common_targets": 52,
+        "n_residues": 28263,
+        "n_boot_used": 2000
+      },
+      "ESpritz-D": {
+        "task": "binding",
+        "method_a": "DisorderNet",
+        "method_b": "ESpritz-D",
+        "auc_a": 0.7649160087098904,
+        "auc_b": 0.797226496679021,
+        "delta_auc": -0.03231048796913061,
+        "aps_a": 0.21496544491709474,
+        "aps_b": 0.24626775610473095,
+        "delta_aps": -0.03130231118763621,
+        "delta_ci": [
+          -0.08939371189096318,
+          0.0801675429329393
+        ],
+        "p_two_sided": 0.6256871564217891,
+        "n_common_targets": 52,
+        "n_residues": 28263,
+        "n_boot_used": 2000
+      },
+      "AlphaFold-rsa(fused-vs-leader)": {
+        "task": "binding",
+        "method_a": "DisorderNet-fused",
+        "method_b": "DisoFLAG-PB",
+        "auc_a": 0.7245072728720903,
+        "auc_b": 0.7759503784666183,
+        "delta_auc": -0.05144310559452803,
+        "aps_a": 0.18224147687930073,
+        "aps_b": 0.24539291639774236,
+        "delta_aps": -0.06315143951844163,
+        "delta_ci": [
+          -0.09114422556619042,
+          -0.010406847398606766
+        ],
+        "p_two_sided": 0.010994502748625687,
+        "n_common_targets": 51,
+        "n_residues": 25253,
+        "n_boot_used": 2000
+      }
+    },
+    "inference_seconds": 2.51,
+    "seconds_per_target": 0.0483,
+    "submission": "/scratch4/sfried3/jbeale3_disordernet/multitask_full/caid_submissions/DisorderNet-binding.caid"
+  },
+  "binding_idr": {
+    "ours": {
+      "auc": 0.5180104172165619,
+      "aps": 0.3883030056950211,
+      "n_residues": 7741,
+      "prevalence": 0.3863841880893941,
+      "n_reference_targets": 52,
+      "n_scored_targets": 52,
+      "missing_targets": [],
+      "length_mismatch_targets": [],
+      "coverage": 1.0
+    },
+    "rank": 24,
+    "fused": {
+      "auc": 0.3765590455577258,
+      "aps": 0.3087932553262773,
+      "n_residues": 7741,
+      "prevalence": 0.3863841880893941,
+      "n_reference_targets": 52,
+      "n_scored_targets": 52,
+      "missing_targets": [],
+      "length_mismatch_targets": [],
+      "coverage": 1.0
+    },
+    "fused_rank": 105,
+    "n_methods": 115,
+    "leader": "bindEmbed21IDR-rawGeneral",
+    "leader_auc": 0.641,
+    "top_by_auc": [
+      {
+        "method": "bindEmbed21IDR-rawGeneral",
+        "auc": 0.6406624082774639,
+        "aps": 0.5138424045514622,
+        "coverage": 1.0
+      },
+      {
+        "method": "bindEmbed21IDR-idrGeneral",
+        "auc": 0.6353635995706418,
+        "aps": 0.4967410439043845,
+        "coverage": 1.0
+      },
+      {
+        "method": "LIPNet",
+        "auc": 0.6194524626511112,
+        "aps": 0.5067215117582389,
+        "coverage": 1.0
+      },
+      {
+        "method": "ProBiPred-protein",
+        "auc": 0.6129921694909289,
+        "aps": 0.4715494896873263,
+        "coverage": 1.0
+      },
+      {
+        "method": "AIUPred-2-binding",
+        "auc": 0.5903529887909342,
+        "aps": 0.46955159422294246,
+        "coverage": 1.0
+      }
+    ],
+    "paired": {
+      "bindEmbed21IDR-rawGeneral": {
+        "task": "binding_idr",
+        "method_a": "DisorderNet",
+        "method_b": "bindEmbed21IDR-rawGeneral",
+        "auc_a": 0.5180101356701684,
+        "auc_b": 0.6406624082774639,
+        "delta_auc": -0.1226522726072955,
+        "aps_a": 0.3882473418718829,
+        "aps_b": 0.5138424045514622,
+        "delta_aps": -0.12559506267957932,
+        "delta_ci": [
+          -0.20611839347060712,
+          -0.04805998339689931
+        ],
+        "p_two_sided": 0.0029985007496251873,
+        "n_common_targets": 52,
+        "n_residues": 7741,
+        "n_boot_used": 2000
+      },
+      "AlphaFold-rsa": {
+        "task": "binding_idr",
+        "method_a": "DisorderNet",
+        "method_b": "AlphaFold-rsa",
+        "auc_a": 0.5180101356701684,
+        "auc_b": 0.32204941139207094,
+        "delta_auc": 0.19596072427809746,
+        "aps_a": 0.3882473418718829,
+        "aps_b": 0.29286408974204914,
+        "delta_aps": 0.09538325212983378,
+        "delta_ci": [
+          0.054325253949800326,
+          0.36472119894045407
+        ],
+        "p_two_sided": 0.0079960019990005,
+        "n_common_targets": 52,
+        "n_residues": 7741,
+        "n_boot_used": 2000
+      },
+      "AlphaFold-rsa(fused-vs-leader)": {
+        "task": "binding_idr",
+        "method_a": "DisorderNet-fused",
+        "method_b": "bindEmbed21IDR-rawGeneral",
+        "auc_a": 0.3765583416917419,
+        "auc_b": 0.6406624082774639,
+        "delta_auc": -0.264104066585722,
+        "aps_a": 0.30881085463632196,
+        "aps_b": 0.5138424045514622,
+        "delta_aps": -0.20503154991514028,
+        "delta_ci": [
+          -0.35860122133670197,
+          -0.17136391679952082
+        ],
+        "p_two_sided": 0.0009995002498750624,
+        "n_common_targets": 52,
+        "n_residues": 7741,
+        "n_boot_used": 2000
+      }
+    },
+    "inference_seconds": 2.38,
+    "seconds_per_target": 0.0457,
+    "submission": "/scratch4/sfried3/jbeale3_disordernet/multitask_full/caid_submissions/DisorderNet-binding_idr.caid"
+  },
+  "linker": {
+    "ours": {
+      "auc": 0.8884695909186922,
+      "aps": 0.3878121651738945,
+      "n_residues": 20498,
+      "prevalence": 0.06727485608352034,
+      "n_reference_targets": 31,
+      "n_scored_targets": 31,
+      "missing_targets": [],
+      "length_mismatch_targets": [],
+      "coverage": 1.0
+    },
+    "rank": 2,
+    "fused": {
+      "auc": 0.8846324730559538,
+      "aps": 0.3505271485572458,
+      "n_residues": 20498,
+      "prevalence": 0.06727485608352034,
+      "n_reference_targets": 31,
+      "n_scored_targets": 31,
+      "missing_targets": [],
+      "length_mismatch_targets": [],
+      "coverage": 1.0
+    },
+    "fused_rank": 2,
+    "n_methods": 115,
+    "leader": "IPA-AF2-Linker",
+    "leader_auc": 0.897,
+    "top_by_auc": [
+      {
+        "method": "IPA-AF2-Linker",
+        "auc": 0.8984967108449166,
+        "aps": 0.4821214662961236,
+        "coverage": 0.8709677419354839
+      },
+      {
+        "method": "LINKER-Pred2",
+        "auc": 0.8746166570725445,
+        "aps": 0.36502709620654544,
+        "coverage": 1.0
+      },
+      {
+        "method": "LINKER-Pred",
+        "auc": 0.8699511145434261,
+        "aps": 0.3767826458195224,
+        "coverage": 1.0
+      },
+      {
+        "method": "DisoFLAG-IDR",
+        "auc": 0.8557276383099858,
+        "aps": 0.3129428488434848,
+        "coverage": 0.967741935483871
+      },
+      {
+        "method": "LINKER-Pred-Lite",
+        "auc": 0.8543055078757331,
+        "aps": 0.39306182603554374,
+        "coverage": 1.0
+      }
+    ],
+    "paired": {
+      "IPA-AF2-Linker": {
+        "task": "linker",
+        "method_a": "DisorderNet",
+        "method_b": "IPA-AF2-Linker",
+        "auc_a": 0.89241526828039,
+        "auc_b": 0.8984967108449166,
+        "delta_auc": -0.006081442564526585,
+        "aps_a": 0.41467059889271046,
+        "aps_b": 0.4821214662961236,
+        "delta_aps": -0.06745086740341316,
+        "delta_ci": [
+          -0.05506794009825057,
+          0.042756885017492946
+        ],
+        "p_two_sided": 0.8865567216391804,
+        "n_common_targets": 27,
+        "n_residues": 15570,
+        "n_boot_used": 2000
+      },
+      "AlphaFold-rsa": {
+        "task": "linker",
+        "method_a": "DisorderNet",
+        "method_b": "AlphaFold-rsa",
+        "auc_a": 0.8884367255031567,
+        "auc_b": 0.8001282263246403,
+        "delta_auc": 0.08830849917851635,
+        "aps_a": 0.3877031616663178,
+        "aps_b": 0.18505519199717374,
+        "delta_aps": 0.20264796966914406,
+        "delta_ci": [
+          0.008760309809247583,
+          0.18919819338271035
+        ],
+        "p_two_sided": 0.021989005497251374,
+        "n_common_targets": 31,
+        "n_residues": 20498,
+        "n_boot_used": 2000
+      },
+      "AlphaFold-rsa(fused-vs-leader)": {
+        "task": "linker",
+        "method_a": "DisorderNet-fused",
+        "method_b": "IPA-AF2-Linker",
+        "auc_a": 0.8822831168181375,
+        "auc_b": 0.8984967108449166,
+        "delta_auc": -0.01621359402677902,
+        "aps_a": 0.35607232258451876,
+        "aps_b": 0.4821214662961236,
+        "delta_aps": -0.12604914371160486,
+        "delta_ci": [
+          -0.09488608471369363,
+          0.0435677630192423
+        ],
+        "p_two_sided": 0.6856571714142928,
+        "n_common_targets": 27,
+        "n_residues": 15570,
+        "n_boot_used": 2000
+      }
+    },
+    "inference_seconds": 1.78,
+    "seconds_per_target": 0.0576,
+    "submission": "/scratch4/sfried3/jbeale3_disordernet/multitask_full/caid_submissions/DisorderNet-linker.caid"
+  },
+  "binding_idr_from_binding_head": {
+    "ours": {
+      "auc": 0.5382586355557902,
+      "aps": 0.38996976784368287,
+      "n_residues": 7741,
+      "prevalence": 0.3863841880893941,
+      "n_reference_targets": 52,
+      "n_scored_targets": 52,
+      "missing_targets": [],
+      "length_mismatch_targets": [],
+      "coverage": 1.0
+    },
+    "note": "the binding head scored on the Binding-IDR reference, which is how CAID scores its own entrants",
+    "submission": "/scratch4/sfried3/jbeale3_disordernet/multitask_full/caid_submissions/DisorderNet-binding-on-idr.caid"
+  }
+}
