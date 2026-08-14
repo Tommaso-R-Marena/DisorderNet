@@ -120,3 +120,45 @@ class TestClaimsCarryTheirStatus:
         assert "0.938" in text, (
             "the README must record that our own rsa scores 0.938 where CAID's "
             "scores 0.950, so the fused row is not self-contained")
+
+
+class TestDataProvenanceIsPinned:
+    """The inputs are not in the repo; their identity has to be."""
+
+    @staticmethod
+    def _doc():
+        p = os.path.join(REPO, "results", "caid3", "DATA_PROVENANCE.md")
+        assert os.path.isfile(p), "DATA_PROVENANCE.md must exist"
+        return open(p).read()
+
+    def test_every_reference_has_a_checksum(self):
+        text = self._doc()
+        for task in ("disorder_pdb", "disorder_nox", "binding", "binding_idr",
+                     "linker"):
+            assert f"`{task}.fasta`" in text, task
+        # five md5s, one per reference
+        assert len(re.findall(r"`[0-9a-f]{32}`", text)) >= 5
+
+    def test_the_disorder_pdb_checksum_matches_the_one_we_verified(self):
+        assert "6feaff35263e7fd4a3f03640c23786fe" in self._doc()
+
+    def test_the_compositions_match_the_module(self):
+        from colab.caid3_official import EXPECTED
+
+        text = self._doc()
+        for task, (n, pos, neg, und) in EXPECTED.items():
+            for value in (n, pos, neg):
+                assert f"{value:,}" in text or str(value) in text, (
+                    f"{task}: {value} missing from DATA_PROVENANCE.md")
+
+    def test_the_wrong_dataset_is_called_out(self):
+        """The API's plain "CAID3" is a different 185-protein set that does not
+        reproduce the leaderboard. Scoring against it answers another question
+        silently, so the document has to warn about it."""
+        text = self._doc()
+        assert "CAID3 v3" in text and "185" in text
+
+    def test_the_leader_reproduction_table_is_present(self):
+        text = self._doc()
+        for value in ("0.9552", "0.8855", "0.7760", "0.6407", "0.8985"):
+            assert value in text, value
