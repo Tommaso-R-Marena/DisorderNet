@@ -108,6 +108,58 @@ def build_union(entries: list[dict], tasks: tuple[str, ...]) -> tuple[list[dict]
     return rows, coverage
 
 
+def chunk_long_rows(rows: list[dict], max_len: int, stride: int | None = None,
+                    min_len: int = 20) -> tuple[list[dict], dict]:
+    """Keep proteins longer than the model window, as overlapping windows.
+
+    They were being dropped: 2,440 of them on the pdb_missing source alone, 11%
+    of the data, and precisely the hard ones. On CAID3 Disorder-NOX the targets
+    the leader declines have a median length of 1292 against 344 overall, and
+    the difficulty gap on them is +0.118 AUC. Throwing them out of training and
+    then being asked to predict them is how a model ends up at chance above 1500
+    residues while a training-free structural feature scores 0.897.
+
+    Each window is an ordinary training row. Windows carry a ``parent`` so the
+    fold assignment can keep them together — two windows of one protein in
+    different folds is a near-duplicate across the split, which is exactly the
+    leak homology clustering exists to prevent.
+    """
+    stride = stride or max_len // 2
+    out, n_chunked, n_windows = [], 0, 0
+    for r in rows:
+        n = r["length"]
+        if n <= max_len:
+            out.append({**r, "parent": r.get("parent", r["id"])})
+            continue
+        n_chunked += 1
+        starts = list(range(0, n - max_len + 1, stride))
+        if starts[-1] + max_len < n:
+            starts.append(n - max_len)
+        for k, a in enumerate(starts):
+            b = a + max_len
+            if b - a < min_len:
+                continue
+            out.append({
+                "id": f"{r['id']}#w{k}",
+                "parent": r.get("parent", r["id"]),
+                "sequence": r["sequence"][a:b],
+                "length": b - a,
+                "uniprot_acc": r.get("uniprot_acc"),
+                "window_offset": a,
+                "task_labels": {t: v[a:b] for t, v in r["task_labels"].items()},
+                "task_evidence": {t: v[a:b] for t, v in r["task_evidence"].items()},
+                # Structure is attached full-length before chunking, because
+                # structure_features matches on the whole sequence. Slice it to
+                # the same window or the head sees residue i's embedding beside
+                # residue a+i's accessibility.
+                **{k: r[k][a:b] for k in
+                   ("rsa", "plddt", "contacts", "structure_available")
+                   if k in r},
+            })
+            n_windows += 1
+    return out, {"proteins_chunked": n_chunked, "windows_added": n_windows}
+
+
 def load_pdb_missing_rows(cache_path: str, max_len: int, limit: int = 0) -> list[dict]:
     """Training rows for CAID3 Disorder-PDB's own label definition.
 
@@ -335,8 +387,18 @@ def homology_folds(rows: list[dict], n_folds: int, min_identity: float, seed: in
     """
     from colab.homology_splits import cluster_proteins_by_homology_cached
 
-    proteins = [{"id": r["id"], "sequence": r["sequence"], "length": r["length"]}
-                for r in rows]
+    # Cluster one representative per parent protein. Windows of the same
+    # protein are near-identical, so clustering them individually would burn
+    # BLAST time to rediscover that, and any window landing in a different fold
+    # from its siblings is a near-duplicate straddling the split.
+    rep: dict[str, dict] = {}
+    for r in rows:
+        pid = r.get("parent", r["id"])
+        if pid not in rep or r["length"] > rep[pid]["length"]:
+            rep[pid] = {"id": pid, "sequence": r["sequence"],
+                        "length": r["length"]}
+    parent_ids = list(rep)
+    proteins = [rep[p] for p in parent_ids]
     clusters, cluster_meta = cluster_proteins_by_homology_cached(
         proteins, min_identity=min_identity,
     )
@@ -346,9 +408,11 @@ def homology_folds(rows: list[dict], n_folds: int, min_identity: float, seed: in
             f"({cluster_meta}). A degenerate split is not a homology split; "
             "refusing to report cross-validation numbers from it."
         )
+    cluster_of_parent = {p: int(c) for p, c in zip(parent_ids, clusters)}
     by_cluster: dict[int, list[int]] = {}
-    for idx, c in enumerate(clusters):
-        by_cluster.setdefault(int(c), []).append(idx)
+    for idx, r in enumerate(rows):
+        by_cluster.setdefault(
+            cluster_of_parent[r.get("parent", r["id"])], []).append(idx)
 
     order = sorted(by_cluster.values(), key=len, reverse=True)
     folds: list[list[int]] = [[] for _ in range(n_folds)]
@@ -381,7 +445,14 @@ def main(argv=None) -> int:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--min-identity", type=float, default=0.40)
     ap.add_argument("--fusion-layers", type=int, default=12)
-    ap.add_argument("--max-len", type=int, default=1022)
+    ap.add_argument("--max-len", type=int, default=1022,
+                    help="model window; longer proteins are kept as overlapping "
+                         "windows unless --no-window-long-proteins")
+    ap.add_argument("--no-window-long-proteins", action="store_true",
+                    help="drop proteins longer than --max-len instead of "
+                         "windowing them (the old behaviour, which discarded "
+                         "2,440 of them and left the model at chance above "
+                         "1500 residues)")
     ap.add_argument("--stats-only", action="store_true")
     ap.add_argument(
         "--caid-reference", default=None,
@@ -458,13 +529,19 @@ def main(argv=None) -> int:
               f"{s['positives']:>11,}{s['prevalence']:>8.1%}")
 
     rows, coverage = build_union(entries, tasks)
-    rows = [r for r in rows if 20 <= r["length"] <= args.max_len]
+    keep_long = not args.no_window_long_proteins
+    if keep_long:
+        rows = [r for r in rows if r["length"] >= 20]
+    else:
+        rows = [r for r in rows if 20 <= r["length"] <= args.max_len]
     print(f"\nunion: {len(rows):,} proteins within length bounds")
 
     if args.pdb_missing_cache and os.path.isfile(args.pdb_missing_cache):
         print("adding disorder_pdb task from MobiDB missing-residue labels…")
-        extra = load_pdb_missing_rows(args.pdb_missing_cache, args.max_len,
-                                      args.pdb_missing_limit)
+        extra = load_pdb_missing_rows(
+            args.pdb_missing_cache,
+            10 ** 6 if keep_long else args.max_len,
+            args.pdb_missing_limit)
         tasks = tasks + ("disorder_pdb",)
         rows = merge_task_rows(rows, extra, tasks)
         coverage["disorder_pdb"] = sum(
@@ -473,6 +550,13 @@ def main(argv=None) -> int:
 
     if args.structure_dim:
         attach_structure(rows, args.structure_cache)
+
+    if keep_long:
+        rows, chunk_stats = chunk_long_rows(rows, args.max_len)
+        print(f"long proteins kept as windows: "
+              f"{chunk_stats['proteins_chunked']:,} proteins -> "
+              f"{chunk_stats['windows_added']:,} windows "
+              f"(union now {len(rows):,} rows)")
         have = sum(1 for r in rows if r.get("structure_available") is not None
                    and r["structure_available"].any())
         print(f"structural channels: {have}/{len(rows)} proteins have an "
