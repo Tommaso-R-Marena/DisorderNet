@@ -37,7 +37,15 @@
 : "${MT_EPOCHS:=8}"
 : "${MT_STRUCTURE_DIM:=24}"
 : "${MT_TASKS:=disorder_nox,linker,binding,binding_idr,disorder_pdb}"
+
+# Inputs live in one shared cache, not in the workdir. Defaulting them to the
+# workdir meant a run into a fresh directory died on a FileNotFoundError after
+# the queue wait, for want of a file that was already on disk elsewhere.
+: "${MT_DISPROT:=${HOME}/.cache/disordernet/disprot_raw.json}"
+: "${MT_PDB_MISSING:=${HOME}/.cache/disordernet/mobidb_pdbcov.ndjson}"
+: "${MT_CAID_REF:=/scratch4/sfried3/jbeale3_disordernet/caid3_official/disorder_pdb.fasta}"
 export STAGE MT_WORKDIR MT_BACKBONE MT_FOLDS MT_EPOCHS MT_STRUCTURE_DIM MT_TASKS
+export MT_DISPROT MT_PDB_MISSING MT_CAID_REF
 
 # ── Paths (override via env before sbatch) ───────────────────────────────────
 # No default. DISORDERNET_REPO silently defaulting to ~/DisorderNet sent this
@@ -87,9 +95,30 @@ case "${MT_WORKDIR}" in
                exit 1 ;;
 esac
 
+# Check every input before the GPU is touched. Each of these has cost a queue
+# wait to discover, and the message from a missing file three frames into
+# argparse names neither the file's purpose nor where it should have come from.
+missing=0
+for f in "${MT_DISPROT}" "${MT_PDB_MISSING}" "${MT_CAID_REF}"; do
+  if [[ ! -s "${f}" ]]; then
+    echo "ERROR: required input missing or empty: ${f}" >&2
+    missing=1
+  fi
+done
+if [[ "${missing}" -ne 0 ]]; then
+  echo "  Set MT_DISPROT / MT_PDB_MISSING / MT_CAID_REF to override." >&2
+  exit 1
+fi
+echo "inputs: disprot=${MT_DISPROT}"
+echo "        pdb-missing=${MT_PDB_MISSING}"
+echo "        caid-reference=${MT_CAID_REF}"
+
 cd "${PROJECT_DIR}"
 python rockfish/train_multitask.py \
   --workdir "${MT_WORKDIR}" \
+  --disprot "${MT_DISPROT}" \
+  --pdb-missing-cache "${MT_PDB_MISSING}" \
+  --caid-reference "${MT_CAID_REF}" \
   --backbone "${MT_BACKBONE}" \
   --n-folds "${MT_FOLDS}" \
   --epochs "${MT_EPOCHS}" \
