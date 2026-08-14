@@ -1,5 +1,20 @@
 #!/usr/bin/env python3
-"""Score a multi-task model on the reconstructed CAID3 benchmarks.
+"""SUPERSEDED — scores against reconstructed CAID3 benchmarks.
+
+.. warning::
+
+   Use ``rockfish/eval_caid3_official.py``. CAID publishes all five references
+   and every entrant's per-residue predictions, so nothing needs reconstructing
+   and every comparison can be paired rather than set against a printed number.
+
+   The numbers this script produced were not comparable to published ones. On
+   the reconstruction our Binding head read 0.8389, above the published leader's
+   0.776; measured against the official 52-target reference it is 0.7649 and
+   ranks 11th. Binding-IDR read 0.6426 and is actually 0.5180.
+
+Original documentation follows.
+
+Score a multi-task model on the reconstructed CAID3 benchmarks.
 
 Only Linker reconstructs exactly (31 targets, 1,379 positives, matching the
 published composition to the residue), so only Linker is reported as a

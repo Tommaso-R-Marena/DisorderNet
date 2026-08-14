@@ -1,6 +1,35 @@
-"""Reconstruct the CAID3 reference sets that are not published as FASTA.
+"""SUPERSEDED — reconstructions of CAID3 references that CAID actually publishes.
 
-Only ``disorder_pdb.fasta`` ships in the CAID demo-data. The other four
+.. warning::
+
+   **Do not score anything against these and call it a CAID3 result.** Use
+   :mod:`colab.caid3_official`, which downloads all five real references and
+   every entrant's per-residue predictions.
+
+   This module was written on the belief that only ``disorder_pdb.fasta`` was
+   published. It is not so: CAID serves all five references and the raw
+   predictions of all 117 entrants behind its results site. What this module
+   builds are *different benchmarks wearing the published names*, and the
+   difference is not small in either size or score:
+
+       benchmark      reconstructed        official        our AUC then / now
+       Disorder-NOX   319 tgt              204 tgt         0.8521 / 0.8422
+       Binding         45 tgt              52 tgt          0.8389 / 0.7649
+       Binding-IDR     31 tgt              52 tgt          0.6426 / 0.5180
+       Linker          31 tgt (exact)      31 tgt          0.8397 / 0.8885
+
+   Scored against the reconstruction, Binding read 0.8389 — above the published
+   leader's 0.776 — while the true figure is 0.7649 and ranks 11th. Every one of
+   those numbers was reported as a CAID3 result before the official files were
+   found.
+
+   ``PUBLISHED`` is still accurate and still imported by
+   :mod:`rockfish.eval_caid3_tasks`. The reconstruction functions are kept only
+   so the earlier results remain reproducible and the error remains legible.
+
+Original documentation follows.
+
+Only ``disorder_pdb.fasta`` was believed to ship in the CAID demo-data. The other four
 benchmarks — Disorder-NOX, Binding, Binding-IDR, Linker — are derivable, and
 without them "best overall on CAID3" cannot be measured at all.
 

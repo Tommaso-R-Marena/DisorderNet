@@ -438,3 +438,32 @@ class TestPreregisteredConstants:
         text = open(doc).read()
         assert "0.9553" in text
         assert "AlphaFold-rsa" in text and "PUNCH2" in text
+
+
+class TestSupersededPathsSaySo:
+    """The reconstructions produced numbers that were reported as CAID3 results.
+
+    Binding read 0.8389 against a published leader of 0.776 — apparently a
+    decisive win — where the official 52-target reference gives 0.7649 and rank
+    11. Anyone reaching for those modules has to meet that fact first.
+    """
+
+    def test_the_reconstruction_module_is_marked(self):
+        import colab.caid3_references as m
+
+        doc = m.__doc__ or ""
+        assert doc.lstrip().startswith("SUPERSEDED"), doc[:80]
+        assert "caid3_official" in doc
+
+    def test_the_old_evaluator_is_marked(self):
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "rockfish", "eval_caid3_tasks.py")
+        head = open(path).read()[:2000]
+        assert "SUPERSEDED" in head
+        assert "eval_caid3_official.py" in head
+
+    def test_the_replacement_exists_and_is_not_marked(self):
+        import colab.caid3_official as m
+
+        assert "SUPERSEDED" not in (m.__doc__ or "")
