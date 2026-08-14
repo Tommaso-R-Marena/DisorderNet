@@ -36,7 +36,12 @@
 : "${MT_FOLDS:=5}"
 : "${MT_EPOCHS:=8}"
 : "${MT_STRUCTURE_DIM:=24}"
-: "${MT_TASKS:=disorder_nox,linker,binding,binding_idr,disorder_pdb}"
+# DisProt tasks only. disorder_pdb is appended by the trainer from the MobiDB
+# missing-residue source, which is CAID3's own label definition. Listing it here
+# too produced six tasks with a duplicate name, and the DisProt-derived version
+# is degenerate: its rules mark only annotated disorder, so it arrives at 100%
+# prevalence with no negatives at all.
+: "${MT_TASKS:=disorder_nox,linker,binding,binding_idr}"
 
 # Inputs live in one shared cache, not in the workdir. Defaulting them to the
 # workdir meant a run into a fresh directory died on a FileNotFoundError after

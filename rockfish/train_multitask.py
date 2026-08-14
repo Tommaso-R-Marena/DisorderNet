@@ -528,6 +528,14 @@ def main(argv=None) -> int:
         print(f"{t:<16}{s['proteins']:>9}{s['evaluated_residues']:>12,}"
               f"{s['positives']:>11,}{s['prevalence']:>8.1%}")
 
+    if len(set(tasks)) != len(tasks):
+        dupes = sorted({t for t in tasks if list(tasks).count(t) > 1})
+        raise SystemExit(
+            f"duplicate task(s) {dupes} in --tasks. disorder_pdb is appended "
+            f"from --pdb-missing-cache and must not also be listed: the "
+            f"DisProt-derived version of it is degenerate."
+        )
+
     rows, coverage = build_union(entries, tasks)
     keep_long = not args.no_window_long_proteins
     if keep_long:
@@ -610,6 +618,20 @@ def main(argv=None) -> int:
     layer_ids = list(range(n_layers - min(args.fusion_layers, n_layers), n_layers))
     print(f"\nbackbone {args.backbone}: {n_frozen} tensors frozen, "
           f"mixing layers {layer_ids[0]}-{layer_ids[-1]}")
+
+    for t in tasks:
+        ev = np.concatenate([r["task_evidence"][t] for r in rows])
+        lb = np.concatenate([r["task_labels"][t] for r in rows])
+        if not ev.any():
+            continue
+        pos = float(lb[ev].mean())
+        if pos >= 0.999 or pos <= 0.001:
+            raise SystemExit(
+                f"task {t!r} has prevalence {pos:.3%} over {int(ev.sum()):,} "
+                f"evidenced residues — effectively one class. A task with no "
+                f"negatives contributes a constant gradient and its AUC is "
+                f"undefined; it must not be trained or reported."
+            )
 
     folds = homology_folds(rows, args.n_folds, args.min_identity, args.seed)
     print(f"homology folds: {[len(f) for f in folds]}")

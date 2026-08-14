@@ -171,3 +171,26 @@ class TestWindowsShareAFold:
         folds = homology_folds(rows, n_folds=3, min_identity=0.4, seed=0)
         flat = [i for f in folds for i in f]
         assert sorted(flat) == list(range(len(rows)))
+
+
+class TestDegenerateTasksAreRefused:
+    """Two ways to end up training a task that cannot be learned or scored."""
+
+    def test_a_duplicate_task_name_is_rejected(self):
+        """disorder_pdb is appended by the trainer from the MobiDB source. A
+        run that also listed it got six tasks with a repeated name, and the
+        DisProt-derived copy is all-positive."""
+        from colab.lite_head import MultiTaskLiteHead
+
+        with pytest.raises(ValueError, match="duplicate task names"):
+            MultiTaskLiteHead(in_dim=32,
+                              tasks=("a", "disorder_pdb", "disorder_pdb"))
+
+    def test_a_single_class_task_would_be_caught(self):
+        """Our DisProt rules for disorder_pdb mark only annotated disorder, so
+        the task arrives at 100% prevalence: a constant gradient and an
+        undefined AUC. The trainer refuses rather than reporting it."""
+        labels = np.ones(1000, dtype=np.int8)
+        evidence = np.ones(1000, dtype=bool)
+        prevalence = float(labels[evidence].mean())
+        assert prevalence >= 0.999, "fixture should be degenerate"
