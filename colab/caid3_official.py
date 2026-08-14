@@ -568,3 +568,33 @@ def coverage_bias_report(
         })
     out["methods"].sort(key=lambda m: -(m["skipping_worth"] or 0))
     return out
+
+
+def holm_bonferroni(pvalues: dict[str, float], alpha: float = 0.05) -> dict:
+    """Control the family-wise error rate across a set of comparisons.
+
+    Five benchmarks, several opponents each, and a long history of exploratory
+    tests against the same references: at that point an uncorrected p=0.03 means
+    very little. Holm is used rather than Bonferroni because it is uniformly more
+    powerful and makes no independence assumption, which matters here — the
+    comparisons share our predictions and share targets, so they are strongly
+    dependent.
+
+    Returns each comparison with its adjusted p-value and whether it survives.
+    Adjusted p-values are enforced monotone, so a test never appears more
+    significant than one ranked above it.
+    """
+    items = sorted(pvalues.items(), key=lambda kv: kv[1])
+    m = len(items)
+    out, running = {}, 0.0
+    for i, (name, p) in enumerate(items):
+        adj = min(1.0, (m - i) * p)
+        running = max(running, adj)
+        out[name] = {
+            "p_raw": float(p),
+            "p_adjusted": float(running),
+            "significant": bool(running <= alpha),
+            "rank": i + 1,
+            "n_comparisons": m,
+        }
+    return out
