@@ -437,3 +437,58 @@ def paired_bootstrap(
         "n_common_targets": len(ys), "n_residues": int(len(y_all)),
         "n_boot_used": int(deltas.size),
     }
+
+
+def rank_fuse(preds: list[dict[str, np.ndarray]], ref: dict,
+              weights: list[float] | None = None) -> dict[str, np.ndarray]:
+    """Combine predictors on a common scale, without fitting anything.
+
+    CAID's AUC is pooled over every residue of every protein, so scores must be
+    comparable *between* proteins. Rank each predictor once across all evaluated
+    residues — monotone on the pooled vector, so each input's own AUC is
+    unchanged — then average. Ranking within each target instead is the natural
+    mistake and a costly one: it silently changes the metric, and made a 0.8160
+    predictor look like 0.6952.
+
+    Equal weights by default. On CAID3 the AUC-maximising weight sits at 0.45 to
+    0.50 on every task where the fusion helps, so equal weighting is both the
+    honest choice and the empirically right one.
+    """
+    targets = [t for t in ref
+               if all(t in p and len(p[t]) == len(ref[t][1]) for p in preds)]
+    if not targets:
+        return {}
+    from scipy.stats import rankdata
+
+    masks, lengths = {}, {}
+    stacked = []
+    for p in preds:
+        chunks = []
+        for tid in targets:
+            lab = ref[tid][1]
+            m = evaluated_mask(lab)
+            masks[tid], lengths[tid] = m, len(lab)
+            chunks.append(p[tid][m])
+        v = np.concatenate(chunks)
+        finite = np.isfinite(v)
+        r = np.full(len(v), np.nan)
+        r[finite] = rankdata(v[finite]) / max(int(finite.sum()), 1)
+        stacked.append(r)
+
+    w = np.asarray(weights if weights is not None else [1.0] * len(preds),
+                   dtype=np.float64)
+    w = w / w.sum()
+    fused = np.nansum(np.vstack(stacked) * w[:, None], axis=0)
+
+    out, off = {}, 0
+    for tid in targets:
+        m, n = masks[tid], lengths[tid]
+        k = int(m.sum())
+        full = np.full(n, np.nan)
+        full[m] = fused[off:off + k]
+        # Unevaluated positions are never scored; fill so the file stays
+        # full-length for CAID's format.
+        full[~m] = 0.0
+        out[tid] = full
+        off += k
+    return out
