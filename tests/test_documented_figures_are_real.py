@@ -162,3 +162,64 @@ class TestDataProvenanceIsPinned:
         text = self._doc()
         for value in ("0.9552", "0.8855", "0.7760", "0.6407", "0.8985"):
             assert value in text, value
+
+
+class TestMethodologyIsFixed:
+    """The methodology is only fixed if the code implements what it states."""
+
+    @staticmethod
+    def _doc():
+        p = os.path.join(REPO, "results", "caid3", "METHODOLOGY.md")
+        assert os.path.isfile(p), "METHODOLOGY.md must exist"
+        return open(p).read()
+
+    def test_both_ranking_fields_are_required(self):
+        text = self._doc()
+        assert "Report both fields, never one" in text
+        assert "full-coverage" in text
+
+    def test_the_evaluator_computes_both_ranking_fields(self):
+        src = open(os.path.join(REPO, "rockfish",
+                                "eval_caid3_official.py")).read()
+        assert "rank_full_coverage" in src
+        assert "n_full_coverage_entrants" in src
+
+    def test_the_structural_baseline_is_mandatory(self):
+        from rockfish.eval_caid3_official import (PRIMARY_OPPONENTS,
+                                                  STRUCTURAL_BASELINE)
+
+        assert STRUCTURAL_BASELINE == "AlphaFold-rsa"
+        assert STRUCTURAL_BASELINE in PRIMARY_OPPONENTS
+        assert "AlphaFold-rsa" in self._doc()
+
+    def test_full_coverage_is_required_of_us(self):
+        src = open(os.path.join(REPO, "rockfish",
+                                "eval_caid3_official.py")).read()
+        assert "Partial coverage inflates the score" in src
+
+    def test_the_paired_test_resamples_proteins(self):
+        from colab.caid3_official import paired_bootstrap
+
+        doc = paired_bootstrap.__doc__ or ""
+        assert "resampling proteins rather than residues" in doc
+
+    def test_the_documented_ranks_match_the_committed_results(self):
+        """METHODOLOGY.md's summary table must agree with the run it describes."""
+        import json
+
+        path = os.path.join(REPO, "results", "caid3",
+                            "mt_full_caid3_official.json")
+        if not os.path.isfile(path):
+            pytest.skip("mt_full results not committed")
+        data = json.load(open(path))
+        text = self._doc()
+        for task, expected_rank in (("disorder_pdb", 1), ("linker", 2),
+                                    ("disorder_nox", 13), ("binding", 11),
+                                    ("binding_idr", 24)):
+            row = data.get(task)
+            if not row or "rank" not in row:
+                continue
+            assert row["rank"] == expected_rank, (
+                f"{task}: results say rank {row['rank']}, "
+                f"METHODOLOGY.md says {expected_rank}")
+            assert f"{row['ours']['auc']:.4f}" in text, task

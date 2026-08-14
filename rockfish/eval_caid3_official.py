@@ -308,12 +308,31 @@ def main(argv=None) -> int:
         # in turn, so the archived submission was whichever task ran last.
         our_path = write_caid_submission(
             os.path.join(subs, f"{OURS}-{task}.caid"), preds, ref)
+        # Score the archived file, not the in-memory probabilities. The
+        # submission stores four decimals — CAID's own convention — so the two
+        # differ slightly, and on Linker they round to 0.8885 against 0.8884.
+        # The archived file is what anyone else can rerun, so it is what gets
+        # reported; a published number that its own artefact cannot reproduce is
+        # not reproducible, however small the discrepancy.
+        preds = {k: np.asarray(v) for k, v in
+                 read_caid_predictions(our_path).items()}
         predictions_by_task[task] = preds
-        ours = score_method(ref, {k: np.asarray(v) for k, v in preds.items()})
+        ours = score_method(ref, preds)
 
         board = official_leaderboard(task, args.refs, args.predictions)
         better = [r for r in board if r["auc"] > ours["auc"]]
         rank = len(better) + 1
+        # Two fields, always both. Ranking among every entrant is CAID's own
+        # accounting, and it rewards declining hard targets — the single method
+        # above us on Linker skipped 4 of 31, and 9 of the 12 above us on
+        # Disorder-NOX skipped some. Ranking among entrants that answered every
+        # target is the equal-footing field. Reporting only the first
+        # understates us; reporting only the second is cherry-picking, since a
+        # method that skips is not disqualified, only scored on an easier set.
+        # The paired tests below settle it properly, on shared targets.
+        full_cov = [r for r in board if r["coverage"] >= 1.0]
+        rank_full = len([r for r in full_cov if r["auc"] > ours["auc"]]) + 1
+        skipped_above = [r for r in better if r["coverage"] < 1.0]
 
         # Paired tests need our submission alongside theirs.
         staged = os.path.join(subs, "_paired")
@@ -365,6 +384,9 @@ def main(argv=None) -> int:
 
         results[task] = {
             "ours": ours, "rank": rank,
+            "rank_full_coverage": rank_full,
+            "n_full_coverage_entrants": len(full_cov) + 1,
+            "n_above_us_that_skipped_targets": len(skipped_above),
             "fused": fused_row,
             "fused_rank": (len(fused_better) + 1) if fused_row else None, "n_methods": len(board) + 1,
             "leader": leader, "leader_auc": LEADERS[task][1],
@@ -410,7 +432,7 @@ def main(argv=None) -> int:
     print(f"\n{'=' * 92}\n OFFICIAL CAID3 — all comparisons paired on shared "
           f"targets\n{'=' * 92}")
     print(f"{'benchmark':<14}{'our AUC':>9}{'our APS':>9}{'cov':>6}"
-          f"{'rank':>10}{'leader':>26}{'lead AUC':>10}")
+          f"{'rank/all':>10}{'rank/full':>12}{'leader':>26}{'lead AUC':>10}")
     for task, r in results.items():
         if "rank" not in r:
             # Derived rows (a head scored on another task's reference) have no
@@ -421,8 +443,9 @@ def main(argv=None) -> int:
             continue
         o = r["ours"]
         rank = f"{r['rank']}/{r['n_methods']}"
+        rankf = f"{r['rank_full_coverage']}/{r['n_full_coverage_entrants']}"
         print(f"{task:<14}{o['auc']:>9.4f}{o['aps']:>9.4f}"
-              f"{o['coverage']:>6.2f}{rank:>10}"
+              f"{o['coverage']:>6.2f}{rank:>10}{rankf:>12}"
               f"{r['leader']:>26}{r['leader_auc']:>10.3f}")
         if r.get("fused"):
             f = r["fused"]
