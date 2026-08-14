@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=48000M
 #SBATCH --time=01-00:00:00
-#SBATCH --account=sfried3
+#SBATCH --account=sfried3_gpu
 #SBATCH --export=ALL
 #SBATCH --output=logs/dn-mt_%j.out
 #SBATCH --error=logs/dn-mt_%j.err

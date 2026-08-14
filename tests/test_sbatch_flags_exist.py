@@ -120,5 +120,39 @@ def test_gpu_jobs_respect_max_mem_per_cpu(path):
         f"{cpus.group(1)} CPUs x 4000M = {limit}M (MaxMemPerCPU on ica100)")
 
 
+
+@pytest.mark.parametrize("path", sbatch_files(),
+                         ids=[os.path.basename(p) for p in sbatch_files()] or None)
+def test_gpu_qos_uses_the_gpu_account(path):
+    """qos_gpu is only granted to the *_gpu account association.
+
+    Submitting qos_gpu under the CPU account fails with "Invalid qos
+    specification" — at submit time, so it is cheap, but it is also invisible
+    until you try, and it silently blocked an evaluation that was otherwise
+    ready to run.
+    """
+    text = open(path).read()
+    if "--qos=qos_gpu" not in text:
+        pytest.skip("not a GPU-QOS job")
+    acct = re.search(r"#SBATCH --account=(\S+)", text)
+    assert acct, f"{os.path.basename(path)}: qos_gpu but no --account declared"
+    assert acct.group(1).endswith("_gpu"), (
+        f"{os.path.basename(path)}: --qos=qos_gpu with --account="
+        f"{acct.group(1)}. The qos_gpu association is on the _gpu account; "
+        f"Slurm rejects this at submit with 'Invalid qos specification'.")
+
+
+@pytest.mark.parametrize("path", sbatch_files(),
+                         ids=[os.path.basename(p) for p in sbatch_files()] or None)
+def test_gpu_jobs_request_a_gpu(path):
+    text = open(path).read()
+    if "--partition=ica100" not in text:
+        pytest.skip("not a GPU partition")
+    assert "--gres=gpu:" in text, (
+        f"{os.path.basename(path)}: on ica100 without --gres=gpu:N. The job "
+        f"runs, sees no CUDA device, and falls back to CPU — which for this "
+        f"model means a run that never finishes rather than one that fails.")
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
