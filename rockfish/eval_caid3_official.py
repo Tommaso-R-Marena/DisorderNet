@@ -93,15 +93,65 @@ def write_caid_submission(path, per_target, ref):
     return path
 
 
+#: ESM-2 was trained at 1024 tokens and the head was trained with --max-len
+#: 1022, so no protein longer than that was ever seen during training. Scoring a
+#: 1500-residue chain in one pass puts both components far outside their regime,
+#: and the result is not graceful degradation: on CAID3 Disorder-NOX targets over
+#: 1500 residues the model scored 0.5183, chance, while AlphaFold-rsa scored
+#: 0.8967 on those same targets. The signal was there and the model was throwing
+#: it away.
+WINDOW = 1022
+STRIDE = 511
+
+
+def _windows(n: int, window: int = WINDOW, stride: int = STRIDE):
+    """Cover [0, n) with overlapping windows, the last one flush to the end."""
+    if n <= window:
+        return [(0, n)]
+    starts = list(range(0, n - window + 1, stride))
+    if starts[-1] + window < n:
+        starts.append(n - window)
+    return [(s, s + window) for s in starts]
+
+
+def _taper(length: int) -> np.ndarray:
+    """Weight a window's contribution, low at its edges.
+
+    A residue at the edge of a window has context on one side only, which is
+    exactly the deficit windowing exists to avoid. Overlapping windows are
+    averaged with a raised-cosine weight so each position is dominated by the
+    window that saw the most of its neighbourhood.
+    """
+    if length == 1:
+        return np.ones(1, dtype=np.float64)
+    x = np.linspace(0.0, 1.0, length)
+    return 0.5 - 0.5 * np.cos(2.0 * np.pi * x) + 1e-3
+
+
 def predict_task(head, mix, esm, batch_converter, layer_ids, device, ref,
                  task, structures, structure_dim, batch_size=8):
-    """Per-residue probabilities for every target in a reference."""
-    items = list(ref.items())
-    out, t0 = {}, time.perf_counter()
+    """Per-residue probabilities for every target, windowed to ESM's regime.
+
+    Chunks from all targets go into one queue, so a few very long proteins do
+    not serialise the whole pass, and short proteins are unaffected: a sequence
+    at or below the window length yields exactly one chunk covering all of it.
+    """
+    t0 = time.perf_counter()
+    jobs = []
+    for tid, (seq, _lab) in ref.items():
+        for (a, b) in _windows(len(seq)):
+            jobs.append((tid, a, b, seq[a:b]))
+
+    acc = {tid: np.zeros(len(seq), dtype=np.float64)
+           for tid, (seq, _l) in ref.items()}
+    wsum = {tid: np.zeros(len(seq), dtype=np.float64)
+            for tid, (seq, _l) in ref.items()}
+
     with torch.no_grad():
-        for s in range(0, len(items), batch_size):
-            batch = items[s:s + batch_size]
-            _, _, tokens = batch_converter([(tid, seq) for tid, (seq, _) in batch])
+        for s in range(0, len(jobs), batch_size):
+            batch = jobs[s:s + batch_size]
+            _, _, tokens = batch_converter([(f"{t}:{a}", sub)
+                                            for t, a, _b, sub in batch])
             tokens = tokens.to(device)
             rep = esm(tokens, repr_layers=layer_ids, return_contacts=False)
             feats = mix([rep["representations"][i][:, 1:-1, :] for i in layer_ids])
@@ -112,24 +162,42 @@ def predict_task(head, mix, esm, batch_converter, layer_ids, device, ref,
                 sp = torch.zeros(len(batch), L, device=device)
                 sa = torch.zeros(len(batch), L, device=device)
                 sc = torch.zeros(len(batch), L, device=device)
-                for bi, (tid, _sl) in enumerate(batch):
+                for bi, (tid, a, b, _sub) in enumerate(batch):
                     f = structures.get(tid) or {}
                     if not f:
                         continue
-                    r = np.asarray(f["rsa"], dtype=np.float32)
-                    q = np.asarray(f["plddt"], dtype=np.float32)
+                    # Structure channels must be sliced to the same window, or
+                    # the head sees residue i's embedding beside residue a+i's
+                    # accessibility.
+                    r = np.asarray(f["rsa"], dtype=np.float32)[a:b]
+                    q = np.asarray(f["plddt"], dtype=np.float32)[a:b]
                     k = min(len(r), len(q), L)
+                    if k <= 0:
+                        continue
                     sr[bi, :k] = torch.from_numpy(r[:k]).to(device)
                     sp[bi, :k] = torch.from_numpy(q[:k]).to(device)
                     sa[bi, :k] = 1.0
-                    ct = np.asarray(f.get("contacts", np.zeros(k)), dtype=np.float32)
+                    ct = np.asarray(f.get("contacts", np.zeros(b - a)),
+                                    dtype=np.float32)[a:b]
                     kk = min(len(ct), k)
                     sc[bi, :kk] = torch.from_numpy(ct[:kk]).to(device)
                 kw = {"rsa": sr, "plddt": sp, "structure_available": sa,
                       "contacts": sc}
             probs = torch.sigmoid(head(feats, **kw)[task]).float().cpu().numpy()
-            for bi, (tid, (seq, _lab)) in enumerate(batch):
-                out[tid] = probs[bi, :len(seq)].astype(np.float64)
+            for bi, (tid, a, b, sub) in enumerate(batch):
+                n = min(len(sub), probs.shape[1])
+                w = _taper(n)
+                acc[tid][a:a + n] += probs[bi, :n].astype(np.float64) * w
+                wsum[tid][a:a + n] += w
+
+    out = {}
+    for tid, seq_lab in ref.items():
+        w = wsum[tid]
+        if not (w > 0).all():
+            raise RuntimeError(
+                f"{tid}: {int((w <= 0).sum())} of {len(w)} residues were never "
+                f"covered by a window. Scoring would silently use zeros.")
+        out[tid] = acc[tid] / w
     return out, time.perf_counter() - t0
 
 
