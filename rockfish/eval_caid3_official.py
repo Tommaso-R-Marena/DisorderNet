@@ -46,6 +46,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from colab.caid3_official import (  # noqa: E402
     LEADERS,
     TASKS,
+    holm_bonferroni,
     official_leaderboard,
     paired_bootstrap,
     rank_fuse,
@@ -61,6 +62,20 @@ from colab.caid3_official import (  # noqa: E402
 STRUCTURAL_BASELINE = "AlphaFold-rsa"
 
 OURS = "DisorderNet"
+
+#: Pre-registered analysis (results/caid3/PREREGISTRATION.md). The primary
+#: family is exactly two tests on Disorder-PDB, unfused, all 319 targets. It is
+#: fixed here so the confirmatory run cannot have its family redefined after the
+#: numbers land — which is precisely what invalidated the previous run's
+#: p-values, where 16 exploratory comparisons were made and the two that cleared
+#: 0.05 were reported as the result.
+PRIMARY_TASK = "disorder_pdb"
+PRIMARY_OPPONENTS = (STRUCTURAL_BASELINE, "PUNCH2")
+
+#: Non-inferiority floor: mt_full's 0.9603 less a 0.005 margin, which is also
+#: PUNCH2's published figure. Below this the windowed variant is rejected for
+#: Disorder-PDB whatever it does elsewhere.
+NON_INFERIORITY_FLOOR = 0.9553
 
 
 def load_accessions(path):
@@ -428,6 +443,66 @@ def main(argv=None) -> int:
             ci = f"[{pr['delta_ci'][0]:+.4f},{pr['delta_ci'][1]:+.4f}]"
             print(f"{task:<14}{opp:<26}{pr['delta_auc']:>+9.4f}{ci:>20}"
                   f"{pr['p_two_sided']:>8.3f}{pr['n_common_targets']:>9}")
+
+    # ── Pre-registered analysis ──────────────────────────────────────────
+    primary = {}
+    prim = results.get(PRIMARY_TASK) or {}
+    for opp in PRIMARY_OPPONENTS:
+        pr = (prim.get("paired") or {}).get(opp)
+        if pr and "p_two_sided" in pr:
+            primary[opp] = pr["p_two_sided"]
+    primary_holm = holm_bonferroni(primary) if primary else {}
+
+    secondary = {}
+    for task, r in results.items():
+        if task == PRIMARY_TASK:
+            continue
+        for opp, pr in (r.get("paired") or {}).items():
+            if "p_two_sided" in pr:
+                secondary[f"{task}: {opp}"] = pr["p_two_sided"]
+    secondary_holm = holm_bonferroni(secondary) if secondary else {}
+
+    ours_primary = (prim.get("ours") or {})
+    auc_primary = ours_primary.get("auc")
+    cov_primary = ours_primary.get("coverage")
+    non_inferior = (auc_primary is not None
+                    and auc_primary >= NON_INFERIORITY_FLOOR)
+
+    print(f"\n{'=' * 92}\n PRE-REGISTERED ANALYSIS "
+          f"(results/caid3/PREREGISTRATION.md)\n{'=' * 92}")
+    print(f" primary family: {PRIMARY_TASK}, unfused, "
+          f"{len(primary)} test(s), Holm across those alone")
+    for opp, v in sorted(primary_holm.items(), key=lambda kv: kv[1]["rank"]):
+        pr = prim["paired"][opp]
+        print(f"   ours - {opp:<20}{pr['delta_auc']:>+9.4f}  "
+              f"p={v['p_raw']:.4f}  adj={v['p_adjusted']:.4f}  "
+              f"{'CONFIRMED' if v['significant'] else 'not significant'}")
+    if auc_primary is not None:
+        verdict = "PASS" if non_inferior else "FAIL — variant rejected"
+        print(f"\n non-inferiority: {PRIMARY_TASK} AUC {auc_primary:.4f} vs "
+              f"floor {NON_INFERIORITY_FLOOR}  {verdict}")
+    if cov_primary is not None and cov_primary < 1.0:
+        print(f" WARNING: coverage {cov_primary:.3f} on {PRIMARY_TASK}. A "
+              f"subset score is void; the pre-registration requires 319/319.")
+
+    if secondary_holm:
+        print(f"\n secondary (exploratory), Holm within a family of "
+              f"{len(secondary_holm)}:")
+        for name, v in sorted(secondary_holm.items(),
+                              key=lambda kv: kv[1]["rank"])[:8]:
+            print(f"   {name:<52}p={v['p_raw']:.4f}  adj={v['p_adjusted']:.4f}"
+                  f"  {'sig' if v['significant'] else '-'}")
+
+    results["_preregistered"] = {
+        "primary_task": PRIMARY_TASK,
+        "primary_opponents": list(PRIMARY_OPPONENTS),
+        "primary_holm": primary_holm,
+        "secondary_holm": secondary_holm,
+        "non_inferiority_floor": NON_INFERIORITY_FLOOR,
+        "non_inferiority_pass": bool(non_inferior),
+        "primary_auc": auc_primary,
+        "primary_coverage": cov_primary,
+    }
 
     out = args.out or os.path.join(args.checkpoint, "caid3_official_results.json")
     with open(out + ".part", "w") as fh:

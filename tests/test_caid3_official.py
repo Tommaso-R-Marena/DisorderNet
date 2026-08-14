@@ -353,3 +353,88 @@ class TestRankFusionOnTheRealChallenge:
         ab = score_method(ref, rank_fuse([a, b], ref))["auc"]
         ba = score_method(ref, rank_fuse([b, a], ref))["auc"]
         assert ab == pytest.approx(ba, abs=1e-9)
+
+
+class TestFamilyWiseCorrection:
+    """Sixteen comparisons were run against these references, and the two that
+    cleared 0.05 were reported. Holm is what makes that honest."""
+
+    def test_the_smallest_p_gets_the_full_bonferroni_factor(self):
+        from colab.caid3_official import holm_bonferroni
+
+        r = holm_bonferroni({"a": 0.01, "b": 0.2, "c": 0.5, "d": 0.9})
+        assert r["a"]["p_adjusted"] == pytest.approx(0.04)
+        assert r["a"]["rank"] == 1
+
+    def test_adjusted_values_are_monotone(self):
+        """Without enforcing this, a later test can appear more significant
+        than one ranked above it."""
+        from colab.caid3_official import holm_bonferroni
+
+        r = holm_bonferroni({"a": 0.02, "b": 0.021, "c": 0.5, "d": 0.9})
+        adj = [v["p_adjusted"] for v in sorted(r.values(),
+                                               key=lambda z: z["rank"])]
+        assert adj == sorted(adj)
+
+    def test_it_is_never_more_conservative_than_bonferroni(self):
+        from colab.caid3_official import holm_bonferroni
+
+        ps = {"a": 0.001, "b": 0.01, "c": 0.02, "d": 0.3}
+        r = holm_bonferroni(ps)
+        for k, p in ps.items():
+            assert r[k]["p_adjusted"] <= min(1.0, len(ps) * p) + 1e-12
+
+    def test_adjusted_p_never_exceeds_one(self):
+        from colab.caid3_official import holm_bonferroni
+
+        r = holm_bonferroni({f"t{i}": 0.9 for i in range(20)})
+        assert all(v["p_adjusted"] <= 1.0 for v in r.values())
+
+    def test_a_single_test_is_unadjusted(self):
+        """A pre-registered primary endpoint of one needs no correction."""
+        from colab.caid3_official import holm_bonferroni
+
+        r = holm_bonferroni({"only": 0.03})
+        assert r["only"]["p_adjusted"] == pytest.approx(0.03)
+        assert r["only"]["significant"]
+
+    def test_the_real_disorder_pdb_family_is_reproduced(self):
+        """The published correction, so a change to holm_bonferroni that would
+        revive those claims fails loudly."""
+        from colab.caid3_official import holm_bonferroni
+
+        r = holm_bonferroni({
+            "fused-PUNCH2": 0.006, "ours-AFrsa": 0.013, "ours-PUNCH2": 0.2049,
+            "b1": 0.001, "b2": 0.003, "b3": 0.008, "b4": 0.011, "b5": 0.022,
+            "b6": 0.041, "b7": 0.3758, "b8": 0.4608, "b9": 0.6257,
+            "b10": 0.6857, "b11": 0.7156, "b12": 0.7326, "b13": 0.8866,
+        })
+        assert not r["ours-AFrsa"]["significant"]
+        assert not r["fused-PUNCH2"]["significant"]
+        assert r["ours-AFrsa"]["p_adjusted"] == pytest.approx(0.143, abs=0.002)
+
+
+class TestPreregisteredConstants:
+    """The pre-registration is only binding if the code agrees with it."""
+
+    def test_the_primary_family_is_exactly_two_tests(self):
+        from rockfish.eval_caid3_official import (PRIMARY_OPPONENTS,
+                                                  PRIMARY_TASK)
+
+        assert PRIMARY_TASK == "disorder_pdb"
+        assert len(PRIMARY_OPPONENTS) == 2
+        assert set(PRIMARY_OPPONENTS) == {"AlphaFold-rsa", "PUNCH2"}
+
+    def test_the_non_inferiority_floor_matches_the_document(self):
+        from rockfish.eval_caid3_official import NON_INFERIORITY_FLOOR
+
+        assert NON_INFERIORITY_FLOOR == pytest.approx(0.9553)
+
+    def test_the_document_exists_and_states_the_same_floor(self):
+        doc = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "results", "caid3",
+            "PREREGISTRATION.md")
+        assert os.path.isfile(doc), "the pre-registration must be in the repo"
+        text = open(doc).read()
+        assert "0.9553" in text
+        assert "AlphaFold-rsa" in text and "PUNCH2" in text
