@@ -3,6 +3,12 @@
 #SBATCH --partition=ica100
 #SBATCH --qos=qos_gpu
 #SBATCH --gres=gpu:1
+# icgpu04 reports idle and accepts jobs, then fails them in ~12s with
+# "CUDA initialization: CUDA unknown error" and zero visible devices.
+# It has done this twice in this project, most recently killing both
+# re-evaluation jobs at once because Slurm placed them there together.
+# Override on the command line if it is ever repaired.
+#SBATCH --exclude=icgpu04
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=12
@@ -59,6 +65,22 @@ source "${COMMON_SH}"
 disordernet_slurm_setup
 
 DISPROT="${EVAL_DISPROT:-${EVAL_CKPT}/disprot_raw.json}"
+
+# Confirm the GPU is actually usable before anything else runs. A node can be
+# allocated, report idle, and still initialise CUDA with zero visible devices —
+# icgpu04 does exactly that. Failing here names the node and the cause in one
+# line, instead of a torch traceback forty lines into the job.
+if ! python -c "
+import sys, torch
+if not torch.cuda.is_available() or torch.cuda.device_count() == 0:
+    sys.exit(1)
+print('GPU ok:', torch.cuda.get_device_name(0))
+"; then
+  echo "ERROR: no usable CUDA device on $(hostname). The node was allocated" >&2
+  echo "  but CUDA reports zero devices. Resubmit excluding it:" >&2
+  echo "    sbatch --exclude=$(hostname -s) ..." >&2
+  exit 1
+fi
 
 cd "${PROJECT_DIR}"
 python rockfish/eval_caid3_official.py \
