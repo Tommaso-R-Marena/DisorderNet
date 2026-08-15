@@ -72,10 +72,20 @@ OURS = "DisorderNet"
 PRIMARY_TASK = "disorder_pdb"
 PRIMARY_OPPONENTS = (STRUCTURAL_BASELINE, "PUNCH2")
 
-#: Non-inferiority floor: mt_full's 0.9603 less a 0.005 margin, which is also
-#: PUNCH2's published figure. Below this the windowed variant is rejected for
-#: Disorder-PDB whatever it does elsewhere.
-NON_INFERIORITY_FLOOR = 0.9553
+#: Non-inferiority floors — one per benchmark we currently place on, each the
+#: corrected mt_windowed figure less a 0.005 margin
+#: (results/caid3/PREREGISTRATION_2.md). Four rather than one, because there are
+#: four placements to protect and any change to a shared trunk can trade them.
+#: A breach rejects the variant outright, whatever it gained elsewhere.
+NON_INFERIORITY_FLOORS = {
+    "disorder_pdb": 0.9545,
+    "disorder_nox": 0.8878,
+    "linker": 0.9193,
+    "binding": 0.7884,
+}
+
+#: Kept for the first pre-registration, whose primary task was Disorder-PDB.
+NON_INFERIORITY_FLOOR = NON_INFERIORITY_FLOORS["disorder_pdb"]
 
 
 def load_accessions(path):
@@ -498,8 +508,18 @@ def main(argv=None) -> int:
     ours_primary = (prim.get("ours") or {})
     auc_primary = ours_primary.get("auc")
     cov_primary = ours_primary.get("coverage")
-    non_inferior = (auc_primary is not None
-                    and auc_primary >= NON_INFERIORITY_FLOOR)
+
+    floors = {}
+    for task, floor in NON_INFERIORITY_FLOORS.items():
+        row = (results.get(task) or {}).get("ours")
+        if not row:
+            continue
+        floors[task] = {
+            "auc": row["auc"], "floor": floor,
+            "pass": bool(row["auc"] >= floor),
+            "margin": round(row["auc"] - floor, 4),
+        }
+    non_inferior = all(v["pass"] for v in floors.values()) if floors else False
 
     print(f"\n{'=' * 92}\n PRE-REGISTERED ANALYSIS "
           f"(results/caid3/PREREGISTRATION.md)\n{'=' * 92}")
@@ -510,10 +530,15 @@ def main(argv=None) -> int:
         print(f"   ours - {opp:<20}{pr['delta_auc']:>+9.4f}  "
               f"p={v['p_raw']:.4f}  adj={v['p_adjusted']:.4f}  "
               f"{'CONFIRMED' if v['significant'] else 'not significant'}")
-    if auc_primary is not None:
-        verdict = "PASS" if non_inferior else "FAIL — variant rejected"
-        print(f"\n non-inferiority: {PRIMARY_TASK} AUC {auc_primary:.4f} vs "
-              f"floor {NON_INFERIORITY_FLOOR}  {verdict}")
+    if floors:
+        print(f"\n non-inferiority — every placement must hold, a single "
+              f"breach rejects the variant:")
+        for task, v in floors.items():
+            print(f"   {task:<16}{v['auc']:>8.4f} vs floor {v['floor']:.4f}"
+                  f"  {v['margin']:>+8.4f}  "
+                  f"{'PASS' if v['pass'] else 'FAIL'}")
+        print(f"   overall: "
+              f"{'PASS' if non_inferior else 'FAIL — variant rejected'}")
     if cov_primary is not None and cov_primary < 1.0:
         print(f" WARNING: coverage {cov_primary:.3f} on {PRIMARY_TASK}. A "
               f"subset score is void; the pre-registration requires 319/319.")
@@ -531,7 +556,7 @@ def main(argv=None) -> int:
         "primary_opponents": list(PRIMARY_OPPONENTS),
         "primary_holm": primary_holm,
         "secondary_holm": secondary_holm,
-        "non_inferiority_floor": NON_INFERIORITY_FLOOR,
+        "non_inferiority_floors": floors,
         "non_inferiority_pass": bool(non_inferior),
         "primary_auc": auc_primary,
         "primary_coverage": cov_primary,
