@@ -246,24 +246,34 @@ def main(argv=None) -> int:
     tasks = tuple(payload["tasks"])
     layer_ids = list(payload["layer_ids"])
     structure_dim = int(payload.get("structure_dim", 0))
+    # Default False: a checkpoint predating the conditioned read-out has no
+    # cond.* tensors, and building a head that expects them would fail
+    # strict-loading the model of record.
+    condition_binding = bool(payload.get("condition_binding", False))
 
     from colab.disordernet_gpu import TrainConfig, setup_environment
     cfg = setup_environment(TrainConfig.from_profile("lite", esm_backbone=args.backbone))
     device = cfg.device
 
     from colab.esm_backbone import load_esm_backbone
-    from colab.lite_head import MultiTaskLiteHead, ScalarMix, freeze_backbone
+    from colab.lite_head import (WIDE_DILATIONS, MultiTaskLiteHead, ScalarMix,
+                                 freeze_backbone)
     esm, _a, batch_converter, spec = load_esm_backbone(
         device, backbone=args.backbone, use_gradient_checkpointing=False)
     freeze_backbone(esm)
     mix = ScalarMix(len(layer_ids)).to(device)
     mix.load_state_dict(payload["mix"])
     head = MultiTaskLiteHead(in_dim=spec.embed_dim, tasks=tasks,
-                             structure_dim=structure_dim).to(device)
+                             structure_dim=structure_dim,
+                             condition_binding=condition_binding,
+                             dilations=(WIDE_DILATIONS
+                                        if payload.get("wide_receptive_field")
+                                        else None)).to(device)
     head.load_state_dict(payload["head"])
     head.eval()
     mix.eval()
     print(f"checkpoint: tasks={list(tasks)} structure_dim={structure_dim} "
+          f"condition_binding={condition_binding} "
           f"trainable={sum(p.numel() for p in head.parameters()):,}")
 
     subs = args.submissions or os.path.join(args.checkpoint, "caid_submissions")

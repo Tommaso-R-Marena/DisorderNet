@@ -328,6 +328,17 @@ class StructureChannels(nn.Module):
         return self.encode(x)
 
 
+#: Tasks whose read-out is conditioned on predicted disorder. Binding-IDR is
+#: defined as binding *within disordered regions*, so the disorder answer is part
+#: of its question rather than a hint.
+_CONDITIONED_TASKS = ("binding_idr", "binding")
+
+#: Where the disorder signal comes from, most task-matched first. disorder_pdb is
+#: trained on 21,386 proteins against disorder_nox's 3,333, so it is both the
+#: stronger predictor and the one whose labels match CAID's own definition.
+_CONDITION_SOURCES = ("disorder_pdb", "disorder_nox")
+
+
 class MultiTaskLiteHead(nn.Module):
     """One shared trunk, one linear read-out per CAID3 task.
 
@@ -359,6 +370,7 @@ class MultiTaskLiteHead(nn.Module):
         n_blocks: int = 4,
         dilations: Optional[Sequence[int]] = None,
         structure_dim: int = 0,
+        condition_binding: bool = True,
     ):
         super().__init__()
         if not tasks:
@@ -389,6 +401,45 @@ class MultiTaskLiteHead(nn.Module):
             t: nn.Conv1d(in_dim + self.structure_dim, 1, 1) for t in self.tasks
         })
         self.receptive_field = receptive_field(dil, n_blocks)
+
+        # Disorder-conditioned binding read-outs.
+        #
+        # Binding-IDR is the Binding labels restricted to disordered residues.
+        # Trained as a masked variant of binding, our head reached 0.4945 on the
+        # official reference — below chance — while scoring 0.7924 on Binding
+        # itself. Conditioning on disorder erased the signal, which means what it
+        # had learned was disorder: across a whole protein, binding sites sit in
+        # IDRs and IDRs are the disordered part, so "is this disordered" answers
+        # Binding well and answers Binding-IDR not at all.
+        #
+        # So give the model the disorder answer instead of making it rediscover
+        # one. Each conditioned task gets a second read-out over [trunk,
+        # p(disorder)], letting it learn "given this residue is disordered, does
+        # it bind" rather than "is this residue disordered".
+        #
+        # The conditioning signal is **detached**. Binding is the weakest task
+        # here (891 training proteins) and disorder carries three first-place
+        # results; without the detach, binding's gradient would flow back through
+        # the disorder read-out and could degrade them to help itself. Detached,
+        # the conditioned path is strictly additive: every unconditioned task's
+        # logit is bit-identical to what it would be with conditioning off.
+        self.condition_binding = bool(condition_binding)
+        self.condition_on = tuple(t for t in _CONDITIONED_TASKS if t in self.tasks)
+        self.condition_source = next(
+            (t for t in _CONDITION_SOURCES if t in self.tasks), None)
+        if self.condition_source is None or not self.condition_binding:
+            # No cond parameters are created at all, so a checkpoint trained
+            # before this existed loads with strict=True. That matters: the
+            # model of record holds three first places and must stay loadable.
+            self.condition_on = ()
+        self.cond = nn.ModuleDict({
+            t: nn.Conv1d(hidden + 1, 1, 1) for t in self.condition_on
+        })
+        for m in self.cond.values():
+            # Start as a no-op so a conditioned run begins exactly where the
+            # unconditioned one is, and any change is something it learned.
+            nn.init.zeros_(m.weight)
+            nn.init.zeros_(m.bias)
 
     def forward(
         self,
@@ -421,9 +472,18 @@ class MultiTaskLiteHead(nn.Module):
         h = self.proj(x)
         for blk in self.blocks:
             h = blk(h)
-        return {
+        logits = {
             t: (self.out[t](h) + self.skip[t](x)).squeeze(1) for t in self.tasks
         }
+        if self.condition_on:
+            # Detached: no gradient flows from a conditioned task back into the
+            # disorder read-out or the trunk through this path, so the tasks
+            # holding three first places cannot be traded away to help binding.
+            p_dis = torch.sigmoid(logits[self.condition_source]).detach()
+            h_cond = torch.cat([h, p_dis.unsqueeze(1)], dim=1)
+            for t in self.condition_on:
+                logits[t] = logits[t] + self.cond[t](h_cond).squeeze(1)
+        return logits
 
     def n_trainable(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)

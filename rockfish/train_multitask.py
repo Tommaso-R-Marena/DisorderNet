@@ -448,6 +448,9 @@ def main(argv=None) -> int:
     ap.add_argument("--max-len", type=int, default=1022,
                     help="model window; longer proteins are kept as overlapping "
                          "windows unless --no-window-long-proteins")
+    ap.add_argument("--no-condition-binding", action="store_true",
+                    help="disable the disorder-conditioned binding read-out "
+                         "(the ablation arm; conditioning is on by default)")
     ap.add_argument("--no-window-long-proteins", action="store_true",
                     help="drop proteins longer than --max-len instead of "
                          "windowing them (the old behaviour, which discarded "
@@ -650,6 +653,7 @@ def main(argv=None) -> int:
         head = MultiTaskLiteHead(in_dim=dim, tasks=tasks,
                                  dropout=cfg.head_dropout,
                                  structure_dim=args.structure_dim,
+                                 condition_binding=not args.no_condition_binding,
                                  dilations=(WIDE_DILATIONS
                                             if args.wide_receptive_field else None)).to(device)
         params = list(head.parameters()) + list(mix.parameters())
@@ -774,6 +778,7 @@ def main(argv=None) -> int:
         head = MultiTaskLiteHead(in_dim=dim, tasks=tasks,
                                  dropout=cfg.head_dropout,
                                  structure_dim=args.structure_dim,
+                                 condition_binding=not args.no_condition_binding,
                                  dilations=(WIDE_DILATIONS
                                             if args.wide_receptive_field else None)).to(device)
         params = list(head.parameters()) + list(mix.parameters())
@@ -824,6 +829,12 @@ def main(argv=None) -> int:
             "embed_dim": dim,
             "structure_dim": args.structure_dim,
             "wide_receptive_field": args.wide_receptive_field,
+            # Recorded so the evaluator builds the same architecture. Absent in
+            # checkpoints trained before conditioning existed, and the evaluator
+            # defaults it to False for exactly that reason — a head that creates
+            # cond parameters cannot strict-load a checkpoint that has none, and
+            # the model of record holds three first places.
+            "condition_binding": not args.no_condition_binding,
             "n_train_proteins": len(rows),
             "caid_leak_filter": None if args.no_caid_filter else leak,
         }, ckpt)
