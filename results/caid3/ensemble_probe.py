@@ -164,11 +164,29 @@ def paired_analysis(out_dir: str) -> int:
                 continue
             r = paired_bootstrap(task, staged, staged, "DisorderNet-Ensemble",
                                  opp, n_boot=10000)
-            if abs(r["auc_a"] - scored[task]["auc"]) > 1e-9:
+            # The paired test restricts to targets *both* methods predicted, so
+            # our AUC there equals our full-set AUC only when the opponent
+            # covered everything. ESMDisPred-2PDB covers 181 of 204 on
+            # Disorder-NOX, where we score 0.8937 on the shared subset against
+            # 0.8931 on all of it — a real difference, not a stale file. Check
+            # the count instead, which catches a wrong file without forbidding
+            # a legitimate subset.
+            opp_cov = score_method(ref, read_caid_predictions(
+                os.path.join(PREDS, f"{opp}.caid")))
+            expected_common = opp_cov["n_scored_targets"] if opp_cov else None
+            if expected_common is not None and \
+                    r["n_common_targets"] != expected_common:
                 raise RuntimeError(
-                    f"{task} vs {opp}: paired test scored us at "
-                    f"{r['auc_a']:.4f}, archived file gives "
-                    f"{scored[task]['auc']:.4f}")
+                    f"{task} vs {opp}: paired test used "
+                    f"{r['n_common_targets']} common targets, but {opp} covers "
+                    f"{expected_common} of {len(ref)}. The staging directory is "
+                    f"serving a different file.")
+            if expected_common == len(ref) and \
+                    abs(r["auc_a"] - scored[task]["auc"]) > 1e-9:
+                raise RuntimeError(
+                    f"{task} vs {opp}: opponent has full coverage, so the "
+                    f"paired test should score us at {scored[task]['auc']:.4f}, "
+                    f"but reports {r['auc_a']:.4f}")
             scored.setdefault("_paired", {})[f"{task}: {opp}"] = r
 
     ps = {k: v["p_two_sided"] for k, v in scored.get("_paired", {}).items()
