@@ -107,12 +107,6 @@ def paired_analysis(out_dir: str) -> int:
     from colab.caid3_official import holm_bonferroni, paired_bootstrap
 
     os.makedirs(out_dir, exist_ok=True)
-    staged = os.path.join(out_dir, "_paired")
-    os.makedirs(staged, exist_ok=True)
-    for fn in os.listdir(PREDS):
-        dst = os.path.join(staged, fn)
-        if not os.path.exists(dst):
-            os.symlink(os.path.join(PREDS, fn), dst)
 
     scored = {}
     for task in TASKS:
@@ -131,20 +125,50 @@ def paired_analysis(out_dir: str) -> int:
                 for i, (aa, p) in enumerate(zip(seq, v), 1):
                     fh.write(f"{i}\t{aa}\t{p:.4f}\t{int(p >= 0.5)}\n")
         os.replace(path + ".part", path)
-        import shutil
-        shutil.copy(path, os.path.join(staged, "DisorderNet-Ensemble.caid"))
-        shutil.copy(os.path.join(REFS, f"{task}.fasta"),
-                    os.path.join(staged, f"{task}.fasta"))
-        # Score the archived file, so the number is reproducible from it.
         scored[task] = score_method(
             ref, {k: np.asarray(v) for k, v in
                   read_caid_predictions(path).items()})
+
+        # One staging directory per task. A single shared filename was reused
+        # across tasks, and every task but the last read a stale file: the
+        # Disorder-PDB comparison was computed against Linker's predictions and
+        # reported a delta of +0.0488 where the truth is +0.0139. The bug was
+        # invisible in the output and only surfaced because two of our own
+        # numbers disagreed.
+        import shutil
+        staged = os.path.join(out_dir, f"_paired_{task}")
+        os.makedirs(staged, exist_ok=True)
+        for fn in os.listdir(PREDS):
+            dst = os.path.join(staged, fn)
+            if not os.path.exists(dst):
+                os.symlink(os.path.join(PREDS, fn), dst)
+        shutil.copy(path, os.path.join(staged, "DisorderNet-Ensemble.caid"))
+        shutil.copy(os.path.join(REFS, f"{task}.fasta"),
+                    os.path.join(staged, f"{task}.fasta"))
+
+        # Verify the staged copy is the file we think it is before trusting any
+        # comparison computed from it.
+        staged_score = score_method(
+            read_reference(os.path.join(staged, f"{task}.fasta")),
+            {k: np.asarray(v) for k, v in read_caid_predictions(
+                os.path.join(staged, "DisorderNet-Ensemble.caid")).items()})
+        if abs(staged_score["auc"] - scored[task]["auc"]) > 1e-9:
+            raise RuntimeError(
+                f"{task}: staged ensemble scores {staged_score['auc']:.4f} but "
+                f"the archived file scores {scored[task]['auc']:.4f}. The "
+                f"staging directory is serving a different file; every paired "
+                f"comparison from it would be wrong.")
 
         for opp in dict.fromkeys([LEADERS[task][0], "AlphaFold-rsa"]):
             if not os.path.exists(os.path.join(staged, f"{opp}.caid")):
                 continue
             r = paired_bootstrap(task, staged, staged, "DisorderNet-Ensemble",
                                  opp, n_boot=10000)
+            if abs(r["auc_a"] - scored[task]["auc"]) > 1e-9:
+                raise RuntimeError(
+                    f"{task} vs {opp}: paired test scored us at "
+                    f"{r['auc_a']:.4f}, archived file gives "
+                    f"{scored[task]['auc']:.4f}")
             scored.setdefault("_paired", {})[f"{task}: {opp}"] = r
 
     ps = {k: v["p_two_sided"] for k, v in scored.get("_paired", {}).items()
