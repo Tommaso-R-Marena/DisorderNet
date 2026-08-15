@@ -100,7 +100,10 @@ class TestLabelSemantics:
     def test_every_declared_task_is_implemented(self):
         e = entry(regions=[(DISORDER, 1, 20), (BINDING, 5, 10), (LINKER, 25, 30)])
         for t in TASKS:
-            task_labels(e, t)   # must not raise
+            lab = task_labels(e, t)
+            assert lab is not None, f"{t} produced no labels"
+            assert len(lab) == len(e["sequence"]), t
+            assert set(np.unique(lab)) <= {-1, 0, 1}, t
 
 
 class TestDatasetBuild:

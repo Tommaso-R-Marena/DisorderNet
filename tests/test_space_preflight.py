@@ -23,7 +23,9 @@ from rockfish.run_disordernet import preflight_writable_space
 
 class TestPreflight:
     def test_passes_on_a_writable_directory(self, tmp_path):
-        preflight_writable_space(str(tmp_path), probe_mb=1)
+        preflight_writable_space(str(tmp_path), probe_mb=1)   # raises if not
+        assert tmp_path.is_dir()
+        assert not list(tmp_path.glob("*probe*")), "probe file left behind"
 
     def test_creates_the_directory_if_absent(self, tmp_path):
         target = tmp_path / "checkpoints"

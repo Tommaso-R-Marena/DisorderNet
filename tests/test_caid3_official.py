@@ -225,7 +225,9 @@ class TestAgainstTheRealChallenge:
 
     @pytest.mark.parametrize("task", TASKS)
     def test_downloaded_reference_matches_caid_composition(self, task):
-        verify_composition(task, os.path.join(CACHE, f"{task}.fasta"))
+        path = os.path.join(CACHE, f"{task}.fasta")
+        verify_composition(task, path)          # raises on mismatch
+        assert composition(read_reference(path)) == EXPECTED[task]
 
     @pytest.mark.parametrize("task", TASKS)
     def test_published_leader_reproduces(self, task):

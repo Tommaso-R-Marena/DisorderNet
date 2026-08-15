@@ -121,7 +121,10 @@ class TestPooling:
 
         proteins, folds = make_case(0.6)
         labels, probs = pool_evidenced(align_fold_predictions(proteins, folds, n_folds=1))
-        roc_auc_score(labels, probs)
+        auc = roc_auc_score(labels, probs)      # raises on NaN or a -1 class
+        assert 0.0 <= auc <= 1.0
+        assert np.isfinite(probs).all()
+        assert set(np.unique(labels)) <= {0, 1}
 
 
 class TestFusionRoundTrip:
