@@ -1,5 +1,13 @@
 # Confirmatory result — windowed training
 
+> **Superseded numbers below the fold.** The first evaluation of this run built
+> the head with default dilations while the checkpoint was trained with
+> `--wide-receptive-field`, so it ran at a 61-residue receptive field instead of
+> 213. Dilation changes no weight shape, so `load_state_dict(strict=True)`
+> accepted it silently. The corrected figures are in `CORRECTED.md`; everything
+> below is kept as the record of what was reported and why it was wrong.
+
+
 Job 29833016 (training) and 29833018 (evaluation), analysed exactly as fixed in
 `PREREGISTRATION.md` before the run started, under `METHODOLOGY.md`.
 
