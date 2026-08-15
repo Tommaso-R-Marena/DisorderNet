@@ -1,5 +1,13 @@
 # Pre-registration — windowed-training run on CAID3
 
+> **CONCLUDED.** This registration governed the windowed run and its outcome is
+> in `CORRECTED.md`: P1 confirmed at adjusted p=0.0252, P2 failed, non-inferiority
+> passed. Its floor of 0.9553 is history and is deliberately left as written —
+> rewriting it would erase what that run was actually held to. The live
+> registration is `PREREGISTRATION_2.md`, whose floors come from corrected
+> measurements.
+
+
 Written and committed **before** the run starts and before any of its results
 exist. The git history is the timestamp.
 

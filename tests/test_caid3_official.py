@@ -427,19 +427,40 @@ class TestPreregisteredConstants:
         assert len(PRIMARY_OPPONENTS) == 2
         assert set(PRIMARY_OPPONENTS) == {"AlphaFold-rsa", "PUNCH2"}
 
-    def test_the_non_inferiority_floor_matches_the_document(self):
-        from rockfish.eval_caid3_official import NON_INFERIORITY_FLOOR
+    @staticmethod
+    def _doc(name):
+        return os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "results", "caid3", name)
 
-        assert NON_INFERIORITY_FLOOR == pytest.approx(0.9553)
+    def test_the_floors_match_the_active_registration(self):
+        """There are two pre-registrations with different floors, because the
+        second was set from corrected measurements. The code must follow the
+        active one — this test caught it following neither cleanly."""
+        from rockfish.eval_caid3_official import NON_INFERIORITY_FLOORS
 
-    def test_the_document_exists_and_states_the_same_floor(self):
-        doc = os.path.join(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__))), "results", "caid3",
-            "PREREGISTRATION.md")
-        assert os.path.isfile(doc), "the pre-registration must be in the repo"
-        text = open(doc).read()
-        assert "0.9553" in text
-        assert "AlphaFold-rsa" in text and "PUNCH2" in text
+        text = open(self._doc("PREREGISTRATION_2.md")).read()
+        assert len(NON_INFERIORITY_FLOORS) == 4, NON_INFERIORITY_FLOORS
+        for task, floor in NON_INFERIORITY_FLOORS.items():
+            assert f"{floor:.4f}" in text, (
+                f"{task} floor {floor} is not stated in PREREGISTRATION_2.md")
+
+    def test_the_superseded_floor_is_still_the_first_registration(self):
+        """The first registration is history, not a live constraint, and its
+        floor must stay as it was written — rewriting it would erase what the
+        first run was actually held to."""
+        assert "0.9553" in open(self._doc("PREREGISTRATION.md")).read()
+
+    def test_the_first_registration_is_marked_concluded(self):
+        text = open(self._doc("PREREGISTRATION.md")).read()
+        assert "CONCLUDED" in text, (
+            "a completed registration must say so, or it reads as a live "
+            "constraint the code is violating")
+
+    def test_both_documents_exist_and_name_their_opponents(self):
+        for name in ("PREREGISTRATION.md", "PREREGISTRATION_2.md"):
+            text = open(self._doc(name)).read()
+            assert "AlphaFold-rsa" in text or "bindEmbed21IDR" in text, name
+            assert "Holm" in text, name
 
 
 class TestSupersededPathsSaySo:
