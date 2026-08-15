@@ -23,6 +23,22 @@ and the one a per-residue model with a bounded receptive field is built for.
 question, and one a purely local model has no mechanism to answer: a 213-residue
 receptive field over a 1,000-residue protein never sees the protein.
 
+**The decomposition itself is elementary, and saying otherwise would oversell
+it.** Partitioning a Mann-Whitney pair count by whether the pair is within or
+between groups is textbook, and the weight has an obvious closed form: for n
+proteins of roughly equal size only about 1/n of pairs fall inside one, which is
+exactly what CAID3 shows — 0.0029 against 1/319, 0.0326 against 1/31. "97% of
+the metric is between-protein" is therefore close to a restatement of "there are
+many proteins", not a discovery.
+
+What is not arithmetic is the empirical divergence it exposes. On Binding our
+within-protein AUC is 0.8683 against the leader's 0.8049 while our pooled score
+is *lower*; on Binding-IDR our within-protein ability matches the leader and the
+entire 0.14 pooled deficit is between-protein. Two methods can be ordered one
+way on the question the benchmark is understood to ask and the other way on the
+number it reports. That is a fact about these predictors, not about pair
+counting, and it is what makes the split worth computing.
+
 The decomposition was written to size a specific gap. On Binding-IDR our
 predictions win 21 targets and lose 21 against a leader ahead of us by 0.14
 pooled, and per-protein rank normalisation — which destroys between-protein
