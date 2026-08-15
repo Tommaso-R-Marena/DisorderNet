@@ -274,3 +274,122 @@ class TestArchitectureIsRestoredFromTheCheckpoint:
         for field in ("structure_dim", "wide_receptive_field",
                       "condition_binding"):
             assert f'"{field}":' in src, field
+
+
+class TestProteinLevelBias:
+    """The missing degree of freedom, and the guarantee it cannot cost anything.
+
+    Decomposing CAID's pooled AUC shows 96.7% to 99.7% of the positive-negative
+    pairs it counts are between different proteins. A per-residue model with a
+    213-residue receptive field has no mechanism for that, and the consequence is
+    measurable: on Binding our within-protein AUC is 0.8683 against the leader's
+    0.8049 while our pooled score is lower.
+
+    Adding a constant to every residue of one protein moves only that protein's
+    between-protein comparisons and leaves its within-protein ranking exactly
+    intact. These tests hold the implementation to that property, which is the
+    entire reason the term is safe.
+    """
+
+    def test_it_is_enabled_only_for_the_binding_tasks(self):
+        m = head()
+        assert m.protein_bias_on == ("binding_idr", "binding")
+        assert all(t not in m.protein_bias_on for t in PROTECTED)
+
+    def test_it_can_be_disabled(self):
+        m = head(protein_bias=False)
+        assert m.protein_bias_on == ()
+        assert len(m.protein_bias) == 0
+
+    def test_it_starts_as_an_exact_no_op(self):
+        m_on = head().eval()
+        m_off = head(protein_bias=False).eval()
+        m_off.load_state_dict(
+            {k: v for k, v in m_on.state_dict().items()
+             if not k.startswith("protein_bias.")})
+        inp = x()
+        with torch.no_grad():
+            a, b = m_on(inp), m_off(inp)
+        for t in ALL_TASKS:
+            assert torch.equal(a[t], b[t]), t
+
+    def test_it_is_constant_within_a_protein(self):
+        """The whole point: a per-protein term, not a per-residue one. If it
+        varied along the sequence it would change within-protein ranking, which
+        is the part already working."""
+        m = head().eval()
+        with torch.no_grad():
+            m.protein_bias["binding"].weight.normal_(0.0, 0.2)
+            inp = x(batch=3, length=40)
+            with_bias = m(inp)["binding"]
+            m.protein_bias_on = ()
+            without = m(inp)["binding"]
+        delta = with_bias - without
+        for row in delta:
+            assert torch.allclose(row, row[0].expand_as(row), atol=1e-6), (
+                "the bias varies within a protein and would disturb "
+                "within-protein ranking")
+
+    def test_different_proteins_receive_different_biases(self):
+        """A term identical across proteins would be a global constant, which
+        changes no AUC at all."""
+        m = head().eval()
+        with torch.no_grad():
+            m.protein_bias["binding"].weight.normal_(0.0, 0.5)
+            inp = x(batch=4, length=40)
+            with_bias = m(inp)["binding"]
+            m.protein_bias_on = ()
+            without = m(inp)["binding"]
+        per_protein = (with_bias - without)[:, 0]
+        assert per_protein.std() > 1e-6, per_protein
+
+    def test_protected_tasks_are_bit_identical(self):
+        m = head().eval()
+        with torch.no_grad():
+            m.protein_bias["binding"].weight.normal_(0.0, 0.5)
+            m.protein_bias["binding_idr"].weight.normal_(0.0, 0.5)
+            inp = x()
+            a = m(inp)
+            m.protein_bias_on = ()
+            b = m(inp)
+        for t in PROTECTED:
+            assert torch.equal(a[t], b[t]), t
+
+    def test_no_gradient_reaches_the_trunk_through_it(self):
+        """Pooling is detached, so the weakest task cannot reshape the trunk
+        that carries three first places."""
+        m = head(protein_bias=True)
+        # Isolate the bias path: zero the ordinary read-out so only the bias
+        # contributes gradient.
+        with torch.no_grad():
+            m.out["binding"].weight.zero_()
+            m.out["binding"].bias.zero_()
+            m.skip["binding"].weight.zero_()
+            m.skip["binding"].bias.zero_()
+            m.cond["binding"].weight.zero_()
+            m.cond["binding"].bias.zero_()
+        m(x())["binding"].sum().backward()
+        assert m.proj.weight.grad is None or \
+            torch.count_nonzero(m.proj.weight.grad) == 0, (
+                "gradient from the protein bias reached the trunk")
+
+    def test_the_bias_head_itself_does_learn(self):
+        """The guard above must not pass because the path is dead."""
+        m = head()
+        m(x())["binding"].sum().backward()
+        g = m.protein_bias["binding"].weight.grad
+        assert g is not None and torch.count_nonzero(g) > 0
+
+    def test_an_older_checkpoint_still_loads(self):
+        old = head(protein_bias=False, condition_binding=False)
+        state = old.state_dict()
+        assert not any(k.startswith("protein_bias.") for k in state)
+        fresh = head(protein_bias=False, condition_binding=False)
+        fresh.load_state_dict(state)
+
+    def test_pooling_uses_both_mean_and_max(self):
+        """Mean alone cannot express "this chain contains a strong site
+        somewhere", which is exactly the protein-level signal wanted."""
+        m = head()
+        assert m.protein_bias["binding"].in_features == \
+            2 * m.blocks[0].conv1.in_channels

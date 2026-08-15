@@ -328,6 +328,30 @@ class StructureChannels(nn.Module):
         return self.encode(x)
 
 
+#: Tasks given a protein-level bias term. Decomposing CAID's pooled AUC into
+#: within-protein and between-protein pairs shows that 96.7% to 99.7% of the
+#: pairs it counts are *between* proteins — w_within runs from 0.0029 on
+#: Disorder-PDB to 0.0326 on Linker. The metric is therefore overwhelmingly a
+#: question about which chains carry more of the label, not which residues
+#: within a chain do.
+#:
+#: A per-residue model with a bounded receptive field has no mechanism for that.
+#: A 213-residue field over a 1,000-residue chain never sees the chain. And the
+#: consequence is measurable: on Binding our within-protein AUC is 0.8683
+#: against the leader's 0.8049 — we are substantially better at the biological
+#: question — while our pooled score is lower, because between-protein
+#: calibration dominates. On Binding-IDR our within-protein AUC matches the
+#: leader (0.7004 against 0.6958) and the entire 0.14 pooled deficit is
+#: between-protein.
+#:
+#: Adding a constant to every residue of one protein changes only that
+#: protein's between-protein comparisons and leaves its within-protein ranking
+#: exactly intact. So a learned per-protein bias is precisely the missing
+#: degree of freedom, and precisely the one that cannot disturb what already
+#: works.
+_PROTEIN_BIAS_TASKS = ("binding_idr", "binding")
+
+
 #: Tasks whose read-out is conditioned on predicted disorder. Binding-IDR is
 #: defined as binding *within disordered regions*, so the disorder answer is part
 #: of its question rather than a hint.
@@ -371,6 +395,7 @@ class MultiTaskLiteHead(nn.Module):
         dilations: Optional[Sequence[int]] = None,
         structure_dim: int = 0,
         condition_binding: bool = True,
+        protein_bias: bool = True,
     ):
         super().__init__()
         if not tasks:
@@ -435,6 +460,18 @@ class MultiTaskLiteHead(nn.Module):
         self.cond = nn.ModuleDict({
             t: nn.Conv1d(hidden + 1, 1, 1) for t in self.condition_on
         })
+
+        # Protein-level bias: mean and max of the trunk over the whole chain,
+        # mapped to one scalar per task and added to every residue of it.
+        self.protein_bias_on = (
+            tuple(t for t in _PROTEIN_BIAS_TASKS if t in self.tasks)
+            if protein_bias else ())
+        self.protein_bias = nn.ModuleDict({
+            t: nn.Linear(2 * hidden, 1) for t in self.protein_bias_on
+        })
+        for m in self.protein_bias.values():
+            nn.init.zeros_(m.weight)
+            nn.init.zeros_(m.bias)
         for m in self.cond.values():
             # Start as a no-op so a conditioned run begins exactly where the
             # unconditioned one is, and any change is something it learned.
@@ -475,6 +512,28 @@ class MultiTaskLiteHead(nn.Module):
         logits = {
             t: (self.out[t](h) + self.skip[t](x)).squeeze(1) for t in self.tasks
         }
+        if self.protein_bias_on:
+            # Pooled over the sequence, detached. Detached because binding has
+            # 891 training proteins and the disorder tasks 21,386 with three
+            # first places between them; letting a protein-level term for the
+            # weakest task reshape the shared trunk would put those at risk for
+            # no reason. The bias head still learns — it just learns from what
+            # the trunk already represents.
+            #
+            # A caveat worth stating rather than discovering: with windowed
+            # inference this pools over the *window*, not the protein. For the
+            # 93% of CAID3 targets at or below 1022 residues the window is the
+            # whole chain and the two coincide. For longer ones the effective
+            # bias becomes a taper-weighted average of per-window biases —
+            # still a chain-level quantity, no longer literally constant along
+            # it. Training sees the same windows, so the two are consistent;
+            # the model learns a per-window term and is asked for a per-window
+            # term.
+            hd = h.detach()
+            pooled = torch.cat([hd.mean(dim=2), hd.amax(dim=2)], dim=1)
+            for t in self.protein_bias_on:
+                logits[t] = logits[t] + self.protein_bias[t](pooled)
+
         if self.condition_on:
             # Detached: no gradient flows from a conditioned task back into the
             # disorder read-out or the trunk through this path, so the tasks

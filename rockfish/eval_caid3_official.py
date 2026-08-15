@@ -260,6 +260,7 @@ def main(argv=None) -> int:
     # cond.* tensors, and building a head that expects them would fail
     # strict-loading the model of record.
     condition_binding = bool(payload.get("condition_binding", False))
+    protein_bias = bool(payload.get("protein_bias", False))
 
     from colab.disordernet_gpu import TrainConfig, setup_environment
     cfg = setup_environment(TrainConfig.from_profile("lite", esm_backbone=args.backbone))
@@ -276,6 +277,7 @@ def main(argv=None) -> int:
     head = MultiTaskLiteHead(in_dim=spec.embed_dim, tasks=tasks,
                              structure_dim=structure_dim,
                              condition_binding=condition_binding,
+                             protein_bias=protein_bias,
                              dilations=(WIDE_DILATIONS
                                         if payload.get("wide_receptive_field")
                                         else None)).to(device)
@@ -284,6 +286,7 @@ def main(argv=None) -> int:
     mix.eval()
     print(f"checkpoint: tasks={list(tasks)} structure_dim={structure_dim} "
           f"condition_binding={condition_binding} "
+          f"protein_bias={protein_bias} "
           f"trainable={sum(p.numel() for p in head.parameters()):,}")
 
     subs = args.submissions or os.path.join(args.checkpoint, "caid_submissions")
