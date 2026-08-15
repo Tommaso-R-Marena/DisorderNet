@@ -55,8 +55,12 @@
 : "${MT_DISPROT:=${HOME}/.cache/disordernet/disprot_raw.json}"
 : "${MT_PDB_MISSING:=${HOME}/.cache/disordernet/mobidb_pdbcov.ndjson}"
 : "${MT_CAID_REF:=/scratch4/sfried3/jbeale3_disordernet/caid3_official/disorder_pdb.fasta}"
+# Additional benchmark references to exclude, space separated. Filtering CAID3
+# alone leaves 307 of CAID2's 348 targets in training — the rounds share one
+# protein — so a model meant to be evaluated on CAID2 must name it here.
+: "${MT_CAID_REF_EXTRA:=}"
 export STAGE MT_WORKDIR MT_BACKBONE MT_FOLDS MT_EPOCHS MT_STRUCTURE_DIM MT_TASKS
-export MT_DISPROT MT_PDB_MISSING MT_CAID_REF
+export MT_DISPROT MT_PDB_MISSING MT_CAID_REF MT_CAID_REF_EXTRA
 
 # ── Paths (override via env before sbatch) ───────────────────────────────────
 # No default. DISORDERNET_REPO silently defaulting to ~/DisorderNet sent this
@@ -146,6 +150,7 @@ python rockfish/train_multitask.py \
   --disprot "${MT_DISPROT}" \
   --pdb-missing-cache "${MT_PDB_MISSING}" \
   --caid-reference "${MT_CAID_REF}" \
+  ${MT_CAID_REF_EXTRA:+$(for r in ${MT_CAID_REF_EXTRA}; do printf -- '--caid-reference %s ' "$r"; done)} \
   --backbone "${MT_BACKBONE}" \
   --n-folds "${MT_FOLDS}" \
   --epochs "${MT_EPOCHS}" \

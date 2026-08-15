@@ -194,3 +194,73 @@ class TestDegenerateTasksAreRefused:
         evidence = np.ones(1000, dtype=bool)
         prevalence = float(labels[evidence].mean())
         assert prevalence >= 0.999, "fixture should be degenerate"
+
+
+class TestLeakFilterAcceptsSeveralBenchmarks:
+    """Filtering CAID3 alone leaves CAID2 in the training set.
+
+    The two rounds share exactly one protein, so a model filtered only against
+    CAID3 has trained on 307 of CAID2's 348 targets and cannot be evaluated on
+    CAID2 at all. A held-out benchmark is the difference between one result and
+    a replicated one, so the filter has to take both.
+    """
+
+    @staticmethod
+    def _ref(tmp_path, name, records):
+        p = tmp_path / f"{name}.fasta"
+        p.write_text("".join(f">{i}\n{s}\n{'0' * len(s)}\n" for i, s in records))
+        return str(p)
+
+    def _rows(self):
+        return [{"id": f"DP{i:04d}", "sequence": "ACDEFGHIKL" * 5,
+                 "length": 50} for i in range(6)]
+
+    def test_a_single_path_still_works(self, tmp_path):
+        from rockfish.train_multitask import drop_caid_targets
+
+        rows = self._rows()
+        ref = self._ref(tmp_path, "a", [("DP0001", rows[1]["sequence"])])
+        kept, meta = drop_caid_targets(rows, ref, 0.4,
+                                       allow_missing_homology=True)
+        assert meta["n_id_overlap"] >= 1
+        assert "DP0001" not in {r["id"] for r in kept}
+
+    def test_several_paths_remove_targets_from_each(self, tmp_path):
+        from rockfish.train_multitask import drop_caid_targets
+
+        rows = self._rows()
+        a = self._ref(tmp_path, "a", [("DP0001", "MMMMMMMMMM")])
+        b = self._ref(tmp_path, "b", [("DP0004", "WWWWWWWWWW")])
+        kept, meta = drop_caid_targets(rows, [a, b], 0.4,
+                                       allow_missing_homology=True)
+        ids = {r["id"] for r in kept}
+        assert "DP0001" not in ids and "DP0004" not in ids
+        assert meta["n_targets_filtered"] == 2
+
+    def test_a_target_in_both_references_is_counted_once(self, tmp_path):
+        from rockfish.train_multitask import drop_caid_targets
+
+        rows = self._rows()
+        a = self._ref(tmp_path, "a", [("DP0002", "MMMMMMMMMM")])
+        b = self._ref(tmp_path, "b", [("DP0002", "MMMMMMMMMM")])
+        _kept, meta = drop_caid_targets(rows, [a, b], 0.4,
+                                        allow_missing_homology=True)
+        assert meta["n_targets_filtered"] == 1
+
+    def test_missing_paths_are_ignored_not_fatal(self, tmp_path):
+        from rockfish.train_multitask import drop_caid_targets
+
+        rows = self._rows()
+        a = self._ref(tmp_path, "a", [("DP0003", "MMMMMMMMMM")])
+        kept, meta = drop_caid_targets(
+            rows, [a, str(tmp_path / "nope.fasta")], 0.4,
+            allow_missing_homology=True)
+        assert "DP0003" not in {r["id"] for r in kept}
+        assert meta["n_targets_filtered"] == 1
+
+    def test_no_usable_reference_reports_it(self, tmp_path):
+        from rockfish.train_multitask import drop_caid_targets
+
+        kept, meta = drop_caid_targets(self._rows(), [], 0.4)
+        assert len(kept) == 6
+        assert "no benchmark reference" in meta["reason"]

@@ -303,23 +303,38 @@ def structure_batch(batch, L, device):
 
 
 def drop_caid_targets(
-    rows: list[dict], reference_fasta: Optional[str], min_identity: float,
+    rows: list[dict], reference_fasta, min_identity: float,
     allow_missing_homology: bool = False,
 ) -> tuple[list[dict], dict]:
-    """Remove CAID3 targets and their homologues from the training union.
+    """Remove benchmark targets and their homologues from the training union.
 
-    Exact id/sequence matches are removed first and unconditionally — a CAID3
+    Exact id/sequence matches are removed first and unconditionally — a CAID
     target is literally a DisProt entry, so without this the model trains on the
     proteins it will be scored on. Homologues above ``min_identity`` go too,
     since a 90%-identical paralogue leaks nearly as much as the target itself.
+
+    ``reference_fasta`` may be one path or several. Several matters: filtering
+    CAID3 alone leaves 307 of CAID2's 348 targets in the training set, because
+    the two rounds share exactly one protein. A model filtered only against
+    CAID3 therefore cannot be evaluated on CAID2 at all, and a held-out
+    benchmark is the difference between one result and a replicated one.
     """
     from colab.caid3_eval import parse_caid_reference_fasta
 
-    if not reference_fasta or not os.path.isfile(reference_fasta):
+    paths = ([reference_fasta] if isinstance(reference_fasta, (str, bytes))
+             else list(reference_fasta or []))
+    paths = [p for p in paths if p and os.path.isfile(p)]
+    if not paths:
         return rows, {"n_before": len(rows), "n_removed": 0, "n_id_overlap": 0,
-                      "reason": "no CAID3 reference available"}
+                      "reason": "no benchmark reference available"}
 
-    targets = parse_caid_reference_fasta(reference_fasta)
+    targets, seen = [], set()
+    for path in paths:
+        for t in parse_caid_reference_fasta(path):
+            if t["id"] in seen:
+                continue
+            seen.add(t["id"])
+            targets.append(t)
     target_ids = {t["id"] for t in targets}
     target_seqs = {t["sequence"] for t in targets}
 
@@ -374,7 +389,8 @@ def drop_caid_targets(
         "n_id_overlap": n_id,
         "n_homology_removed": len(homologous),
         "min_identity": min_identity,
-        "reference": reference_fasta,
+        "reference": paths if len(paths) > 1 else paths[0],
+        "n_targets_filtered": len(targets),
     }
 
 
@@ -458,9 +474,11 @@ def main(argv=None) -> int:
                          "1500 residues)")
     ap.add_argument("--stats-only", action="store_true")
     ap.add_argument(
-        "--caid-reference", default=None,
-        help="CAID3 Disorder-PDB FASTA whose targets must be excluded from "
-             "training (defaults to <workdir>/caid3_disorder_pdb.fasta)",
+        "--caid-reference", default=None, action="append",
+        help="Benchmark FASTA whose targets must be excluded from training. "
+             "Repeatable, and repeating it matters: filtering CAID3 alone "
+             "leaves 307 of CAID2's 348 targets in the training set, since the "
+             "rounds share one protein.",
     )
     ap.add_argument("--leak-identity", type=float, default=0.40)
     ap.add_argument(
@@ -515,12 +533,15 @@ def main(argv=None) -> int:
     os.makedirs(args.workdir, exist_ok=True)
     disprot = args.disprot or os.path.join(args.workdir, "disprot_raw.json")
     if not args.caid_reference:
-        for cand in (os.path.join(args.workdir, "caid3_disorder_pdb.fasta"),
-                     os.path.join(args.workdir, "checkpoints",
-                                  "caid3_disorder_pdb.fasta")):
-            if os.path.isfile(cand):
-                args.caid_reference = cand
-                break
+        args.caid_reference = [
+            c for c in (os.path.join(args.workdir, "caid3_disorder_pdb.fasta"),
+                        os.path.join(args.workdir, "checkpoints",
+                                     "caid3_disorder_pdb.fasta"))
+            if os.path.isfile(c)][:1]
+    if args.caid_reference:
+        print(f"leak filter references ({len(args.caid_reference)}):")
+        for c in args.caid_reference:
+            print(f"    {c}")
     entries = load_disprot(disprot)
     print(f"DisProt entries: {len(entries):,}")
 
