@@ -63,6 +63,38 @@ STRUCTURAL_BASELINE = "AlphaFold-rsa"
 
 OURS = "DisorderNet"
 
+
+def assert_filtered_against(benchmark: str, checkpoint: str) -> None:
+    """Refuse to score a checkpoint on a round it was not filtered against.
+
+    The two CAID rounds share exactly one protein, so filtering against CAID3
+    leaves 307 of CAID2's 348 Disorder-PDB targets in the training union. A
+    CAID3-only checkpoint scored on CAID2 would be measuring memorisation and
+    would look excellent doing it — the failure mode that makes a replication
+    worthless is the one that produces the most impressive number.
+
+    Checked from the checkpoint's own recorded filter rather than from the
+    operator's intent, because the operator's intent is exactly what a
+    mis-set environment variable overrides. ``caid3`` is not exempt: a run
+    could as easily be launched against CAID2 references alone.
+    """
+    meta = os.path.join(checkpoint, "multitask_results.json")
+    if not os.path.isfile(meta):
+        raise SystemExit(
+            f"{checkpoint} has no multitask_results.json, so the leak filter "
+            f"it was trained under cannot be established. Refusing to score.")
+    with open(meta) as fh:
+        refs = json.load(fh).get("caid_leak_filter", {}).get("reference")
+    refs = refs if isinstance(refs, list) else ([refs] if refs else [])
+    if not any(benchmark in str(r) for r in refs):
+        raise SystemExit(
+            f"{checkpoint} was not filtered against {benchmark} — its "
+            f"references are {refs or 'none recorded'}. Its training union "
+            f"therefore contains {benchmark} targets, and any score here "
+            f"would measure memorisation rather than generalisation.")
+    print(f"leak filter covers {benchmark} ({len(refs)} references)")
+
+
 #: Pre-registered analysis (results/caid3/PREREGISTRATION.md). The primary
 #: family is exactly two tests on Disorder-PDB, unfused, all 319 targets. It is
 #: fixed here so the confirmatory run cannot have its family redefined after the
@@ -255,6 +287,7 @@ def main(argv=None) -> int:
                                os.path.join(args.refs, f"{task}.fasta"))
     print(f"all {len(round_tasks)} {args.benchmark} references match "
           f"their published composition")
+    assert_filtered_against(args.benchmark, args.checkpoint)
 
     ckpt = os.path.join(args.checkpoint, "multitask_head.pt")
     if not os.path.isfile(ckpt):
@@ -400,7 +433,17 @@ def main(argv=None) -> int:
                     shutil.copy(fused_path,
                                 os.path.join(staged, f"{OURS}-fused.caid"))
 
-        leader = LEADERS[task][0]
+        # LEADERS is the CAID3 published table, verified against the challenge
+        # site. A replication round has no entry there — PUNCH2 did not enter
+        # CAID2 — and reaching into it anyway named an opponent whose file does
+        # not exist, which is how this crashed. For any other round the leader
+        # is taken empirically: the top full-coverage entrant on this very
+        # reference, recomputed from the raw prediction files.
+        if args.benchmark == "caid3":
+            leader, leader_auc = LEADERS[task]
+        else:
+            top = (full_cov or board)[0]
+            leader, leader_auc = top["method"], top["auc"]
         paired = {}
         for opponent in dict.fromkeys([leader, STRUCTURAL_BASELINE,
                                        board[0]["method"]]):
@@ -411,9 +454,14 @@ def main(argv=None) -> int:
 
         if fused_row:
             fused_better = [r for r in board if r["auc"] > fused_row["auc"]]
-            paired[f"{STRUCTURAL_BASELINE}(fused-vs-leader)"] = paired_bootstrap(
-                task, args.refs, staged, f"{OURS}-fused", leader,
-                n_boot=args.n_boot)
+            # Guarded like the loop above. Without this the fused comparison
+            # opened the opponent's file unconditionally and took the whole
+            # evaluation down when the named leader was not an entrant.
+            if os.path.exists(os.path.join(staged, f"{leader}.caid")):
+                paired[f"{STRUCTURAL_BASELINE}(fused-vs-leader)"] = \
+                    paired_bootstrap(task, args.refs, staged,
+                                     f"{OURS}-fused", leader,
+                                     n_boot=args.n_boot)
 
         results[task] = {
             "ours": ours, "rank": rank,
@@ -422,7 +470,7 @@ def main(argv=None) -> int:
             "n_above_us_that_skipped_targets": len(skipped_above),
             "fused": fused_row,
             "fused_rank": (len(fused_better) + 1) if fused_row else None, "n_methods": len(board) + 1,
-            "leader": leader, "leader_auc": LEADERS[task][1],
+            "leader": leader, "leader_auc": leader_auc,
             "top_by_auc": [{k: r[k] for k in ("method", "auc", "aps", "coverage")}
                            for r in board[:5]],
             "paired": paired,
@@ -439,8 +487,12 @@ def main(argv=None) -> int:
     # head against a reconstructed "disordered-and-not-binding" convention
     # produced a predictor for a different question, which is how it landed
     # below chance. Score the binding head where the binding head belongs.
-    if "binding" in predictions_by_task:
-        idr_ref = read_reference(os.path.join(args.refs, "binding_idr.fasta"))
+    # CAID2 has no Binding-IDR reference — it is a CAID3 addition — so this is
+    # conditioned on the file existing rather than on the round, which keeps it
+    # true whatever a future round contains.
+    idr_path = os.path.join(args.refs, "binding_idr.fasta")
+    if "binding" in predictions_by_task and os.path.isfile(idr_path):
+        idr_ref = read_reference(idr_path)
         shared = {t: v for t, v in predictions_by_task["binding"].items()
                   if t in idr_ref}
         if shared:
@@ -462,8 +514,8 @@ def main(argv=None) -> int:
                           f"binding head scored on the same reference "
                           f"{scored['auc']:.4f}")
 
-    print(f"\n{'=' * 92}\n OFFICIAL CAID3 — all comparisons paired on shared "
-          f"targets\n{'=' * 92}")
+    print(f"\n{'=' * 92}\n OFFICIAL {args.benchmark.upper()} — all comparisons "
+          f"paired on shared targets\n{'=' * 92}")
     print(f"{'benchmark':<14}{'our AUC':>9}{'our APS':>9}{'cov':>6}"
           f"{'rank/all':>10}{'rank/full':>12}{'leader':>26}{'lead AUC':>10}")
     for task, r in results.items():
@@ -522,8 +574,15 @@ def main(argv=None) -> int:
     auc_primary = ours_primary.get("auc")
     cov_primary = ours_primary.get("coverage")
 
+    # The floors are CAID3 numbers. CAID2 shares four task *names* with CAID3
+    # and not one of their values — different targets, different label counts,
+    # different scale. Applying a 0.9545 Disorder-PDB floor to a 348-target
+    # CAID2 reference would print a confident PASS or FAIL about a comparison
+    # that was never registered and does not mean anything.
     floors = {}
-    for task, floor in NON_INFERIORITY_FLOORS.items():
+    active_floors = (NON_INFERIORITY_FLOORS if args.benchmark == "caid3"
+                     else {})
+    for task, floor in active_floors.items():
         row = (results.get(task) or {}).get("ours")
         if not row:
             continue
@@ -536,6 +595,12 @@ def main(argv=None) -> int:
 
     print(f"\n{'=' * 92}\n PRE-REGISTERED ANALYSIS "
           f"(results/caid3/PREREGISTRATION.md)\n{'=' * 92}")
+    if args.benchmark != "caid3":
+        print(f" benchmark={args.benchmark}: this is an independent "
+              f"replication round.\n No non-inferiority floors are registered "
+              f"for it — the CAID3 floors are CAID3 numbers and\n do not "
+              f"transfer to a different target set. Placements below are "
+              f"descriptive.")
     print(f" primary family: {PRIMARY_TASK}, unfused, "
           f"{len(primary)} test(s), Holm across those alone")
     for opp, v in sorted(primary_holm.items(), key=lambda kv: kv[1]["rank"]):

@@ -56,6 +56,10 @@ THREE_TO_ONE: dict[str, str] = {
 # structural_fusion.py) rather than treating this as free information.
 RSA_SMOOTH_WINDOW = 21
 
+#: Sentinel distinguishing "caller did not say" from an explicit ``None``,
+#: which means "do not cache".
+_UNSET = "<unset>"
+
 
 def smooth_window(x: np.ndarray, window: int = RSA_SMOOTH_WINDOW) -> np.ndarray:
     """Centred moving average, always returning one value per input residue.
@@ -142,6 +146,85 @@ def rsa_from_structure(path: str) -> tuple[np.ndarray, str, np.ndarray]:
     )
 
 
+#: Layout version of the derived-feature cache. An earlier cache under
+#: ``rsa_features/`` stored ``rsa``/``plddt``/``seq`` and predates the contacts
+#: channel; reading it as if it were current would silently drop a model input.
+#: Files without a matching version are ignored rather than interpreted.
+RSA_CACHE_VERSION = 2
+
+#: Subdirectory of the structure cache holding derived features.
+RSA_CACHE_DIRNAME = "_rsa_v2"
+
+
+def cif_digest(path: str) -> str:
+    """Content fingerprint of an mmCIF, so the cache invalidates itself.
+
+    Keyed on content rather than accession alone: AlphaFold DB has already
+    moved v4 -> v6 during this project, and a cache keyed on the accession
+    would serve features from the old model forever without anything looking
+    wrong. Size and mtime would not do — rsync rewrites both.
+    """
+    import hashlib
+
+    h = hashlib.blake2b(digest_size=16)
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def rsa_from_structure_cached(
+    path: str, feature_cache: Optional[str] = None,
+) -> tuple[np.ndarray, str, np.ndarray, np.ndarray]:
+    """``rsa_from_structure`` with the parse memoised on disk.
+
+    Shrake-Rupley in Biopython is pure Python and dominates every run that
+    touches structure: on the 22,914-protein union it took **5h04m of the
+    18h** wall clock, recomputing the same accessibilities the previous run
+    computed. Nothing in that calculation depends on the model, the seed, or
+    the task, so it is memoised against the structure's content hash.
+
+    The *raw* rsa is cached, never the smoothed one. The smoothing window is
+    chosen on the benchmark (21, from 0.8688 raw to 0.9459 smoothed), so it has
+    to stay a parameter a future run can vary; a cache of smoothed values would
+    freeze it silently.
+    """
+    if not feature_cache:
+        return rsa_from_structure(path)
+
+    acc = os.path.splitext(os.path.basename(path))[0].upper()
+    npz = os.path.join(feature_cache, f"{acc}.npz")
+    digest = cif_digest(path)
+    if os.path.isfile(npz):
+        try:
+            with np.load(npz, allow_pickle=False) as d:
+                if (int(d["version"]) == RSA_CACHE_VERSION
+                        and str(d["cif_digest"]) == digest):
+                    return (d["rsa"], str(d["seq"]), d["plddt"], d["contacts"])
+        except Exception:
+            pass  # A truncated or foreign file is recomputed, never trusted.
+
+    rsa, seq, plddt, contacts = rsa_from_structure(path)
+    os.makedirs(feature_cache, exist_ok=True)
+    # Written through a file object, not a path: np.savez_compressed appends
+    # ".npz" to any path lacking it, so a ".part" temp would land beside the
+    # name we then try to rename, and every write would fail silently.
+    tmp = f"{npz}.{os.getpid()}.part"
+    try:
+        with open(tmp, "wb") as fh:
+            np.savez_compressed(
+                fh, version=RSA_CACHE_VERSION, cif_digest=digest,
+                rsa=rsa, seq=seq, plddt=plddt, contacts=contacts)
+        os.replace(tmp, npz)          # atomic: many workers share this dir
+    except OSError:
+        if os.path.exists(tmp):
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+    return rsa, seq, plddt, contacts
+
+
 def fetch_structure(
     uniprot_acc: str, cache_dir: str, timeout: int = 60
 ) -> Optional[str]:
@@ -190,6 +273,7 @@ def structure_features(
     cache_dir: str,
     window: int = RSA_SMOOTH_WINDOW,
     allow_fetch: bool = True,
+    feature_cache: Optional[str] = _UNSET,
 ) -> Optional[dict]:
     """Smoothed rsa and pLDDT aligned to ``target_sequence``, or None.
 
@@ -198,6 +282,12 @@ def structure_features(
     accession and may correspond to a different isoform than the benchmark
     target; scoring one against the other is the same class of error that made
     this project's CAID3 numbers wrong for its whole history.
+
+    ``feature_cache`` memoises the SASA parse. It defaults to a subdirectory of
+    ``cache_dir``, which makes the fast path the one that runs by default;
+    pass ``None`` to recompute from the mmCIF every time. Either way the answer
+    is the same array — the cache carries the structure's content hash and
+    recomputes on any mismatch — so this is a speed setting, not a science one.
     """
     if not uniprot_acc or not target_sequence:
         return None
@@ -208,8 +298,11 @@ def structure_features(
         path = fetch_structure(uniprot_acc, cache_dir)
         if path is None:
             return None
+    if feature_cache is _UNSET:
+        feature_cache = os.path.join(cache_dir, RSA_CACHE_DIRNAME)
     try:
-        rsa, seq, plddt, contacts = rsa_from_structure(path)
+        rsa, seq, plddt, contacts = rsa_from_structure_cached(
+            path, feature_cache)
     except Exception:
         return None
     if seq != target_sequence:

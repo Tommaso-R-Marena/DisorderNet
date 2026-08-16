@@ -490,3 +490,150 @@ class TestSupersededPathsSaySo:
         import colab.caid3_official as m
 
         assert "SUPERSEDED" not in (m.__doc__ or "")
+
+
+class TestCrossRoundLeakGuard:
+    """A CAID3-filtered checkpoint must never be scored on CAID2.
+
+    The two rounds share exactly one protein, so a CAID3-only filter leaves 307
+    of CAID2's 348 Disorder-PDB targets in the training union. That model would
+    score *better* on CAID2 than an honest one, which is why this cannot be
+    left to the operator remembering.
+    """
+
+    @staticmethod
+    def _ckpt(tmp_path, refs):
+        import json as _json
+
+        d = tmp_path / "run"
+        d.mkdir()
+        payload = {"caid_leak_filter": {"reference": refs}} if refs is not None else {}
+        (d / "multitask_results.json").write_text(_json.dumps(payload))
+        return str(d)
+
+    def test_a_caid3_only_checkpoint_is_refused_on_caid2(self, tmp_path):
+        from rockfish.eval_caid3_official import assert_filtered_against
+
+        ckpt = self._ckpt(tmp_path, ["/refs/caid3_official/disorder_pdb.fasta"])
+        with pytest.raises(SystemExit) as exc:
+            assert_filtered_against("caid2", ckpt)
+        assert "memorisation" in str(exc.value)
+
+    def test_a_dual_filtered_checkpoint_passes_both_rounds(self, tmp_path):
+        from rockfish.eval_caid3_official import assert_filtered_against
+
+        ckpt = self._ckpt(tmp_path, [
+            "/refs/caid3_official/disorder_pdb.fasta",
+            "/refs/caid2_official/disorder_pdb.fasta",
+            "/refs/caid2_official/binding.fasta",
+        ])
+        assert_filtered_against("caid2", ckpt) is None
+        assert_filtered_against("caid3", ckpt) is None
+
+    def test_a_single_string_reference_is_accepted_not_iterated(self, tmp_path):
+        """Older runs recorded one path as a bare string. Treating a string as
+        a list of characters would make every check pass on 'c' in 'caid2'."""
+        from rockfish.eval_caid3_official import assert_filtered_against
+
+        ckpt = self._ckpt(tmp_path, "/refs/caid3_official/disorder_pdb.fasta")
+        assert_filtered_against("caid3", ckpt) is None
+        with pytest.raises(SystemExit):
+            assert_filtered_against("caid2", ckpt)
+
+    def test_a_missing_or_empty_filter_record_is_refused(self, tmp_path):
+        from rockfish.eval_caid3_official import assert_filtered_against
+
+        with pytest.raises(SystemExit) as exc:
+            assert_filtered_against("caid3", self._ckpt(tmp_path, None))
+        assert "none recorded" in str(exc.value)
+
+    def test_a_checkpoint_without_metadata_is_refused(self, tmp_path):
+        from rockfish.eval_caid3_official import assert_filtered_against
+
+        d = tmp_path / "bare"
+        d.mkdir()
+        with pytest.raises(SystemExit) as exc:
+            assert_filtered_against("caid3", str(d))
+        assert "cannot be established" in str(exc.value)
+
+    def test_the_evaluator_calls_the_guard_before_loading_weights(self):
+        """A guard that runs after the model loads still runs, but a guard that
+        runs after *scoring* would not — so pin the order."""
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "rockfish", "eval_caid3_official.py")
+        src = open(path).read()
+        call = src.index("assert_filtered_against(args.benchmark")
+        load = src.index('torch.load(ckpt')
+        assert call < load, "the leak guard must precede loading the model"
+
+
+class TestCaid2Composition:
+    def test_the_two_rounds_have_different_published_compositions(self):
+        """If these ever coincide the guard that distinguishes them is inert."""
+        from colab.caid3_official import EXPECTED, EXPECTED_CAID2
+
+        shared = set(EXPECTED) & set(EXPECTED_CAID2)
+        assert shared, "the rounds share no task name"
+        for task in shared:
+            assert EXPECTED[task] != EXPECTED_CAID2[task], task
+
+    def test_caid2_has_no_binding_idr_task(self):
+        """CAID2 scored `binding`; `binding_idr` is a CAID3 addition. Scoring
+        our binding_idr head against CAID2's binding reference would silently
+        compare two different label definitions."""
+        from colab.caid3_official import TASKS_CAID2
+
+        assert "binding_idr" not in TASKS_CAID2
+        assert "binding" in TASKS_CAID2
+
+    def test_caid3_floors_are_not_applied_to_caid2(self):
+        """CAID2 shares four task names with CAID3 and none of their values.
+        Applying a CAID3 floor to a CAID2 AUC would print a PASS or FAIL about
+        a comparison nobody registered."""
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "rockfish", "eval_caid3_official.py")
+        src = open(path).read()
+        assert "active_floors" in src
+        assert 'NON_INFERIORITY_FLOORS if args.benchmark == "caid3"' in src
+        assert "for task, floor in active_floors.items():" in src
+        assert "for task, floor in NON_INFERIORITY_FLOORS.items():" not in src
+
+    def test_no_caid3_table_is_consulted_on_another_round(self):
+        """`leader = LEADERS[task][0]` named PUNCH2 on CAID2, where PUNCH2 was
+        not an entrant, and the fused comparison then opened a file that does
+        not exist and took the whole evaluation down after 14 minutes of GPU.
+        The leader must come from the round being scored."""
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "rockfish", "eval_caid3_official.py")
+        src = open(path).read()
+        assert 'if args.benchmark == "caid3":\n            leader, leader_auc = LEADERS[task]' in src
+        assert 'leader, leader_auc = top["method"], top["auc"]' in src
+        assert '"leader_auc": LEADERS[task][1]' not in src
+        assert src.count("LEADERS[task]") == 1, (
+            "every use of the CAID3 leader table must be behind the round check")
+
+    def test_every_opponent_file_is_checked_before_it_is_opened(self):
+        """The paired loop guarded, the fused comparison did not."""
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "rockfish", "eval_caid3_official.py")
+        src = open(path).read()
+        block = src[src.index("fused_better = [r for r in board"):
+                    src.index("results[task] = {")]
+        guard = block.index('os.path.exists(os.path.join(staged, f"{leader}.caid")')
+        call = block.index("paired_bootstrap")
+        assert guard < call, "the fused comparison opens the leader unguarded"
+
+    def test_the_binding_idr_crossover_is_conditioned_on_the_file(self):
+        """CAID2 has no binding_idr reference; reading it unconditionally
+        crashes the round after every task has already been scored."""
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "rockfish", "eval_caid3_official.py")
+        src = open(path).read()
+        assert 'os.path.isfile(idr_path)' in src
+        assert 'read_reference(os.path.join(args.refs, "binding_idr.fasta"))' \
+            not in src
