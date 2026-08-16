@@ -88,6 +88,7 @@ def decompose_auc(labels_by_target: list[np.ndarray],
 
     within_pairs = 0
     within_weighted = 0.0
+    per_target = []
     usable = 0
     for y, s in zip(labels_by_target, scores_by_target):
         n_pos = int(y.sum())
@@ -101,6 +102,7 @@ def decompose_auc(labels_by_target: list[np.ndarray],
         usable += 1
         within_pairs += pairs
         within_weighted += a * pairs
+        per_target.append(a)
 
     if within_pairs == 0:
         return {"pooled": pooled, "reason": "no protein has both classes"}
@@ -116,6 +118,13 @@ def decompose_auc(labels_by_target: list[np.ndarray],
     return {
         "pooled": pooled,
         "auc_within": auc_within,
+        # One protein, one vote. `auc_within` is the quantity the identity
+        # needs — it must be pair-weighted or the decomposition does not close
+        # — but pair weighting lets a few large chains carry the number, so a
+        # conclusion drawn from it should survive the unweighted mean too.
+        # Reported rather than chosen between.
+        "auc_within_unweighted": (float(np.mean(per_target))
+                                  if per_target else None),
         "auc_between": auc_between,
         "w_within": w_within,
         "w_between": w_between,

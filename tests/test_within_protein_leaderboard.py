@@ -180,3 +180,93 @@ class TestTheBootstrapClustersOnProteins:
                    src.index("def hydropathy_between_auc")]
         assert "take = rng.integers" in body
         assert body.index("take = rng.integers") < body.index("for r in rows")
+
+
+class TestOurSubmissionsFaceTheSameRule:
+    @staticmethod
+    def _ref():
+        return {"a": ("AAAA", "0011"), "b": ("AAAAA", "00111")}
+
+    @staticmethod
+    def _write(path, preds):
+        lines = []
+        for tid, (seq, scores) in preds.items():
+            lines.append(f">{tid}")
+            for i, (aa, s) in enumerate(zip(seq, scores), 1):
+                lines.append(f"{i}\t{aa}\t{s}")
+        open(path, "w").write("\n".join(lines) + "\n")
+
+    def test_a_complete_submission_is_included(self, tmp_path):
+        self._write(str(tmp_path / "DisorderNet-linker.caid"), {
+            "a": ("AAAA", [0.1, 0.2, 0.8, 0.9]),
+            "b": ("AAAAA", [0.1, 0.2, 0.8, 0.9, 0.95]),
+        })
+        got = wpl.extra_methods(self._ref(), "linker",
+                                f"{tmp_path}:DisorderNet")
+        assert set(got) == {"DisorderNet"}
+
+    def test_our_partial_submission_is_excluded_like_anyone_elses(self, tmp_path):
+        """Comparing our within-protein AUC on a subset against methods scored
+        on everything is the exact cherry-pick this analysis exists to expose."""
+        self._write(str(tmp_path / "DisorderNet-linker.caid"), {
+            "a": ("AAAA", [0.1, 0.2, 0.8, 0.9]),
+        })
+        assert wpl.extra_methods(self._ref(), "linker",
+                                 f"{tmp_path}:DisorderNet") == {}
+
+    def test_a_missing_file_is_reported_not_fatal(self, tmp_path):
+        assert wpl.extra_methods(self._ref(), "binding",
+                                 f"{tmp_path}:DisorderNet") == {}
+
+    def test_several_submission_directories_may_be_named(self, tmp_path):
+        for name in ("A", "B"):
+            d = tmp_path / name
+            d.mkdir()
+            self._write(str(d / f"{name}-linker.caid"), {
+                "a": ("AAAA", [0.1, 0.2, 0.8, 0.9]),
+                "b": ("AAAAA", [0.1, 0.2, 0.8, 0.9, 0.95]),
+            })
+        got = wpl.extra_methods(
+            self._ref(), "linker",
+            f"{tmp_path / 'A'}:A,{tmp_path / 'B'}:B")
+        assert set(got) == {"A", "B"}
+
+    def test_the_output_says_the_ranks_are_not_caids(self):
+        """These ranks are recomputed on full-coverage methods and two-class
+        targets. Printing them beside CAID's own without saying so would be
+        the most quotable mistake in the file."""
+        src = open(os.path.join(REPO, "results", "caid3",
+                                "within_protein_leaderboard.py")).read()
+        assert "NOT CAID" in src and "published ranks" in src
+        assert "recomputed on this subset" in src
+
+    def test_two_checkpoints_sharing_a_filename_get_distinct_labels(self, tmp_path):
+        """Both checkpoints archive as 'DisorderNet-<task>.caid'. Without a
+        separate label the second would overwrite the first and the table would
+        contain one model under two apparent identities."""
+        for run in ("windowed", "pbias"):
+            d = tmp_path / run
+            d.mkdir()
+            self._write(str(d / "DisorderNet-linker.caid"), {
+                "a": ("AAAA", [0.1, 0.2, 0.8, 0.9]),
+                "b": ("AAAAA", [0.1, 0.2, 0.8, 0.9, 0.95]),
+            })
+        got = wpl.extra_methods(
+            self._ref(), "linker",
+            f"{tmp_path / 'windowed'}:DisorderNet:DN-windowed,"
+            f"{tmp_path / 'pbias'}:DisorderNet:DN-pbias")
+        assert set(got) == {"DN-windowed", "DN-pbias"}
+
+    def test_a_repeated_label_is_refused(self, tmp_path):
+        for run in ("x", "y"):
+            d = tmp_path / run
+            d.mkdir()
+            self._write(str(d / "DisorderNet-linker.caid"), {
+                "a": ("AAAA", [0.1, 0.2, 0.8, 0.9]),
+                "b": ("AAAAA", [0.1, 0.2, 0.8, 0.9, 0.95]),
+            })
+        with pytest.raises(SystemExit):
+            wpl.extra_methods(
+                self._ref(), "linker",
+                f"{tmp_path / 'x'}:DisorderNet:DN,"
+                f"{tmp_path / 'y'}:DisorderNet:DN")

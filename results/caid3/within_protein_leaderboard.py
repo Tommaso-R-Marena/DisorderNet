@@ -61,6 +61,10 @@ ROOT = "/scratch4/sfried3/jbeale3_disordernet"
 BENCH = os.environ.get("WPL_BENCHMARK", "caid3")
 REFS = os.environ.get("WPL_REFS", f"{ROOT}/{BENCH}_official")
 PREDS = os.environ.get("WPL_PREDS", f"{ROOT}/{BENCH}_predictions")
+#: Extra .caid files to score alongside the published entrants — ours. Named
+#: "<dir>:<prefix>" pairs, comma separated. Files are matched as
+#: "<prefix>-<task>.caid", which is how this project archives its submissions.
+EXTRA = os.environ.get("WPL_EXTRA", "")
 OUT = os.environ.get("WPL_OUT", "")
 N_BOOT = int(os.environ.get("WPL_NBOOT", "200"))
 SEED = int(os.environ.get("WPL_SEED", "20260816"))
@@ -107,6 +111,41 @@ def full_coverage_methods(ref, preds_dir):
                 break
         if ok:
             out[fn[:-5]] = pred
+    return out
+
+
+def extra_methods(ref, task, spec):
+    """Load our own submissions and hold them to the same coverage rule.
+
+    Ours are scored by exactly the test the entrants face: predict every target
+    at the reference's length, or be left out. Nothing here is scored on a
+    subset the published methods were not also scored on.
+    """
+    out = {}
+    for item in filter(None, (s.strip() for s in spec.split(","))):
+        parts = item.split(":")
+        directory = parts[0]
+        file_prefix = parts[1] if len(parts) > 1 and parts[1] else "DisorderNet"
+        # Two checkpoints archive their submissions under the same file prefix
+        # in different directories, so the label is separate from the filename
+        # or the second would overwrite the first and the table would silently
+        # contain one model twice.
+        label = parts[2] if len(parts) > 2 and parts[2] else file_prefix
+        path = os.path.join(directory, f"{file_prefix}-{task}.caid")
+        if not os.path.isfile(path):
+            print(f"   (no submission for {task} at {path})")
+            continue
+        if label in out:
+            raise SystemExit(f"duplicate label {label!r} in WPL_EXTRA")
+        pred = read_caid_predictions(path)
+        bad = [tid for tid, (_s, lab) in ref.items()
+               if tid not in pred or len(pred[tid]) != len(lab)
+               or not np.isfinite(pred[tid]).all()]
+        if bad:
+            print(f"   ({label} covers {len(ref)-len(bad)}/{len(ref)} on "
+                  f"{task} — excluded, same rule as the entrants)")
+            continue
+        out[label] = pred
     return out
 
 
@@ -214,7 +253,11 @@ def main() -> int:
         print(f" {BENCH.upper()} / {task}: {len(ref)} targets, "
               f"{len(targets)} with both classes, "
               f"{len(methods)} full-coverage methods")
+        print(" ranks below are recomputed on this subset and are NOT CAID's "
+              "published ranks")
         print("=" * 100)
+        if EXTRA:
+            methods.update(extra_methods(ref, task, EXTRA))
         if len(methods) < 5 or len(targets) < 5:
             print(" too few to compare")
             continue
@@ -243,20 +286,29 @@ def main() -> int:
         by_within = sorted(rows, key=lambda r: -r["auc_within"])
         pooled_rank = {r["method"]: i for i, r in enumerate(by_pooled, 1)}
         within_rank = {r["method"]: i for i, r in enumerate(by_within, 1)}
+        # One protein, one vote. Pair weighting lets a few large chains carry
+        # AUC_within, so any claim about who moves has to survive this too.
+        by_unw = sorted(rows, key=lambda r: -r["auc_within_unweighted"])
+        unw_rank = {r["method"]: i for i, r in enumerate(by_unw, 1)}
+        rho_unw = spearman(
+            np.asarray([float(within_rank[r["method"]]) for r in rows]),
+            np.asarray([float(unw_rank[r["method"]]) for r in rows]))
 
         rho = spearman(np.asarray([r["pooled"] for r in rows]),
                        np.asarray([r["auc_within"] for r in rows]))
         lo, hi = clustered_spearman_ci(rows, len(targets), rng, N_BOOT)
         ci = f"[{lo:+.3f},{hi:+.3f}]" if lo is not None else "n/a"
         print(f" Spearman(pooled, within) = {rho:+.3f}  95% CI {ci}")
+        print(f" Spearman(within pair-weighted, within one-protein-one-vote) "
+              f"= {rho_unw:+.3f}")
 
         print(f"\n {'#':>3} {'method':<28}{'pooled':>9}{'within':>9}"
-              f"{'between':>9}{'within #':>10}{'move':>7}")
-        for i, r in enumerate(by_pooled[:15], 1):
+              f"{'between':>9}{'within #':>10}{'move':>7}{'1p1v #':>8}")
+        for i, r in enumerate(by_pooled[:20], 1):
             wr = within_rank[r["method"]]
             print(f" {i:>3} {r['method']:<28}{r['pooled']:>9.4f}"
                   f"{r['auc_within']:>9.4f}{r['auc_between']:>9.4f}"
-                  f"{wr:>10}{i - wr:>+7}")
+                  f"{wr:>10}{i - wr:>+7}{unw_rank[r['method']]:>8}")
 
         movers = sorted(rows,
                         key=lambda r: -abs(pooled_rank[r["method"]]
@@ -284,13 +336,17 @@ def main() -> int:
             "w_within": w_within,
             "spearman_pooled_vs_within": rho,
             "spearman_ci": [lo, hi],
+            "spearman_within_weighted_vs_unweighted": rho_unw,
             "hydropathy_baseline": (
                 {k: v for k, v in hyd.items() if k != "reason"} if hyd else None),
             "methods": [
                 {"method": r["method"], "pooled": r["pooled"],
-                 "auc_within": r["auc_within"], "auc_between": r["auc_between"],
+                 "auc_within": r["auc_within"],
+                 "auc_within_unweighted": r["auc_within_unweighted"],
+                 "auc_between": r["auc_between"],
                  "rank_pooled": pooled_rank[r["method"]],
-                 "rank_within": within_rank[r["method"]]}
+                 "rank_within": within_rank[r["method"]],
+                 "rank_within_unweighted": unw_rank[r["method"]]}
                 for r in by_pooled
             ],
         }
