@@ -242,11 +242,19 @@ def main(argv=None) -> int:
     ap.add_argument("--backbone", default="650M")
     ap.add_argument("--batch-size", type=int, default=8)
     ap.add_argument("--n-boot", type=int, default=2000)
+    ap.add_argument("--benchmark", default="caid3", choices=("caid3", "caid2"),
+                    help="which round the --refs belong to. The composition "
+                         "guard is round-specific: it correctly refused to "
+                         "score CAID2 references against CAID3's counts.")
     args = ap.parse_args(argv)
 
-    for task in TASKS:
-        verify_composition(task, os.path.join(args.refs, f"{task}.fasta"))
-    print(f"all {len(TASKS)} official references match CAID's composition")
+    from colab.caid3_official import TASKS_CAID2, verify_composition_for
+    round_tasks = TASKS if args.benchmark == "caid3" else TASKS_CAID2
+    for task in round_tasks:
+        verify_composition_for(args.benchmark, task,
+                               os.path.join(args.refs, f"{task}.fasta"))
+    print(f"all {len(round_tasks)} {args.benchmark} references match "
+          f"their published composition")
 
     ckpt = os.path.join(args.checkpoint, "multitask_head.pt")
     if not os.path.isfile(ckpt):
@@ -294,7 +302,7 @@ def main(argv=None) -> int:
 
     results = {}
     predictions_by_task: dict[str, dict] = {}
-    for task in TASKS:
+    for task in round_tasks:
         if task not in tasks:
             continue
         ref = read_reference(os.path.join(args.refs, f"{task}.fasta"))

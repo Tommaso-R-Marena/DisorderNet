@@ -598,3 +598,26 @@ def holm_bonferroni(pvalues: dict[str, float], alpha: float = 0.05) -> dict:
             "n_comparisons": m,
         }
     return out
+
+
+#: CAID2, for replication on a disjoint round. Composition as served by the
+#: dataset API, so a CAID2 reference is verified against CAID2's counts rather
+#: than silently checked against CAID3's — which is what the guard caught.
+EXPECTED_CAID2 = {
+    "disorder_pdb": (348, 37072, 93805, 156143),
+    "disorder_nox": (210, 31315, 129487, 0),
+    "binding": (78, 8209, 58960, 0),
+    "linker": (40, 2023, 35127, 0),
+}
+
+TASKS_CAID2 = ("disorder_pdb", "disorder_nox", "binding", "linker")
+
+
+def verify_composition_for(round_name: str, task: str, path: str) -> None:
+    """Verify against the named round's own composition table."""
+    table = {"caid3": EXPECTED, "caid2": EXPECTED_CAID2}[round_name]
+    got = composition(read_reference(path))
+    want = table[task]
+    if got != want:
+        raise ReferenceCompositionError(
+            f"{round_name}/{task}: reference is {got}, the API reports {want}.")
