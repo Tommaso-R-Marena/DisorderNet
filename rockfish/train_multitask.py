@@ -129,7 +129,9 @@ def chunk_long_rows(rows: list[dict], max_len: int, stride: int | None = None,
     for r in rows:
         n = r["length"]
         if n <= max_len:
-            out.append({**r, "parent": r.get("parent", r["id"])})
+            out.append({**r, "parent": r.get("parent", r["id"]),
+                        "parent_sequence": r.get("parent_sequence",
+                                                 r["sequence"])})
             continue
         n_chunked += 1
         starts = list(range(0, n - max_len + 1, stride))
@@ -142,6 +144,11 @@ def chunk_long_rows(rows: list[dict], max_len: int, stride: int | None = None,
             out.append({
                 "id": f"{r['id']}#w{k}",
                 "parent": r.get("parent", r["id"]),
+                # The window's own sequence is not the protein's. Hashing it
+                # would scatter one protein's windows across the holdout
+                # boundary, which is the near-duplicate split the parent key
+                # exists to prevent.
+                "parent_sequence": r.get("parent_sequence", r["sequence"]),
                 "sequence": r["sequence"][a:b],
                 "length": b - a,
                 "uniprot_acc": r.get("uniprot_acc"),
@@ -394,6 +401,132 @@ def drop_caid_targets(
     }
 
 
+#: Fraction of proteins reserved for the architecture-independent validation
+#: set. 5% of a 22,914-protein union is ~1,150 chains, enough to separate
+#: differences of the size these architectures produce, and cheap enough that
+#: no run has an excuse to skip it.
+HOLDOUT_FRACTION = 0.05
+
+#: Fixed forever. The whole point is that two runs a month apart, with
+#: different architectures and different leak filters, hold out the *same*
+#: proteins; a tunable salt would quietly reintroduce the problem it solves.
+HOLDOUT_SALT = b"disordernet-validation-holdout-v1"
+
+
+def in_validation_holdout(sequence: str,
+                          fraction: float = HOLDOUT_FRACTION) -> bool:
+    """Whether a protein belongs to the fixed validation set.
+
+    Keyed on the protein's **own sequence** and nothing else. Not on a cluster
+    id, not on a row index, not on an RNG seeded per run: cluster ids shift
+    when the input set changes, and every checkpoint here was filtered against
+    a different set of benchmark references, so anything derived from the
+    membership of the union is not stable across the runs it has to compare.
+
+    Why this matters concretely. Cross-validation AUC, as computed by this
+    trainer, is **anti-correlated** with CAID3 AUC across our own checkpoints:
+    Spearman -0.60 on Disorder-PDB, -0.31 on Disorder-NOX, -0.43 on Linker,
+    +0.37 on Binding, +0.03 on Binding-IDR. Picking the checkpoint with the
+    best CV would cost 0.1117 AUC on Binding-IDR and 0.0479 on Disorder-NOX.
+
+    That is not evidence that validation is useless. It is evidence that these
+    CV numbers are not comparable: windowing changes the units being scored
+    from proteins to windows, and a wider leak filter changes which proteins
+    are left to score. Each architecture was measured on a slightly different
+    quantity and the numbers were then compared as though they were one.
+
+    A hash of the sequence fixes exactly that. The same chains are held out of
+    every run regardless of what the run does, so the resulting number is
+    comparable across architectures — which is the only condition under which
+    choosing between them is a measurement rather than a preference.
+    """
+    import hashlib
+
+    h = hashlib.blake2b(HOLDOUT_SALT + sequence.encode(), digest_size=8)
+    return (int.from_bytes(h.digest(), "big") % 10_000) < round(fraction * 10_000)
+
+
+def reserve_validation_holdout(
+    rows: list[dict], fraction: float, min_identity: float,
+    allow_missing_homology: bool = False,
+) -> tuple[list[dict], list[dict], dict]:
+    """Split off the fixed validation set, homologues included.
+
+    Holding out a protein while training on its 90%-identical paralogue holds
+    out nothing. So the sequence hash selects the *seeds*, and everything
+    homologous to a seed goes with it — the same rule, and the same BLAST path,
+    that keeps CAID targets out of training.
+
+    Returns ``(train_rows, holdout_rows, stats)``. Windows of one protein move
+    together: they are near-identical by construction, and splitting them would
+    put the benchmark's own sequence on both sides.
+    """
+    if fraction <= 0:
+        return rows, [], {"n_holdout": 0, "reason": "disabled"}
+
+    seed_rows, rest = [], []
+    for r in rows:
+        # Decide on the parent, never the window: a 1,500-residue protein
+        # yields several windows and they must not be split.
+        key = r.get("parent_sequence") or r["sequence"]
+        (seed_rows if in_validation_holdout(key, fraction) else rest).append(r)
+    if not seed_rows:
+        return rows, [], {"n_holdout": 0, "reason": "no protein hashed in"}
+
+    n_seed = len(seed_rows)
+    seed_ids = {r["id"] for r in seed_rows}
+    seed_seqs = {r["sequence"] for r in seed_rows}
+
+    kept, pulled = [], []
+    for r in rest:
+        if r["id"] in seed_ids or r["sequence"] in seed_seqs:
+            pulled.append(r)
+        else:
+            kept.append(r)
+
+    n_exact = len(pulled)
+    try:
+        from colab.homology_splits import blast_cross_identity_hits
+
+        hits = blast_cross_identity_hits(
+            [{"id": r["id"], "sequence": r["sequence"]} for r in kept],
+            [{"id": r["id"], "sequence": r["sequence"]} for r in seed_rows],
+            min_identity=min_identity,
+        )
+    except ImportError:
+        hits = None
+
+    if hits is None:
+        if not allow_missing_homology:
+            raise SystemExit(
+                "The validation holdout needs the homology filter, and BLAST "
+                "is unavailable. Holding out a protein while training on its "
+                "paralogue holds out nothing, and a validation number computed "
+                "that way is worse than none. Pass "
+                "--allow-missing-homology-filter to proceed knowingly.")
+        homologous: set[str] = set()
+    else:
+        homologous = set(hits)
+
+    train_rows = [r for r in kept if r["id"] not in homologous]
+    pulled.extend(r for r in kept if r["id"] in homologous)
+    holdout = seed_rows + pulled
+
+    stats = {
+        "fraction_requested": fraction,
+        "n_seed_by_hash": n_seed,
+        "n_exact_id_or_sequence": n_exact,
+        "n_homologous": len(homologous),
+        "n_holdout": len(holdout),
+        "n_train": len(train_rows),
+        "holdout_share": len(holdout) / max(len(rows), 1),
+        "min_identity": min_identity,
+        "homology_filter": "blast" if hits is not None else "skipped",
+        "salt": HOLDOUT_SALT.decode(),
+    }
+    return train_rows, holdout, stats
+
+
 def homology_folds(rows: list[dict], n_folds: int, min_identity: float, seed: int):
     """Homology-clustered folds over the union, computed once for all tasks.
 
@@ -491,6 +624,19 @@ def main(argv=None) -> int:
              "rounds share one protein.",
     )
     ap.add_argument("--leak-identity", type=float, default=0.40)
+    ap.add_argument(
+        "--holdout-fraction", type=float, default=HOLDOUT_FRACTION,
+        help="Share of proteins reserved for the fixed validation set, chosen "
+             "by a hash of the sequence so every run holds out the same "
+             "chains. Changing it changes which chains, which breaks the "
+             "comparability that is the entire point.",
+    )
+    ap.add_argument(
+        "--no-holdout", action="store_true",
+        help="Train on everything. The run then has no validation number that "
+             "can be compared with another architecture's, so it cannot take "
+             "part in model selection.",
+    )
     ap.add_argument(
         "--allow-missing-homology-filter", action="store_true",
         help="Proceed when BLAST is unavailable. Exact CAID3 targets are still "
@@ -634,6 +780,30 @@ def main(argv=None) -> int:
 
     if args.stats_only:
         return 0
+
+    # The fixed validation set, reserved before anything is trained. Every run
+    # holds out the same chains regardless of architecture or leak filter,
+    # which is what makes one run's validation number comparable to another's —
+    # and comparability is the whole difficulty. Cross-validation as this
+    # trainer computes it is anti-correlated with CAID3 across our own
+    # checkpoints, because windowing changes the units and a wider leak filter
+    # changes the population, so each architecture was scored on a slightly
+    # different quantity.
+    rows, holdout_rows, holdout_stats = reserve_validation_holdout(
+        rows, 0.0 if args.no_holdout else args.holdout_fraction,
+        args.min_identity,
+        allow_missing_homology=args.allow_missing_homology_filter)
+    if holdout_rows:
+        print(f"validation holdout: {holdout_stats['n_holdout']:,} rows "
+              f"({holdout_stats['holdout_share']:.1%}) — "
+              f"{holdout_stats['n_seed_by_hash']:,} by sequence hash, "
+              f"{holdout_stats['n_exact_id_or_sequence']:,} exact, "
+              f"{holdout_stats['n_homologous']:,} homologous at "
+              f">={args.min_identity}")
+        print(f"  training on {len(rows):,} rows")
+    else:
+        print(f"validation holdout DISABLED ({holdout_stats.get('reason')}) — "
+              f"this run cannot be compared to another architecture")
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -853,6 +1023,57 @@ def main(argv=None) -> int:
                 print(f"   epoch {epoch+1:>3}/{args.epochs}  loss={tot/max(nb,1):.4f}",
                       flush=True)
 
+        # The number that lets this run be compared with another architecture.
+        # Same chains for every run, scored by the model that will be shipped,
+        # under the same forward pass the fold loop uses.
+        holdout_scores = {}
+        if holdout_rows:
+            print(f"\nscoring the fixed validation holdout "
+                  f"({len(holdout_rows):,} rows)…")
+            head.eval()
+            pooled = {t: ([], []) for t in tasks}
+            with torch.no_grad():
+                for s in range(0, len(holdout_rows), args.batch_size):
+                    batch = holdout_rows[s:s + args.batch_size]
+                    _, _, tokens = batch_converter(
+                        [(r["id"], r["sequence"]) for r in batch])
+                    tokens = tokens.to(device)
+                    feats = mix(embed(esm, tokens, layer_ids))
+                    sr, sp, sa, sc = structure_batch(batch, feats.shape[1],
+                                                     device)
+                    logits = head(feats, rsa=sr, plddt=sp,
+                                  structure_available=sa, contacts=sc)
+                    for t in tasks:
+                        p = torch.sigmoid(logits[t]).float().cpu().numpy()
+                        for bi, r in enumerate(batch):
+                            n = min(r["length"], p.shape[1])
+                            m = r["task_evidence"][t][:n]
+                            if not m.any():
+                                continue
+                            pooled[t][0].append(r["task_labels"][t][:n][m])
+                            pooled[t][1].append(p[bi, :n][m])
+
+            from sklearn.metrics import average_precision_score, roc_auc_score
+            for t in tasks:
+                if not pooled[t][0]:
+                    continue
+                y = np.concatenate(pooled[t][0])
+                s_ = np.concatenate(pooled[t][1])
+                if len(np.unique(y)) < 2:
+                    continue
+                holdout_scores[t] = {
+                    "auc": float(roc_auc_score(y, s_)),
+                    "aps": float(average_precision_score(y, s_)),
+                    "n_residues": int(len(y)),
+                    "prevalence": float(y.mean()),
+                }
+                print(f"   {t:<14} AUC={holdout_scores[t]['auc']:.4f}  "
+                      f"APS={holdout_scores[t]['aps']:.4f}  n={len(y):,}")
+            out["validation_holdout"] = {"stats": holdout_stats,
+                                         "scores": holdout_scores}
+            with open(path, "w") as fh:
+                json.dump(out, fh, indent=2)
+
         from colab.compact_checkpoint import atomic_torch_save
         ckpt = os.path.join(args.workdir, "multitask_head.pt")
         atomic_torch_save({
@@ -874,6 +1095,11 @@ def main(argv=None) -> int:
             "private_trunk": not args.no_private_trunk,
             "n_train_proteins": len(rows),
             "caid_leak_filter": None if args.no_caid_filter else leak,
+            # Carried in the checkpoint, not only the results file, so a
+            # comparison between two checkpoints can verify they held out the
+            # same chains rather than assume it.
+            "validation_holdout": {"stats": holdout_stats,
+                                   "scores": holdout_scores},
         }, ckpt)
         print(f"Wrote {ckpt}")
     return 0
