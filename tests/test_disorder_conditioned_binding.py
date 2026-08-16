@@ -393,3 +393,97 @@ class TestProteinLevelBias:
         m = head()
         assert m.protein_bias["binding"].in_features == \
             2 * m.blocks[0].conv1.in_channels
+
+
+class TestPrivateTrunkIsolatesBinding:
+    """The fix for the protein-bias rejection, held to the property it claims.
+
+    That run moved Binding-IDR from 0.5007 to 0.6062 and was rejected because
+    Disorder-NOX, Linker and Binding fell below their floors. The bias path was
+    detached and the tests proved no gradient reached a disorder read-out — but
+    the binding *losses* still shaped the shared trunk, which the disorder tasks
+    read. Protecting a read-out is not protecting a representation.
+
+    Reading a detached trunk closes it exactly: binding contributes zero
+    gradient to proj and blocks. These tests assert that arithmetic, and assert
+    the private stack still learns so the isolation is not simply a dead path.
+    """
+
+    def test_binding_contributes_no_gradient_to_the_shared_trunk(self):
+        m = head()
+        m(x())["binding_idr"].sum().backward()
+        for name, p in m.proj.named_parameters():
+            assert p.grad is None or torch.count_nonzero(p.grad) == 0, name
+        for i, blk in enumerate(m.blocks):
+            for name, p in blk.named_parameters():
+                assert p.grad is None or torch.count_nonzero(p.grad) == 0, \
+                    f"blocks.{i}.{name}"
+
+    def test_both_binding_tasks_are_isolated(self):
+        for task in ("binding", "binding_idr"):
+            m = head()
+            m(x())[task].sum().backward()
+            g = m.proj.weight.grad
+            assert g is None or torch.count_nonzero(g) == 0, task
+
+    def test_the_private_stack_does_learn(self):
+        """Isolation must not be achieved by the path being dead."""
+        m = head()
+        m(x())["binding"].sum().backward()
+        assert torch.count_nonzero(m.private[0].conv1.weight.grad) > 0
+
+    def test_a_disorder_task_still_trains_the_shared_trunk(self):
+        """The trunk must remain trainable — by the tasks that own it."""
+        m = head()
+        m(x())["disorder_pdb"].sum().backward()
+        assert torch.count_nonzero(m.proj.weight.grad) > 0
+
+    def test_adding_binding_to_the_loss_changes_no_trunk_gradient(self):
+        """The strongest form of the property, tested on one model.
+
+        Comparing two separately-constructed models would compare different
+        random initialisations — a head with five tasks consumes more of the RNG
+        stream than one with two — so the first version of this test failed for
+        that reason rather than for a leak. On a single model the question is
+        exact: does adding the binding losses change what the trunk receives?
+        """
+        # eval(), because dropout is stochastic and two forward passes in
+        # train mode differ for that reason alone — which is what the previous
+        # two versions of this test were actually detecting.
+        m = head().eval()
+        inp = x()
+
+        out = m(inp)
+        out["disorder_pdb"].sum().backward()
+        alone = m.proj.weight.grad.clone()
+
+        m.zero_grad(set_to_none=True)
+        out = m(inp)
+        (out["disorder_pdb"].sum() + out["binding_idr"].sum()
+         + out["binding"].sum()).backward()
+        together = m.proj.weight.grad.clone()
+
+        assert torch.allclose(alone, together, atol=0, rtol=0), (
+            "the binding losses moved the shared trunk's gradient")
+        assert torch.count_nonzero(alone) > 0, "the trunk must still train"
+
+    def test_it_can_be_disabled_for_the_ablation(self):
+        m = head(private_trunk=False)
+        assert m.private_on == ()
+        assert len(m.private) == 0
+
+    def test_an_older_checkpoint_still_loads(self):
+        old = head(private_trunk=False, protein_bias=False,
+                   condition_binding=False)
+        state = old.state_dict()
+        assert not any(k.startswith("private.") for k in state)
+        fresh = head(private_trunk=False, protein_bias=False,
+                     condition_binding=False)
+        fresh.load_state_dict(state)
+
+    def test_output_shapes_are_unchanged(self):
+        m = head().eval()
+        with torch.no_grad():
+            out = m(x(batch=3, length=25))
+        for t in ALL_TASKS:
+            assert out[t].shape == (3, 25), t

@@ -464,6 +464,11 @@ def main(argv=None) -> int:
     ap.add_argument("--max-len", type=int, default=1022,
                     help="model window; longer proteins are kept as overlapping "
                          "windows unless --no-window-long-proteins")
+    ap.add_argument("--no-private-trunk", action="store_true",
+                    help="disable private trunk capacity for the binding tasks "
+                         "(the ablation; it is on by default). Without it the "
+                         "binding losses shape the shared trunk, which is what "
+                         "broke three floors in the protein-bias run.")
     ap.add_argument("--no-protein-bias", action="store_true",
                     help="disable the per-protein bias term (the ablation; it "
                          "is on by default). 96.7%% to 99.7%% of the pairs CAID's "
@@ -681,6 +686,7 @@ def main(argv=None) -> int:
                                  structure_dim=args.structure_dim,
                                  condition_binding=not args.no_condition_binding,
                                  protein_bias=not args.no_protein_bias,
+                                 private_trunk=not args.no_private_trunk,
                                  dilations=(WIDE_DILATIONS
                                             if args.wide_receptive_field else None)).to(device)
         params = list(head.parameters()) + list(mix.parameters())
@@ -807,6 +813,7 @@ def main(argv=None) -> int:
                                  structure_dim=args.structure_dim,
                                  condition_binding=not args.no_condition_binding,
                                  protein_bias=not args.no_protein_bias,
+                                 private_trunk=not args.no_private_trunk,
                                  dilations=(WIDE_DILATIONS
                                             if args.wide_receptive_field else None)).to(device)
         params = list(head.parameters()) + list(mix.parameters())
@@ -864,6 +871,7 @@ def main(argv=None) -> int:
             # the model of record holds three first places.
             "condition_binding": not args.no_condition_binding,
             "protein_bias": not args.no_protein_bias,
+            "private_trunk": not args.no_private_trunk,
             "n_train_proteins": len(rows),
             "caid_leak_filter": None if args.no_caid_filter else leak,
         }, ckpt)

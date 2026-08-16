@@ -269,6 +269,7 @@ def main(argv=None) -> int:
     # strict-loading the model of record.
     condition_binding = bool(payload.get("condition_binding", False))
     protein_bias = bool(payload.get("protein_bias", False))
+    private_trunk = bool(payload.get("private_trunk", False))
 
     from colab.disordernet_gpu import TrainConfig, setup_environment
     cfg = setup_environment(TrainConfig.from_profile("lite", esm_backbone=args.backbone))
@@ -286,6 +287,7 @@ def main(argv=None) -> int:
                              structure_dim=structure_dim,
                              condition_binding=condition_binding,
                              protein_bias=protein_bias,
+                             private_trunk=private_trunk,
                              dilations=(WIDE_DILATIONS
                                         if payload.get("wide_receptive_field")
                                         else None)).to(device)

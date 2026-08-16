@@ -351,6 +351,22 @@ class StructureChannels(nn.Module):
 #: works.
 _PROTEIN_BIAS_TASKS = ("binding_idr", "binding")
 
+#: Tasks given private trunk capacity, reading a *detached* shared trunk.
+#:
+#: The protein-bias run moved Binding-IDR from 0.5007 to 0.6062 — rank 30 to 5 —
+#: and was rejected because Disorder-NOX, Linker and Binding each fell below
+#: their floor. The bias path was already detached, so no gradient from a
+#: binding task reached a disorder read-out and the tests proved it; but the
+#: binding *losses* still shaped the shared trunk, and the disorder tasks read
+#: from that trunk. Protecting a read-out is not protecting a representation.
+#:
+#: Reading a detached trunk closes it completely: binding contributes exactly
+#: zero gradient to proj and blocks, so the disorder tasks train as though the
+#: binding tasks were absent — bit-identical, not approximately. The private
+#: stack gives back the capacity the detach removes, so binding is not merely
+#: cut off but re-housed.
+_PRIVATE_TRUNK_TASKS = ("binding_idr", "binding")
+
 
 #: Tasks whose read-out is conditioned on predicted disorder. Binding-IDR is
 #: defined as binding *within disordered regions*, so the disorder answer is part
@@ -396,6 +412,8 @@ class MultiTaskLiteHead(nn.Module):
         structure_dim: int = 0,
         condition_binding: bool = True,
         protein_bias: bool = True,
+        private_trunk: bool = True,
+        n_private_blocks: int = 2,
     ):
         super().__init__()
         if not tasks:
@@ -469,6 +487,13 @@ class MultiTaskLiteHead(nn.Module):
         self.protein_bias = nn.ModuleDict({
             t: nn.Linear(2 * hidden, 1) for t in self.protein_bias_on
         })
+
+        self.private_on = (tuple(t for t in _PRIVATE_TRUNK_TASKS
+                                 if t in self.tasks) if private_trunk else ())
+        self.private = nn.ModuleList(
+            DilatedResidualBlock(hidden, dil[i % len(dil)], dropout)
+            for i in range(n_private_blocks)
+        ) if self.private_on else nn.ModuleList()
         for m in self.protein_bias.values():
             nn.init.zeros_(m.weight)
             nn.init.zeros_(m.bias)
@@ -512,6 +537,18 @@ class MultiTaskLiteHead(nn.Module):
         logits = {
             t: (self.out[t](h) + self.skip[t](x)).squeeze(1) for t in self.tasks
         }
+        if self.private_on:
+            # Detached: binding's loss contributes exactly zero gradient to the
+            # shared trunk, so the three tasks reading it are untouched.
+            hp = h.detach()
+            for blk in self.private:
+                hp = blk(hp)
+            for t in self.private_on:
+                logits[t] = (self.out[t](hp) + self.skip[t](x)).squeeze(1)
+            h_for_bias = hp
+        else:
+            h_for_bias = h
+
         if self.protein_bias_on:
             # Pooled over the sequence, detached. Detached because binding has
             # 891 training proteins and the disorder tasks 21,386 with three
@@ -529,7 +566,7 @@ class MultiTaskLiteHead(nn.Module):
             # it. Training sees the same windows, so the two are consistent;
             # the model learns a per-window term and is asked for a per-window
             # term.
-            hd = h.detach()
+            hd = h_for_bias.detach()
             pooled = torch.cat([hd.mean(dim=2), hd.amax(dim=2)], dim=1)
             for t in self.protein_bias_on:
                 logits[t] = logits[t] + self.protein_bias[t](pooled)
@@ -539,7 +576,8 @@ class MultiTaskLiteHead(nn.Module):
             # disorder read-out or the trunk through this path, so the tasks
             # holding three first places cannot be traded away to help binding.
             p_dis = torch.sigmoid(logits[self.condition_source]).detach()
-            h_cond = torch.cat([h, p_dis.unsqueeze(1)], dim=1)
+            h_cond = torch.cat([h_for_bias.detach() if self.private_on else h,
+                                p_dis.unsqueeze(1)], dim=1)
             for t in self.condition_on:
                 logits[t] = logits[t] + self.cond[t](h_cond).squeeze(1)
         return logits
