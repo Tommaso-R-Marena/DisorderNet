@@ -39,12 +39,15 @@ def fake_structure(tmp_path, monkeypatch):
         "seq": seq,
         "plddt": np.linspace(30.0, 95.0, n).astype(np.float32),
         "contacts": np.arange(n, dtype=np.float32),
+        # Signed on purpose: the channel exists to be odd under reflection.
+        "ca_torsion": np.linspace(-170.0, 170.0, n).astype(np.float32),
     }
     calls = {"n": 0}
 
     def stub(path):
         calls["n"] += 1
-        return truth["rsa"], truth["seq"], truth["plddt"], truth["contacts"]
+        return (truth["rsa"], truth["seq"], truth["plddt"], truth["contacts"],
+                truth["ca_torsion"])
 
     monkeypatch.setattr(sr, "rsa_from_structure", stub)
     return {"cif": str(cif), "cache": str(tmp_path / "cache"),
@@ -59,7 +62,8 @@ class TestTheCacheReturnsWhatItReplaces:
         b = sr.rsa_from_structure_cached(f["cif"], f["cache"])
         assert f["calls"]["n"] == 1, "the second call recomputed"
 
-        for i, key in enumerate(("rsa", "seq", "plddt", "contacts")):
+        for i, key in enumerate(("rsa", "seq", "plddt", "contacts",
+                                 "ca_torsion")):
             if key == "seq":
                 assert a[i] == b[i] == f["truth"]["seq"]
             else:
@@ -75,7 +79,7 @@ class TestTheCacheReturnsWhatItReplaces:
         fresh = sr.rsa_from_structure_cached(f["cif"], None)
         cached = sr.rsa_from_structure_cached(f["cif"], f["cache"])
         cached = sr.rsa_from_structure_cached(f["cif"], f["cache"])
-        for i in (0, 2, 3):
+        for i in (0, 2, 3, 4):
             assert cached[i].dtype == fresh[i].dtype
             np.testing.assert_array_equal(cached[i], fresh[i])
 
@@ -166,7 +170,8 @@ class TestStructureFeaturesIsUnchangedByCaching:
         warm = sr.structure_features("P12345", seq, f["dir"])
         again = sr.structure_features("P12345", seq, f["dir"])
         assert plain is not None and warm is not None and again is not None
-        for key in ("rsa", "rsa_raw", "plddt", "contacts"):
+        for key in ("rsa", "rsa_raw", "plddt", "contacts", "ca_torsion",
+                    "handedness"):
             np.testing.assert_array_equal(plain[key], warm[key])
             np.testing.assert_array_equal(plain[key], again[key])
         assert plain["window"] == again["window"] == sr.RSA_SMOOTH_WINDOW
@@ -257,9 +262,10 @@ class TestAgainstRealStructures:
             sr.rsa_from_structure_cached(path, cache)     # populate
             warm = sr.rsa_from_structure_cached(path, cache)  # read back
             assert warm[1] == fresh[1], name
-            for i in (0, 2, 3):
+            for i in (0, 2, 3, 4):
                 assert warm[i].dtype == fresh[i].dtype, name
-                np.testing.assert_array_equal(warm[i], fresh[i], err_msg=name)
+                np.testing.assert_array_equal(warm[i], fresh[i], err_msg=name,
+                                              strict=False)
             n_checked += 1
         assert n_checked >= 1
         # Every structure produced a file, so nothing was silently skipped.

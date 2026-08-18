@@ -101,8 +101,9 @@ def contact_density(coords: np.ndarray, cutoff: float = 10.0) -> np.ndarray:
     return within.astype(np.float32)
 
 
-def rsa_from_structure(path: str) -> tuple[np.ndarray, str, np.ndarray]:
-    """Per-residue (rsa, sequence, pLDDT) from an AlphaFold mmCIF.
+def rsa_from_structure(path: str) -> tuple[
+        np.ndarray, str, np.ndarray, np.ndarray, np.ndarray]:
+    """Per-residue (rsa, sequence, pLDDT, contacts, CA virtual torsion).
 
     SASA is Shrake-Rupley via Biopython, so no external DSSP binary is needed.
     AlphaFold stores pLDDT in the B-factor column, so both channels come from
@@ -121,6 +122,7 @@ def rsa_from_structure(path: str) -> tuple[np.ndarray, str, np.ndarray]:
         seq: list[str] = []
         plddt: list[float] = []
         centres: list[np.ndarray] = []
+        ca_centres: list[np.ndarray] = []
         for residue in next(iter(model)):
             aa = THREE_TO_ONE.get(residue.get_resname())
             if aa is None:
@@ -132,17 +134,30 @@ def rsa_from_structure(path: str) -> tuple[np.ndarray, str, np.ndarray]:
             # CB where present, CA otherwise (glycine has no CB).
             atom = residue["CB"] if "CB" in residue else (
                 residue["CA"] if "CA" in residue else None)
+            # CA specifically, for the backbone virtual torsion. CB would not
+            # do: the torsion is a property of the chain trace, and swapping in
+            # CB for non-glycines would make it a different quantity at every
+            # glycine.
+            ca_atom = residue["CA"] if "CA" in residue else None
+            ca_centres.append(
+                np.asarray(ca_atom.get_coord(), dtype=np.float32)
+                if ca_atom is not None else np.full(3, np.nan, dtype=np.float32))
             centres.append(
                 np.asarray(atom.get_coord(), dtype=np.float32)
                 if atom is not None else np.full(3, np.nan, dtype=np.float32)
             )
 
     coords = np.asarray(centres, dtype=np.float32) if centres else np.zeros((0, 3))
+    ca = (np.asarray(ca_centres, dtype=np.float32) if ca_centres
+          else np.zeros((0, 3)))
+    from colab.chirality import ca_virtual_torsion
+
     return (
         np.asarray(rsa, dtype=np.float32),
         "".join(seq),
         np.asarray(plddt, dtype=np.float32),
         contact_density(coords),
+        ca_virtual_torsion(ca),
     )
 
 
@@ -150,10 +165,10 @@ def rsa_from_structure(path: str) -> tuple[np.ndarray, str, np.ndarray]:
 #: ``rsa_features/`` stored ``rsa``/``plddt``/``seq`` and predates the contacts
 #: channel; reading it as if it were current would silently drop a model input.
 #: Files without a matching version are ignored rather than interpreted.
-RSA_CACHE_VERSION = 2
+RSA_CACHE_VERSION = 3
 
 #: Subdirectory of the structure cache holding derived features.
-RSA_CACHE_DIRNAME = "_rsa_v2"
+RSA_CACHE_DIRNAME = "_rsa_v3"
 
 
 def cif_digest(path: str) -> str:
@@ -175,7 +190,7 @@ def cif_digest(path: str) -> str:
 
 def rsa_from_structure_cached(
     path: str, feature_cache: Optional[str] = None,
-) -> tuple[np.ndarray, str, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, str, np.ndarray, np.ndarray, np.ndarray]:
     """``rsa_from_structure`` with the parse memoised on disk.
 
     Shrake-Rupley in Biopython is pure Python and dominates every run that
@@ -200,11 +215,12 @@ def rsa_from_structure_cached(
             with np.load(npz, allow_pickle=False) as d:
                 if (int(d["version"]) == RSA_CACHE_VERSION
                         and str(d["cif_digest"]) == digest):
-                    return (d["rsa"], str(d["seq"]), d["plddt"], d["contacts"])
+                    return (d["rsa"], str(d["seq"]), d["plddt"],
+                            d["contacts"], d["ca_torsion"])
         except Exception:
             pass  # A truncated or foreign file is recomputed, never trusted.
 
-    rsa, seq, plddt, contacts = rsa_from_structure(path)
+    rsa, seq, plddt, contacts, torsion = rsa_from_structure(path)
     os.makedirs(feature_cache, exist_ok=True)
     # Written through a file object, not a path: np.savez_compressed appends
     # ".npz" to any path lacking it, so a ".part" temp would land beside the
@@ -214,7 +230,8 @@ def rsa_from_structure_cached(
         with open(tmp, "wb") as fh:
             np.savez_compressed(
                 fh, version=RSA_CACHE_VERSION, cif_digest=digest,
-                rsa=rsa, seq=seq, plddt=plddt, contacts=contacts)
+                rsa=rsa, seq=seq, plddt=plddt, contacts=contacts,
+                ca_torsion=torsion)
         os.replace(tmp, npz)          # atomic: many workers share this dir
     except OSError:
         if os.path.exists(tmp):
@@ -222,7 +239,7 @@ def rsa_from_structure_cached(
                 os.unlink(tmp)
             except OSError:
                 pass
-    return rsa, seq, plddt, contacts
+    return rsa, seq, plddt, contacts, torsion
 
 
 def fetch_structure(
@@ -301,7 +318,7 @@ def structure_features(
     if feature_cache is _UNSET:
         feature_cache = os.path.join(cache_dir, RSA_CACHE_DIRNAME)
     try:
-        rsa, seq, plddt, contacts = rsa_from_structure_cached(
+        rsa, seq, plddt, contacts, torsion = rsa_from_structure_cached(
             path, feature_cache)
     except Exception:
         return None
@@ -317,6 +334,13 @@ def structure_features(
         # Scaled by a typical globular-core count so the channel arrives at
         # roughly unit range, like rsa and pLDDT/100.
         "contacts": (smooth_window(contacts, window) / 20.0).astype(np.float32),
+        # Backbone handedness. Left unsmoothed *and* left signed: smoothing a
+        # signed quantity across a helix boundary cancels it, and every other
+        # structural channel here is mirror-invariant, so this is the only one
+        # that can tell a structure from its reflection.
+        "ca_torsion": np.asarray(torsion, dtype=np.float32),
+        "handedness": np.sin(np.radians(
+            np.asarray(torsion, dtype=np.float64))).astype(np.float32),
         "window": int(window),
         "uniprot_acc": uniprot_acc.upper(),
     }
