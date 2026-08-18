@@ -37,6 +37,12 @@ from colab.structure_rsa import (  # noqa: E402
     rsa_from_structure_cached,
 )
 
+#: What one parse returns, in order. Pinned so a channel added to the parse
+#: without updating its consumers fails on the first structure with a message
+#: naming the arity, instead of on all 21,878 with "too many values to unpack".
+CHANNEL_NAMES = ("rsa", "seq", "plddt", "contacts", "ca_torsion")
+EXPECTED_CHANNELS = len(CHANNEL_NAMES)
+
 
 def _one(args: tuple[str, str]) -> tuple[str, int, str]:
     """Returns (accession, n_residues, error). Never raises: one unparseable
@@ -44,8 +50,21 @@ def _one(args: tuple[str, str]) -> tuple[str, int, str]:
     path, feature_cache = args
     acc = os.path.splitext(os.path.basename(path))[0]
     try:
-        rsa, seq, _plddt, _contacts = rsa_from_structure_cached(
-            path, feature_cache)
+        # Unpacked by width, not by name, so an added channel is caught here
+        # rather than 21,878 times in a row: adding the CA torsion turned this
+        # into a five-tuple and every structure failed with "too many values
+        # to unpack" while the tests, which index, passed.
+        out = rsa_from_structure_cached(path, feature_cache)
+        if len(out) != EXPECTED_CHANNELS:
+            return acc, 0, (f"parse returned {len(out)} values, expected "
+                            f"{EXPECTED_CHANNELS}")
+        rsa, seq = out[0], out[1]
+        for i, name in enumerate(CHANNEL_NAMES):
+            if i < 2:
+                continue
+            if len(out[i]) != len(rsa):
+                return acc, 0, (f"{name} has {len(out[i])} values against "
+                                f"{len(rsa)} residues")
         if len(rsa) != len(seq):
             return acc, 0, f"length mismatch rsa={len(rsa)} seq={len(seq)}"
         return acc, len(rsa), ""

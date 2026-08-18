@@ -297,3 +297,57 @@ class TestAgainstRealStructures:
 
         assert warm < cold / 3.0, (
             f"cache read {warm:.2f}s vs parse {cold:.2f}s — not worth the risk")
+
+
+class TestTheParseArityIsPinned:
+    """Adding a channel to the parse broke every consumer at once.
+
+    `rsa, seq, plddt, contacts = rsa_from_structure_cached(...)` is correct
+    until the parse returns five values, and then it fails 21,878 times with
+    "too many values to unpack" — after the tests had passed, because the tests
+    index rather than unpack.
+    """
+
+    def test_the_parse_returns_the_declared_number_of_channels(
+            self, fake_structure):
+        from rockfish.build_rsa_cache import CHANNEL_NAMES, EXPECTED_CHANNELS
+
+        out = sr.rsa_from_structure_cached(fake_structure["cif"], None)
+        assert len(out) == EXPECTED_CHANNELS == len(CHANNEL_NAMES)
+
+    def test_every_array_channel_is_one_value_per_residue(self, fake_structure):
+        out = sr.rsa_from_structure_cached(fake_structure["cif"], None)
+        n = len(out[0])
+        assert len(out[1]) == n                      # the sequence
+        for arr in out[2:]:
+            assert len(arr) == n
+
+    def test_the_prefill_reports_an_arity_mismatch_by_name(self, fake_structure,
+                                                           monkeypatch):
+        import rockfish.build_rsa_cache as b
+
+        monkeypatch.setattr(
+            b, "rsa_from_structure_cached",
+            lambda path, cache: (np.zeros(3), "AAA", np.zeros(3)))
+        acc, n, err = b._one((fake_structure["cif"], None))
+        assert n == 0
+        assert "expected" in err and str(b.EXPECTED_CHANNELS) in err
+
+    def test_the_prefill_reports_a_ragged_channel(self, fake_structure,
+                                                  monkeypatch):
+        import rockfish.build_rsa_cache as b
+
+        monkeypatch.setattr(
+            b, "rsa_from_structure_cached",
+            lambda path, cache: (np.zeros(5), "AAAAA", np.zeros(5),
+                                 np.zeros(5), np.zeros(4)))
+        acc, n, err = b._one((fake_structure["cif"], None))
+        assert n == 0
+        assert "ca_torsion" in err
+
+    def test_a_good_parse_still_passes(self, fake_structure):
+        import rockfish.build_rsa_cache as b
+
+        acc, n, err = b._one((fake_structure["cif"], None))
+        assert err == ""
+        assert n == len(fake_structure["truth"]["rsa"])
