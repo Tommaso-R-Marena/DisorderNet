@@ -110,15 +110,34 @@ class TestWindowsMoveWithTheirProtein:
 
 
 class TestHomologuesAreReservedToo:
+    """The stub here returns what BLAST actually returns.
+
+    An earlier version of these tests stubbed it as a set of protein ids. The
+    real function returns ``(query_index, subject_index, identity)`` triples,
+    so the production code's ``set(hits)`` was a set of tuples and its
+    membership test never matched — not one homologue left training, while the
+    count printed in the log looked correct and every test passed. A fake that
+    does not match the interface it fakes proves nothing about the code that
+    calls the real one.
+    """
+
     @staticmethod
-    def _split(rows, hits):
-        """Run the reservation with a stubbed homology filter."""
+    def _split(rows, homologous_ids):
+        """Run the reservation with a homology filter stubbed at its real
+        contract: index triples, not ids."""
         import rockfish.train_multitask as tm
 
         mod = sys.modules.setdefault("colab.homology_splits",
                                      type(sys)("colab.homology_splits"))
         old = getattr(mod, "blast_cross_identity_hits", None)
-        mod.blast_cross_identity_hits = lambda kept, targets, min_identity: hits
+
+        def fake(query, subject, min_identity):
+            if homologous_ids is None:
+                return None
+            return [(i, 0, 0.91) for i, q in enumerate(query)
+                    if q["id"] in homologous_ids]
+
+        mod.blast_cross_identity_hits = fake
         try:
             return tm.reserve_validation_holdout(rows, 0.05, 0.4)
         finally:
@@ -242,3 +261,35 @@ class TestTheTrainerUsesIt:
         assert "scoring the fixed validation holdout" in src
         assert src.index("fitting final head on all") < \
             src.index("scoring the fixed validation holdout")
+
+
+class TestTheHomologyContractIsPinned:
+    """The bug was a mismatch between a stub and the function it stood for.
+
+    So the contract itself is asserted, against the real function's source and
+    against the other caller that already had it right, rather than left to be
+    re-learned.
+    """
+
+    @staticmethod
+    def _src(name):
+        return open(os.path.join(REPO, *name.split("/"))).read()
+
+    def test_the_filter_documents_index_triples(self):
+        src = self._src("colab/homology_splits.py")
+        block = src[src.index("def blast_cross_identity_hits"):]
+        assert "(query_index, subject_index, identity)" in block[:1200]
+
+    def test_both_callers_map_indices_back_to_ids(self):
+        src = self._src("rockfish/train_multitask.py")
+        assert src.count('homologous = {kept[q]["id"] for q, _s, _i in hits}') == 2, (
+            "both the CAID filter and the validation holdout must map BLAST's "
+            "index triples back to ids")
+        assert "homologous = set(hits)" not in src
+
+    def test_a_set_of_ids_would_not_have_worked(self):
+        """The counterfactual, so the failure mode stays legible: membership of
+        an id in a set of tuples is always False."""
+        hits = [(0, 3, 0.9), (7, 1, 0.95)]
+        assert "O3" not in set(hits)
+        assert {("id",)} != {"id"}

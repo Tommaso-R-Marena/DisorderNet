@@ -527,7 +527,12 @@ def reserve_validation_holdout(
                 "--allow-missing-homology-filter to proceed knowingly.")
         homologous: set[str] = set()
     else:
-        homologous = set(hits)
+        # (query_index, subject_index, identity) triples, not ids. `set(hits)`
+        # is a set of tuples, so `r["id"] not in homologous` is always true and
+        # not one homologue ever left training — while the count printed in the
+        # log looked right. Indices back to ids, the same way drop_caid_targets
+        # does it.
+        homologous = {kept[q]["id"] for q, _s, _i in hits}
 
     train_rows = [r for r in kept if r["id"] not in homologous]
     pulled.extend(r for r in kept if r["id"] in homologous)
