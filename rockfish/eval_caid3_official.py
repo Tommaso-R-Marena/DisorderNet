@@ -440,7 +440,10 @@ def main(argv=None) -> int:
         # is taken empirically: the top full-coverage entrant on this very
         # reference, recomputed from the raw prediction files.
         if args.benchmark == "caid3":
-            leader, leader_auc = LEADERS[task]
+            # (method, auc, aps) — three fields, not two. Unpacking it as a
+            # pair passed a source-text test and failed at runtime two minutes
+            # into a GPU job, which is what source-text tests are worth.
+            leader, leader_auc = LEADERS[task][0], LEADERS[task][1]
         else:
             top = (full_cov or board)[0]
             leader, leader_auc = top["method"], top["auc"]

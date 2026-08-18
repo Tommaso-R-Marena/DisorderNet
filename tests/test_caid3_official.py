@@ -609,11 +609,29 @@ class TestCaid2Composition:
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "rockfish", "eval_caid3_official.py")
         src = open(path).read()
-        assert 'if args.benchmark == "caid3":\n            leader, leader_auc = LEADERS[task]' in src
         assert 'leader, leader_auc = top["method"], top["auc"]' in src
         assert '"leader_auc": LEADERS[task][1]' not in src
-        assert src.count("LEADERS[task]") == 1, (
-            "every use of the CAID3 leader table must be behind the round check")
+        block = src[src.index('if args.benchmark == "caid3":'):
+                    src.index("paired = {}")]
+        assert block.count("LEADERS[task]") == 2, (
+            "every use of the CAID3 leader table must be behind the round "
+            "check")
+        assert "LEADERS[task]" not in src[src.index("paired = {}"):]
+
+    def test_the_leader_table_is_unpacked_at_its_real_width(self):
+        """LEADERS[task] is (method, auc, aps). `leader, leader_auc =
+        LEADERS[task]` reads fine, satisfies a source-text assertion, and
+        raises ValueError two minutes into a GPU job. Check the shape, not the
+        spelling."""
+        from colab.caid3_official import LEADERS, TASKS
+
+        assert set(LEADERS) == set(TASKS)
+        for task, row in LEADERS.items():
+            assert len(row) == 3, (task, row)
+            name, auc, aps = row
+            assert isinstance(name, str) and name
+            assert 0.5 < float(auc) < 1.0
+            assert 0.0 < float(aps) <= 1.0
 
     def test_every_opponent_file_is_checked_before_it_is_opened(self):
         """The paired loop guarded, the fused comparison did not."""
