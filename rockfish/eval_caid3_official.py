@@ -219,6 +219,11 @@ def predict_task(head, mix, esm, batch_converter, layer_ids, device, ref,
                 sp = torch.zeros(len(batch), L, device=device)
                 sa = torch.zeros(len(batch), L, device=device)
                 sc = torch.zeros(len(batch), L, device=device)
+                # NaN, not zero. Zero is a planar backbone; the head reads
+                # finite-ness as this channel's availability flag, and filling
+                # absent windows with 0 would assert "planar" about residues
+                # with no torsion window at all.
+                sh = torch.full((len(batch), L), float("nan"), device=device)
                 for bi, (tid, a, b, _sub) in enumerate(batch):
                     f = structures.get(tid) or {}
                     if not f:
@@ -238,8 +243,15 @@ def predict_task(head, mix, esm, batch_converter, layer_ids, device, ref,
                                     dtype=np.float32)[a:b]
                     kk = min(len(ct), k)
                     sc[bi, :kk] = torch.from_numpy(ct[:kk]).to(device)
+                    hd = np.asarray(
+                        f.get("handedness", np.full(b - a, np.nan)),
+                        dtype=np.float32)[a:b]
+                    kh = min(len(hd), k)
+                    if kh > 0:
+                        sh[bi, :kh] = torch.from_numpy(
+                            np.ascontiguousarray(hd[:kh])).to(device)
                 kw = {"rsa": sr, "plddt": sp, "structure_available": sa,
-                      "contacts": sc}
+                      "contacts": sc, "handedness": sh}
             probs = torch.sigmoid(head(feats, **kw)[task]).float().cpu().numpy()
             for bi, (tid, a, b, sub) in enumerate(batch):
                 n = min(len(sub), probs.shape[1])
@@ -303,6 +315,8 @@ def main(argv=None) -> int:
     condition_binding = bool(payload.get("condition_binding", False))
     protein_bias = bool(payload.get("protein_bias", False))
     private_trunk = bool(payload.get("private_trunk", False))
+    private_narrow = bool(payload.get("private_narrow", False))
+    chiral = bool(payload.get("chiral", False))
 
     from colab.disordernet_gpu import TrainConfig, setup_environment
     cfg = setup_environment(TrainConfig.from_profile("lite", esm_backbone=args.backbone))
@@ -321,6 +335,8 @@ def main(argv=None) -> int:
                              condition_binding=condition_binding,
                              protein_bias=protein_bias,
                              private_trunk=private_trunk,
+                             private_narrow=private_narrow,
+                             chiral=chiral,
                              dilations=(WIDE_DILATIONS
                                         if payload.get("wide_receptive_field")
                                         else None)).to(device)

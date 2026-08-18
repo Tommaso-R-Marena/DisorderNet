@@ -196,3 +196,120 @@ class TestHandednessIsContinuousAcrossTheWrap:
         rng = np.random.default_rng(6)
         v = handedness(rng.uniform(-720, 720, size=1000))
         assert v.min() >= -1.0 and v.max() <= 1.0
+
+
+class TestTheChannelReachesTheModel:
+    """A channel that is computed and then dropped is worse than none.
+
+    Every step between the mmCIF and the logit is a place where handedness can
+    be silently lost — the parse, the cache, the window slice, the batch, the
+    head. Each is checked, because "we added a chirality channel" is exactly
+    the kind of claim that survives a broken pipeline.
+    """
+
+    TASKS = ("disorder_pdb", "disorder_nox", "linker", "binding", "binding_idr")
+
+    def _head(self, chiral):
+        from colab.lite_head import WIDE_DILATIONS, MultiTaskLiteHead
+
+        return MultiTaskLiteHead(in_dim=32, tasks=self.TASKS, structure_dim=24,
+                                 dilations=WIDE_DILATIONS, chiral=chiral).eval()
+
+    @staticmethod
+    def _inputs(n=40, b=2):
+        import torch
+
+        return dict(rsa=torch.rand(b, n), plddt=torch.rand(b, n) * 100,
+                    structure_available=torch.ones(b, n),
+                    contacts=torch.rand(b, n))
+
+    def test_the_chiral_head_takes_two_more_channels(self):
+        from colab.lite_head import StructureChannels
+
+        assert self._head(True).structure.n_in == \
+            StructureChannels.N_CHANNELS_CHIRAL
+        assert self._head(False).structure.n_in == StructureChannels.N_CHANNELS
+
+    def test_flipping_handedness_changes_the_prediction(self):
+        import torch
+
+        m = self._head(True)
+        x = torch.randn(2, 40, 32)
+        kw = self._inputs()
+        with torch.no_grad():
+            a = m(x, handedness=torch.full((2, 40), 0.9), **kw)["disorder_pdb"]
+            b = m(x, handedness=torch.full((2, 40), -0.9), **kw)["disorder_pdb"]
+        assert not torch.allclose(a, b, atol=1e-6)
+
+    def test_a_non_chiral_head_ignores_it(self):
+        """Otherwise an old checkpoint would silently change behaviour the
+        moment the caller started passing the argument."""
+        import torch
+
+        m = self._head(False)
+        x = torch.randn(2, 40, 32)
+        kw = self._inputs()
+        with torch.no_grad():
+            a = m(x, handedness=torch.full((2, 40), 0.9), **kw)["disorder_pdb"]
+            b = m(x, handedness=None, **kw)["disorder_pdb"]
+        assert torch.allclose(a, b, atol=0, rtol=0)
+
+    def test_absent_handedness_is_flagged_not_imputed(self):
+        import torch
+
+        from colab.lite_head import StructureChannels
+
+        h = torch.full((1, 6), float("nan"))
+        h[0, 2:4] = 0.0                      # a genuine planar backbone
+        block = StructureChannels.assemble(
+            None, None, None, length=6, batch=1,
+            device=torch.device("cpu"), handedness=h, chiral=True)
+        assert block[0, 5].tolist() == [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        assert block[0, 6].tolist() == [0.0, 0.0, 1.0, 1.0, 0.0, 0.0], (
+            "a real 0.0 torsion must be flagged present, and NaN absent")
+
+    def test_the_batcher_pads_with_nan(self):
+        import numpy as np
+
+        from rockfish.train_multitask import structure_batch
+
+        row = {"length": 3, "rsa": np.ones(3, np.float32),
+               "plddt": np.ones(3, np.float32),
+               "structure_available": np.ones(3, np.float32),
+               "contacts": np.ones(3, np.float32),
+               "handedness": np.array([0.0, 0.5, np.nan], np.float32)}
+        _r, _p, _a, _c, hd = structure_batch([row], L=5,
+                                             device=__import__("torch").device("cpu"))
+        got = hd[0].tolist()
+        assert got[0] == 0.0 and got[1] == 0.5
+        assert all(g != g for g in got[2:]), f"padding was not NaN: {got}"
+
+    def test_windowing_slices_handedness_with_everything_else(self):
+        import numpy as np
+
+        from rockfish.train_multitask import chunk_long_rows
+
+        n = 2500
+        row = {"id": "P", "sequence": "A" * n, "length": n,
+               "task_labels": {"disorder_pdb": np.zeros(n, np.int8)},
+               "task_evidence": {"disorder_pdb": np.ones(n, bool)},
+               "rsa": np.arange(n, dtype=np.float32),
+               "plddt": np.arange(n, dtype=np.float32),
+               "contacts": np.arange(n, dtype=np.float32),
+               "structure_available": np.ones(n, np.float32),
+               "handedness": np.arange(n, dtype=np.float32)}
+        out, _ = chunk_long_rows([row], max_len=1022, stride=511)
+        assert len(out) > 1
+        for w in out:
+            a = w["window_offset"]
+            assert w["handedness"][0] == float(a), (
+                "handedness was not sliced to the same window as rsa")
+            np.testing.assert_array_equal(w["handedness"], w["rsa"])
+
+    def test_the_evaluator_passes_it(self):
+        import os
+
+        src = open(os.path.join(REPO, "rockfish",
+                                "eval_caid3_official.py")).read()
+        assert '"handedness": sh' in src
+        assert 'float("nan")' in src.split("sh = torch.full")[1][:60]

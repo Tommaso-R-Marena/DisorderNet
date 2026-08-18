@@ -331,9 +331,13 @@ class StructureChannels(nn.Module):
     tell the difference will read absence as order.
     """
 
+    #: Five without handedness, seven with. Kept as a class attribute so a
+    #: checkpoint trained on one cannot silently load into the other: the first
+    #: convolution's shape depends on it and strict loading will refuse.
     N_CHANNELS = 5
+    N_CHANNELS_CHIRAL = 7
 
-    def __init__(self, out_dim: int = 16):
+    def __init__(self, out_dim: int = 16, chiral: bool = False):
         super().__init__()
         # Five inputs: rsa, pLDDT (scaled), contact density, an availability
         # flag, and rsa's local gradient.
@@ -347,11 +351,28 @@ class StructureChannels(nn.Module):
         # The gradient channel exists because a 1x1 convolution cannot see a
         # transition its input does not encode, and IDR boundaries are
         # accessibility transitions.
+        # With `chiral`, two more: signed backbone handedness and a flag for
+        # whether the torsion window was complete.
+        #
+        # Every other channel here is mirror-invariant — reflect the structure
+        # and rsa, pLDDT, contacts and the rsa gradient are all unchanged — so
+        # this is the only one that can distinguish a structure from its
+        # reflection. Measured training-free on CAID3 Disorder-PDB, smoothed
+        # handedness alone has within-protein AUC 0.6435 while its own achiral
+        # control, |sin| of the same torsion, reaches 0.4180: *below chance*.
+        # The whole signal is in the sign. On Disorder-NOX, 0.6494 against
+        # 0.3966. The direction was fitted on 800 MobiDB training proteins and
+        # it is the one polymer physics predicts — disordered residues are less
+        # right-handed (mean 0.074) than ordered ones (0.211), which is what
+        # left-handed polyproline II displacing right-handed alpha looks like.
+        self.chiral = bool(chiral)
+        n_in = self.N_CHANNELS_CHIRAL if self.chiral else self.N_CHANNELS
         self.encode = nn.Sequential(
-            nn.Conv1d(self.N_CHANNELS, out_dim, 1),
+            nn.Conv1d(n_in, out_dim, 1),
             nn.GELU(),
             nn.Conv1d(out_dim, out_dim, 1),
         )
+        self.n_in = n_in
         self.out_dim = out_dim
 
     @staticmethod
@@ -363,8 +384,19 @@ class StructureChannels(nn.Module):
         batch: int,
         device: torch.device,
         contacts: Optional[torch.Tensor] = None,
+        handedness: Optional[torch.Tensor] = None,
+        chiral: bool = False,
     ) -> torch.Tensor:
-        """Build the (B, 5, L) input, zero-filled and flagged where absent."""
+        """Build the (B, 5, L) or (B, 7, L) input, flagged where absent.
+
+        The handedness channel carries its own availability flag rather than
+        reusing the structural one. A residue can have a structure and still
+        have no torsion — the first residue and the last two of every chain,
+        and any window containing a missing CA — and zero is a legitimate
+        torsion, meaning a planar trace. Filling those with 0 would assert
+        "planar" about residues with no window, the same error as imputing
+        rsa 0 for a protein with no structure, which reads as fully buried.
+        """
         zeros = torch.zeros(batch, length, device=device)
         r = zeros if rsa is None else rsa
         p = zeros if plddt is None else plddt / 100.0
@@ -374,7 +406,12 @@ class StructureChannels(nn.Module):
         grad = torch.zeros_like(r)
         if length > 1:
             grad[:, 1:] = r[:, 1:] - r[:, :-1]
-        return torch.stack([r, p, c, a, grad], dim=1)
+        stack = [r, p, c, a, grad]
+        if chiral:
+            h = zeros if handedness is None else handedness
+            h_ok = torch.isfinite(h).to(h.dtype)
+            stack.extend([torch.nan_to_num(h, nan=0.0), h_ok])
+        return torch.stack(stack, dim=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.encode(x)
@@ -470,6 +507,7 @@ class MultiTaskLiteHead(nn.Module):
         protein_bias: bool = True,
         private_trunk: bool = True,
         private_narrow: bool = False,
+        chiral: bool = False,
         n_private_blocks: int = 2,
     ):
         super().__init__()
@@ -480,7 +518,8 @@ class MultiTaskLiteHead(nn.Module):
         self.tasks = tuple(tasks)
         self.structure_dim = int(structure_dim)
         self.structure = (
-            StructureChannels(self.structure_dim) if self.structure_dim else None
+            StructureChannels(self.structure_dim, chiral=bool(chiral))
+            if self.structure_dim else None
         )
 
         dil = list(dilations) if dilations is not None else list(DEFAULT_DILATIONS)
@@ -578,6 +617,7 @@ class MultiTaskLiteHead(nn.Module):
         plddt: Optional[torch.Tensor] = None,
         structure_available: Optional[torch.Tensor] = None,
         contacts: Optional[torch.Tensor] = None,
+        handedness: Optional[torch.Tensor] = None,
     ) -> dict[str, torch.Tensor]:
         """(B, L, C) -> {task: (B, L)} logits, one shared trunk pass.
 
@@ -596,7 +636,8 @@ class MultiTaskLiteHead(nn.Module):
             block = StructureChannels.assemble(
                 rsa, plddt, structure_available,
                 length=x.shape[2], batch=x.shape[0], device=x.device,
-                contacts=contacts,
+                contacts=contacts, handedness=handedness,
+                chiral=self.structure.chiral,
             )
             x = torch.cat([x, self.structure(block)], dim=1)
         h_proj = self.proj(x)

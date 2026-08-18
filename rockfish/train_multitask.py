@@ -160,7 +160,8 @@ def chunk_long_rows(rows: list[dict], max_len: int, stride: int | None = None,
                 # the same window or the head sees residue i's embedding beside
                 # residue a+i's accessibility.
                 **{k: r[k][a:b] for k in
-                   ("rsa", "plddt", "contacts", "structure_available")
+                   ("rsa", "plddt", "contacts", "structure_available",
+                    "handedness")
                    if k in r},
             })
             n_windows += 1
@@ -274,15 +275,25 @@ def attach_structure(rows: list[dict], cache_dir: str) -> None:
             r["plddt"] = np.zeros(n, dtype=np.float32)
             r["contacts"] = np.zeros(n, dtype=np.float32)
             r["structure_available"] = np.zeros(n, dtype=np.float32)
+            # NaN, not 0. Zero is a legitimate handedness — a planar trace —
+            # and the channel carries its own finite-ness flag downstream.
+            r["handedness"] = np.full(n, np.nan, dtype=np.float32)
         else:
             r["rsa"] = np.asarray(feats["rsa"], dtype=np.float32)[:n]
             r["plddt"] = np.asarray(feats["plddt"], dtype=np.float32)[:n]
             r["contacts"] = np.asarray(
                 feats.get("contacts", np.zeros(n)), dtype=np.float32)[:n]
             r["structure_available"] = np.ones(n, dtype=np.float32)
+            hand = np.asarray(feats.get("handedness", np.full(n, np.nan)),
+                              dtype=np.float32)[:n]
+            if len(hand) < n:
+                hand = np.concatenate(
+                    [hand, np.full(n - len(hand), np.nan, np.float32)])
+            r["handedness"] = hand
             # A structure shorter than the sequence leaves the tail unknown.
             if len(r["rsa"]) < n:
                 pad = n - len(r["rsa"])
+                r["handedness"][n - pad:] = np.nan
                 r["rsa"] = np.concatenate([r["rsa"], np.zeros(pad, np.float32)])
                 r["plddt"] = np.concatenate([r["plddt"], np.zeros(pad, np.float32)])
                 r["contacts"] = np.concatenate(
@@ -292,21 +303,31 @@ def attach_structure(rows: list[dict], cache_dir: str) -> None:
 
 
 def structure_batch(batch, L, device):
-    """(rsa, plddt, available, contacts) tensors, or all None."""
+    """(rsa, plddt, available, contacts, handedness), or all None.
+
+    Handedness is filled with NaN rather than 0 everywhere it is unknown —
+    padding beyond the sequence, chain ends with no torsion window, missing
+    CA atoms. Zero is a legitimate handedness, meaning a planar backbone, and
+    the head reads finite-ness as this channel's availability flag.
+    """
     if "rsa" not in batch[0]:
-        return None, None, None, None
+        return None, None, None, None, None
     import torch as _t
     rsa = _t.zeros(len(batch), L, device=device)
     pl = _t.zeros(len(batch), L, device=device)
     av = _t.zeros(len(batch), L, device=device)
     ct = _t.zeros(len(batch), L, device=device)
+    hd = _t.full((len(batch), L), float("nan"), device=device)
     for bi, r in enumerate(batch):
         n = min(r["length"], L)
         rsa[bi, :n] = _t.from_numpy(r["rsa"][:n]).to(device)
         pl[bi, :n] = _t.from_numpy(r["plddt"][:n]).to(device)
         av[bi, :n] = _t.from_numpy(r["structure_available"][:n]).to(device)
         ct[bi, :n] = _t.from_numpy(r["contacts"][:n]).to(device)
-    return rsa, pl, av, ct
+        if "handedness" in r:
+            hd[bi, :n] = _t.from_numpy(
+                np.ascontiguousarray(r["handedness"][:n])).to(device)
+    return rsa, pl, av, ct, hd
 
 
 def drop_caid_targets(
@@ -632,6 +653,20 @@ def main(argv=None) -> int:
              "comparability that is the entire point.",
     )
     ap.add_argument(
+        "--chiral", action="store_true",
+        help="Feed backbone handedness — the signed CA virtual torsion — as two "
+             "extra structural channels. Every other structural input is "
+             "mirror-invariant, so this is the only one that can tell a "
+             "structure from its reflection. See PREREGISTRATION_5.md.",
+    )
+    ap.add_argument(
+        "--private-narrow", action="store_true",
+        help="Give the binding tasks a motif-scale private stack: it reads the "
+             "projection rather than the trunk output, uses narrow dilations, "
+             "and uses position-local normalisation. All three are needed — "
+             "GroupNorm alone makes any stack globally dependent.",
+    )
+    ap.add_argument(
         "--no-holdout", action="store_true",
         help="Train on everything. The run then has no validation number that "
              "can be compared with another architecture's, so it cannot take "
@@ -857,6 +892,8 @@ def main(argv=None) -> int:
                                  condition_binding=not args.no_condition_binding,
                                  protein_bias=not args.no_protein_bias,
                                  private_trunk=not args.no_private_trunk,
+                                 private_narrow=args.private_narrow,
+                                 chiral=args.chiral,
                                  dilations=(WIDE_DILATIONS
                                             if args.wide_receptive_field else None)).to(device)
         params = list(head.parameters()) + list(mix.parameters())
@@ -875,8 +912,9 @@ def main(argv=None) -> int:
                 tokens = tokens.to(device)
                 feats = mix(embed(esm, tokens, layer_ids))
                 L = feats.shape[1]
-                sr, sp, sa, sc = structure_batch(batch, L, device)
-                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa, contacts=sc)
+                sr, sp, sa, sc, sh = structure_batch(batch, L, device)
+                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa,
+                              contacts=sc, handedness=sh)
                 lab, ev = {}, {}
                 for t in tasks:
                     lab[t] = torch.zeros(len(batch), L, device=device)
@@ -909,8 +947,9 @@ def main(argv=None) -> int:
                 _, _, tokens = batch_converter(data)
                 tokens = tokens.to(device)
                 feats = mix(embed(esm, tokens, layer_ids))
-                sr, sp, sa, sc = structure_batch(batch, feats.shape[1], device)
-                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa, contacts=sc)
+                sr, sp, sa, sc, sh = structure_batch(batch, feats.shape[1], device)
+                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa,
+                              contacts=sc, handedness=sh)
                 for t in tasks:
                     p = torch.sigmoid(logits[t]).float().cpu().numpy()
                     for bi, r in enumerate(batch):
@@ -984,6 +1023,8 @@ def main(argv=None) -> int:
                                  condition_binding=not args.no_condition_binding,
                                  protein_bias=not args.no_protein_bias,
                                  private_trunk=not args.no_private_trunk,
+                                 private_narrow=args.private_narrow,
+                                 chiral=args.chiral,
                                  dilations=(WIDE_DILATIONS
                                             if args.wide_receptive_field else None)).to(device)
         params = list(head.parameters()) + list(mix.parameters())
@@ -999,8 +1040,9 @@ def main(argv=None) -> int:
                 tokens = tokens.to(device)
                 feats = mix(embed(esm, tokens, layer_ids))
                 L = feats.shape[1]
-                sr, sp, sa, sc = structure_batch(batch, L, device)
-                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa, contacts=sc)
+                sr, sp, sa, sc, sh = structure_batch(batch, L, device)
+                logits = head(feats, rsa=sr, plddt=sp, structure_available=sa,
+                              contacts=sc, handedness=sh)
                 lab, ev = {}, {}
                 for t in tasks:
                     lab[t] = torch.zeros(len(batch), L, device=device)
@@ -1039,10 +1081,11 @@ def main(argv=None) -> int:
                         [(r["id"], r["sequence"]) for r in batch])
                     tokens = tokens.to(device)
                     feats = mix(embed(esm, tokens, layer_ids))
-                    sr, sp, sa, sc = structure_batch(batch, feats.shape[1],
-                                                     device)
+                    sr, sp, sa, sc, sh = structure_batch(
+                        batch, feats.shape[1], device)
                     logits = head(feats, rsa=sr, plddt=sp,
-                                  structure_available=sa, contacts=sc)
+                                  structure_available=sa, contacts=sc,
+                                  handedness=sh)
                     for t in tasks:
                         p = torch.sigmoid(logits[t]).float().cpu().numpy()
                         for bi, r in enumerate(batch):
@@ -1093,6 +1136,8 @@ def main(argv=None) -> int:
             "condition_binding": not args.no_condition_binding,
             "protein_bias": not args.no_protein_bias,
             "private_trunk": not args.no_private_trunk,
+            "private_narrow": args.private_narrow,
+            "chiral": args.chiral,
             "n_train_proteins": len(rows),
             "caid_leak_filter": None if args.no_caid_filter else leak,
             # Carried in the checkpoint, not only the results file, so a
