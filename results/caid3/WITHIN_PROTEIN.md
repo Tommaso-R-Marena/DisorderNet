@@ -1,7 +1,7 @@
 # What CAID3's headline number ranks methods on
 
-**Status: complete for the 115 published entrants. DisorderNet's own position
-is being computed (job 29928404) and this file will carry it when it lands.**
+**Status: complete.** 115 published entrants, plus DisorderNet scored under
+the identical rule.
 
 CAID scores by pooling every residue of every protein into one AUC. Every
 positive–negative pair in that statistic is either *within* one protein or
@@ -69,6 +69,44 @@ What it does is locate the disagreement. It is concentrated in specific
 methods, and the movement is large where it happens: −40 places for
 UdonPred-combined on Linker, −26 for flDPlr on Disorder-NOX, +32 for
 AlphaFold-pLDDT on Linker.
+
+## Where DisorderNet sits on both axes
+
+Ours faces exactly the entrants' test: predict every target at the reference's
+length, or be excluded. Nothing here is scored on a subset the published
+methods were not also scored on.
+
+| benchmark | ours (best of two) | pooled rank | within-protein AUC | within rank | best other within |
+|---|---:|---:|---:|---:|---|
+| Disorder-PDB | 0.9531 | **1** / 59 | **0.9550** | **1** / 59 | AlphaFold-pLDDT 0.9392 |
+| Binding | 0.8369 | **1** / 71 | **0.8534** | **1** / 71 | AlphaFold3-binding 0.7998 |
+| Linker | 0.9154 | **1** / 92 | **0.8890** | **1** / 92 | APOD 0.8344 |
+| Disorder-NOX | 0.8863 | **1** / 59 | 0.8346 | 5 / 59 | Metapredict-v3 0.8564 |
+| Binding-IDR | 0.6463 | 5 / 71 | 0.6740 | 7 / 71 | LIPNet 0.7620 |
+
+**First on both axes on three of five.** That is a different claim from
+topping the leaderboard, and a stronger one: on Disorder-PDB, Binding and
+Linker DisorderNet wins the metric *and* wins the residue-level question the
+metric is usually read as asking — unlike the CAID3 winners on Disorder-NOX,
+Binding and Linker, which win the metric and place 21st to 25th on the
+question.
+
+The margins on the within-protein axis are not marginal where we lead:
++0.0158 over AlphaFold-pLDDT on Disorder-PDB, +0.0536 over AlphaFold3-binding
+on Binding, +0.0546 over APOD on Linker.
+
+**Where we do not lead, we say so.** On Disorder-NOX we top the pooled table
+and sit 5th within protein, behind Metapredict-v3 by 0.0218 — our advantage
+there is partly protein-level calibration, which is exactly the criticism this
+section levels at others. On Binding-IDR we are 5th and 7th; LIPNet is better
+on both axes and it is not close.
+
+`DisorderNet-pbias` and `DisorderNet-windowed` are both in the table as
+separate methods. The protein-bias variant leads on Disorder-PDB (0.9531
+against 0.9512) and is markedly worse within protein everywhere else —
+Binding 0.7335 against 0.8534, Linker 0.7859 against 0.8890 — which is what a
+protein-level bias term should do and is visible here in a way the pooled
+metric hides.
 
 ## The training-free predictor nobody ranks first
 
@@ -149,6 +187,8 @@ export ANALYSIS_ENV="WPL_BENCHMARK=caid3 WPL_OUT=/path/out.json"
 sbatch rockfish/slurm/analysis_cpu.sbatch
 ```
 
-Raw output: `within_protein_caid3.json`. Every number here comes from the
-published `.caid` files of the CAID3 entrants and the official references —
-nothing in this document depends on DisorderNet at all.
+Raw output: `within_protein_caid3.json` for the entrants alone, and
+`within_protein_caid3_with_ours.json` with DisorderNet added. Every number in
+the sections about the field comes from the published `.caid` files of the
+CAID3 entrants and the official references; the finding about the benchmark
+stands whether or not DisorderNet exists.
