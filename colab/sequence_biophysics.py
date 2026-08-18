@@ -3,7 +3,11 @@
 Our Binding-IDR deficit is entirely between-protein: within-protein AUC matches
 the leader (0.7004 against 0.6958) while between-protein sits at 0.4982, chance,
 against their 0.6400. So what is missing is a quantity that distinguishes whole
-chains, and a per-residue model with a 213-residue field has no channel for it.
+chains. The model is not *blind* to that — its GroupNorm pools statistics over
+the whole length axis, so it already has an implicit protein-level channel
+(`lite_head.measured_dependency_span` measures the dependency as global, not
+213 residues) — but an implicit one carried by normalisation statistics is not
+the same as a descriptor chosen for the job.
 
 Polymer theory supplies exactly such quantities, and they need no training.
 Sequence charge decoration and the related patterning measures are the

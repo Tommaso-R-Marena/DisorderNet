@@ -20,8 +20,18 @@ a single AUC conflates:
 and the one a per-residue model with a bounded receptive field is built for.
 
 **Between-protein** — does this chain have more binding than that one? A global
-question, and one a purely local model has no mechanism to answer: a 213-residue
-receptive field over a 1,000-residue protein never sees the protein.
+question, and one the model answers badly rather than not at all. An earlier
+version of this note said a 213-residue receptive field "never sees the
+protein". That was wrong: `receptive_field` describes the convolutions, and the
+head's GroupNorm pools statistics over the whole length axis, so every output
+position already depends on every input position. Measured on a 401-residue
+input, perturbing residue 0 moves the logit at residue 400
+(`lite_head.measured_dependency_span`).
+
+The correction matters for reading the protein-bias result. That term did not
+supply a missing channel; it supplied a better-shaped one — an explicit,
+pooled, per-protein scalar in place of whatever the normalisation statistics
+happened to carry.
 
 **The decomposition itself is elementary, and saying otherwise would oversell
 it.** Partitioning a Mann-Whitney pair count by whether the pair is within or

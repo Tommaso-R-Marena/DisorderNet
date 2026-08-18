@@ -65,12 +65,30 @@ DEFAULT_DILATIONS: tuple[int, ...] = (1, 2, 4, 8)
 # count — dilation buys context, not weights.
 WIDE_DILATIONS: tuple[int, ...] = (1, 4, 16, 32)
 
+# Narrow schedule for the binding tasks' private stack. Disorder is regional
+# and the wide field is why windowing worked; a *binding* site in an IDR is
+# usually a short linear motif of five to fifteen residues, and a 213-residue
+# field averages a ten-residue motif over twenty times its own length. On
+# CAID3 Binding-IDR the method that leads both the pooled and the
+# within-protein axis is LIPNet, a linear-interacting-peptide predictor, which
+# is what a motif-scale model looks like.
+#
+# The private stack reads the *projection*, not the trunk output, when this is
+# used. A narrow stack layered on a wide trunk inherits the wide field and
+# changes nothing — 213 residues in, 221 out.
+NARROW_DILATIONS: tuple[int, ...] = (1, 2, 4)
+
 
 def receptive_field(dilations: Sequence[int], n_blocks: int) -> int:
-    """Residues visible to one output position.
+    """Residues visible to one output position **through the convolutions**.
 
     Each block applies two dilated kernel-3 convolutions, so it widens the field
     by ``2 * dilation`` on each side.
+
+    This is not the model's dependency span unless every block uses
+    position-local normalisation. With GroupNorm — the default — statistics are
+    pooled over the length axis and every output depends on every input.
+    ``measured_dependency_span`` reports what actually holds.
     """
     span = sum(2 * dilations[i % len(dilations)] for i in range(n_blocks))
     return 1 + 2 * span
@@ -112,22 +130,56 @@ class ScalarMix(nn.Module):
         return torch.softmax(self.weights.detach(), dim=0)
 
 
+class ChannelNorm(nn.Module):
+    """LayerNorm over channels at each position, for (B, C, L) tensors.
+
+    The position-local alternative to GroupNorm. GroupNorm normalises over the
+    channel group **and the whole length axis**, which couples every output
+    position to every input position however narrow the convolutions are; this
+    normalises each position independently, so a block's dependency span is
+    exactly its convolutional field.
+    """
+
+    def __init__(self, channels: int):
+        super().__init__()
+        self.norm = nn.LayerNorm(channels)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:   # (B, C, L)
+        return self.norm(x.transpose(1, 2)).transpose(1, 2)
+
+
 class DilatedResidualBlock(nn.Module):
-    """Residual 1-D conv block with dilation, GroupNorm and GELU.
+    """Residual 1-D conv block with dilation, normalisation and GELU.
 
     GroupNorm rather than BatchNorm: batches here are a handful of proteins of
     wildly differing length, so batch statistics are unstable and — as this
     project found the hard way — BatchNorm running statistics are easy to lose
     across a checkpoint round-trip.
+
+    **GroupNorm normalises over the length axis as well as the channel group**,
+    which means a block's output at one position depends on the input at
+    *every* position, whatever its dilation. `receptive_field` describes the
+    convolutions and not the model: measured on a 401-residue input, perturbing
+    residue 0 moves the logit at residue 400. That is not a defect — sharing
+    per-window statistics is a large part of why this head works at all — but
+    it is not what "213-residue receptive field" says, and this project has
+    used that phrase to argue the model has *no* channel for protein-level
+    information. It has one.
+
+    ``local_norm`` swaps in per-position channel normalisation, which makes the
+    dependency span equal the convolutional field. Off by default, because
+    turning it on changes what every existing checkpoint computes.
     """
 
-    def __init__(self, channels: int, dilation: int, dropout: float = 0.1):
+    def __init__(self, channels: int, dilation: int, dropout: float = 0.1,
+                 local_norm: bool = False):
         super().__init__()
         pad = dilation
         self.conv1 = nn.Conv1d(channels, channels, 3, padding=pad, dilation=dilation)
         self.conv2 = nn.Conv1d(channels, channels, 3, padding=pad, dilation=dilation)
-        self.norm1 = nn.GroupNorm(8, channels)
-        self.norm2 = nn.GroupNorm(8, channels)
+        norm = ChannelNorm if local_norm else (lambda c: nn.GroupNorm(8, c))
+        self.norm1 = norm(channels)
+        self.norm2 = norm(channels)
         self.act = nn.GELU()
         self.drop = nn.Dropout(dropout)
 
@@ -335,9 +387,13 @@ class StructureChannels(nn.Module):
 #: question about which chains carry more of the label, not which residues
 #: within a chain do.
 #:
-#: A per-residue model with a bounded receptive field has no mechanism for that.
-#: A 213-residue field over a 1,000-residue chain never sees the chain. And the
-#: consequence is measurable: on Binding our within-protein AUC is 0.8683
+#: A per-residue model has a poor mechanism for that, though not — as this
+#: comment used to claim — none at all. `receptive_field` returns 213 for the
+#: wide schedule, but it describes the convolutions; GroupNorm pools statistics
+#: over the whole length axis, so the dependency span is actually global
+#: (`measured_dependency_span`). The bias term below therefore replaces an
+#: implicit protein-level channel with an explicit one, rather than creating a
+#: channel that was absent. The consequence is measurable either way: on Binding our within-protein AUC is 0.8683
 #: against the leader's 0.8049 — we are substantially better at the biological
 #: question — while our pooled score is lower, because between-protein
 #: calibration dominates. On Binding-IDR our within-protein AUC matches the
@@ -413,6 +469,7 @@ class MultiTaskLiteHead(nn.Module):
         condition_binding: bool = True,
         protein_bias: bool = True,
         private_trunk: bool = True,
+        private_narrow: bool = False,
         n_private_blocks: int = 2,
     ):
         super().__init__()
@@ -490,8 +547,19 @@ class MultiTaskLiteHead(nn.Module):
 
         self.private_on = (tuple(t for t in _PRIVATE_TRUNK_TASKS
                                  if t in self.tasks) if private_trunk else ())
+        # `private_narrow` reroutes the private stack to read the projection
+        # instead of the trunk output, and gives it its own narrow schedule.
+        # Both parts are needed: dilations alone cannot narrow a field the
+        # trunk has already widened.
+        self.private_narrow = bool(private_narrow) and bool(self.private_on)
+        pdil = (list(NARROW_DILATIONS) if self.private_narrow else dil)
+        # Narrow mode also takes position-local normalisation. Without it the
+        # narrow dilations buy nothing: GroupNorm's statistics run over the
+        # whole length, so the "13-residue" stack would still depend on every
+        # residue in the window.
         self.private = nn.ModuleList(
-            DilatedResidualBlock(hidden, dil[i % len(dil)], dropout)
+            DilatedResidualBlock(hidden, pdil[i % len(pdil)], dropout,
+                                 local_norm=self.private_narrow)
             for i in range(n_private_blocks)
         ) if self.private_on else nn.ModuleList()
         for m in self.protein_bias.values():
@@ -531,7 +599,8 @@ class MultiTaskLiteHead(nn.Module):
                 contacts=contacts,
             )
             x = torch.cat([x, self.structure(block)], dim=1)
-        h = self.proj(x)
+        h_proj = self.proj(x)
+        h = h_proj
         for blk in self.blocks:
             h = blk(h)
         logits = {
@@ -540,7 +609,11 @@ class MultiTaskLiteHead(nn.Module):
         if self.private_on:
             # Detached: binding's loss contributes exactly zero gradient to the
             # shared trunk, so the three tasks reading it are untouched.
-            hp = h.detach()
+            # Narrow mode reads the projection rather than the trunk output, so
+            # the binding read-out sees a motif-scale neighbourhood instead of
+            # inheriting the trunk's 213 residues. Detached either way — the
+            # projection is shared too.
+            hp = (h_proj.detach() if self.private_narrow else h.detach())
             for blk in self.private:
                 hp = blk(hp)
             for t in self.private_on:
@@ -650,3 +723,46 @@ def freeze_backbone(esm_backbone: nn.Module) -> int:
             n += 1
     esm_backbone.eval()
     return n
+
+
+def measured_dependency_span(module, length: int = 401, in_dim: int = 32,
+                             task: str | None = None,
+                             atol: float = 1e-6) -> int:
+    """How far a single-residue perturbation actually reaches, in residues.
+
+    Measured rather than derived, because `receptive_field` describes the
+    convolutions and the normalisation is what decides the answer. Returns the
+    largest distance at which perturbing one residue moves the centre logit;
+    `length` when the dependency is global.
+
+    Intended for tests and for reporting an architecture honestly, not for the
+    training loop.
+    """
+    import torch as _t
+
+    was_training = module.training
+    module.eval()
+    try:
+        x = _t.zeros(1, length, in_dim)
+        with _t.no_grad():
+            base = module(x)
+        if isinstance(base, dict):
+            base = base[task or next(iter(base))]
+        centre = length // 2
+        span = 0
+        for d in range(1, centre + 1):
+            moved_any = False
+            for pos in (centre - d, centre + d):
+                x2 = x.clone()
+                x2[0, pos, :] = 5.0
+                with _t.no_grad():
+                    out = module(x2)
+                if isinstance(out, dict):
+                    out = out[task or next(iter(out))]
+                if not _t.allclose(base[0, centre], out[0, centre], atol=atol):
+                    moved_any = True
+            if moved_any:
+                span = d
+        return span
+    finally:
+        module.train(was_training)

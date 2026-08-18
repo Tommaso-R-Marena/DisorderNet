@@ -7,7 +7,9 @@ conflates, and the difference is attributed to one or the other.
 
 A per-residue model with a bounded receptive field has a mechanism for the
 within-protein part and none at all for the between-protein part: a 213-residue
-field over a 1,000-residue chain never sees the chain. So if a deficit is
+field over a 1,000-residue chain sees it only through its GroupNorm
+statistics, which is a channel but a poor one (see lite_head
+measured_dependency_span). So if a deficit is
 between-protein, no amount of local modelling will close it, and if it is
 within-protein, a global term will not help.
 """

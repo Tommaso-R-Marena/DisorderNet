@@ -487,3 +487,190 @@ class TestPrivateTrunkIsolatesBinding:
             out = m(x(batch=3, length=25))
         for t in ALL_TASKS:
             assert out[t].shape == (3, 25), t
+
+
+class TestNarrowPrivateFieldForBinding:
+    """A binding site in an IDR is a short linear motif; the trunk is 213 wide.
+
+    Disorder is regional and the wide field is why windowing worked. A ten-
+    residue motif averaged over 213 residues is averaged over twenty times its
+    own length, and on CAID3 Binding-IDR the method leading both the pooled and
+    the within-protein axis is LIPNet — a linear-interacting-peptide predictor,
+    which is what a motif-scale model looks like.
+    """
+
+    TASKS = ("disorder_pdb", "disorder_nox", "linker", "binding", "binding_idr")
+
+    def _head(self, **kw):
+        from colab.lite_head import WIDE_DILATIONS, MultiTaskLiteHead
+
+        return MultiTaskLiteHead(in_dim=32, tasks=self.TASKS, structure_dim=0,
+                                 dilations=WIDE_DILATIONS, private_trunk=True,
+                                 **kw)
+
+    def test_narrow_mode_uses_the_narrow_schedule(self):
+        from colab.lite_head import NARROW_DILATIONS
+
+        m = self._head(private_narrow=True)
+        got = [b.conv1.dilation[0] for b in m.private]
+        assert got == list(NARROW_DILATIONS)[:len(got)]
+
+    def test_wide_mode_is_unchanged(self):
+        from colab.lite_head import WIDE_DILATIONS
+
+        m = self._head(private_narrow=False)
+        got = [b.conv1.dilation[0] for b in m.private]
+        assert got == list(WIDE_DILATIONS)[:len(got)]
+        assert m.private_narrow is False
+
+    def test_the_narrow_stack_reads_the_projection_not_the_trunk(self):
+        """Dilations alone cannot narrow a field the trunk already widened:
+        a narrow stack layered on a 213-residue trunk sees 221 residues. The
+        rerouting is the part that does the work, so pin it."""
+        src = open(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "colab", "lite_head.py")).read()
+        assert "hp = (h_proj.detach() if self.private_narrow else h.detach())" \
+            in src
+
+    def test_a_distant_input_cannot_reach_a_narrow_binding_output(self):
+        """The behavioural version of the claim: perturb a residue far outside
+        the narrow field and the binding logit must not move, while the
+        disorder logit — which reads the wide trunk — must.
+
+        The protein-bias term is switched off here because it pools over the
+        whole sequence *by design*, so with it on every residue reaches every
+        output. That interaction is the subject of the next test rather than
+        something to hide behind a tolerance.
+        """
+        from colab.lite_head import measured_dependency_span
+
+        m = self._head(private_narrow=True, protein_bias=False,
+                       condition_binding=False)
+        binding = measured_dependency_span(m, task="binding_idr")
+        disorder = measured_dependency_span(m, task="disorder_pdb")
+        assert binding <= 10, f"binding still reaches {binding} residues"
+        assert disorder >= 100, f"disorder collapsed to {disorder} residues"
+
+    def test_the_protein_bias_reaches_everywhere_by_design(self):
+        """With the bias on, a distant residue does move the binding logit,
+        through the pooled protein-level scalar. That is the bias working, not
+        the narrow field leaking, so the locality claim is only made with the
+        bias off.
+
+        The bias heads are initialised to exactly zero, so an untrained model
+        shows no such effect at all — the measured span is 6, the narrow field.
+        They are given weights here because the question is what the *trained*
+        architecture does, and testing the initialisation instead would have
+        recorded "the bias is local", which is the opposite of true.
+        """
+        from colab.lite_head import measured_dependency_span
+
+        m = self._head(private_narrow=True, protein_bias=True,
+                       condition_binding=False)
+        assert m.protein_bias_on, "no task takes a protein-level bias"
+        for head in m.protein_bias.values():
+            torch.nn.init.normal_(head.weight, std=0.5)
+        assert measured_dependency_span(m, task="binding_idr") >= 100
+
+    def test_a_nearby_input_does_reach_it(self):
+        """Guard the guard: a binding output that never moves is not narrow,
+        it is dead."""
+        from colab.lite_head import measured_dependency_span
+
+        m = self._head(private_narrow=True, protein_bias=False,
+                       condition_binding=False)
+        assert measured_dependency_span(m, task="binding") >= 1
+
+    def test_the_isolation_survives_the_rerouting(self):
+        """The private trunk's whole purpose: binding must still contribute
+        exactly zero gradient to the shared trunk."""
+        m = self._head(private_narrow=True).eval()
+        x = torch.randn(2, 60, 32)
+        out = m(x)
+        out["disorder_pdb"].sum().backward()
+        alone = m.blocks[0].conv1.weight.grad.clone()
+        m.zero_grad(set_to_none=True)
+        out = m(x)
+        (out["disorder_pdb"].sum() + out["binding"].sum()
+         + out["binding_idr"].sum()).backward()
+        together = m.blocks[0].conv1.weight.grad.clone()
+        assert torch.allclose(alone, together, atol=0, rtol=0)
+        assert torch.count_nonzero(alone) > 0
+
+    def test_the_narrow_stack_still_learns(self):
+        m = self._head(private_narrow=True).eval()
+        out = m(torch.randn(2, 60, 32))
+        out["binding_idr"].sum().backward()
+        assert m.private[0].conv1.weight.grad is not None
+        assert torch.count_nonzero(m.private[0].conv1.weight.grad) > 0
+
+
+class TestTheReceptiveFieldFormulaIsNotTheDependencySpan:
+    """`receptive_field` describes the convolutions; GroupNorm decides the
+    answer.
+
+    GroupNorm normalises over the channel group *and the whole length axis*, so
+    every output position depends on every input position however narrow the
+    dilations are. The formula returns 213 for the wide schedule; the measured
+    span on a 401-residue input is the full half-length. This project has used
+    "a per-residue model with a 213-residue field has no channel for
+    protein-level information" as an argument. It has one, through the
+    normalisation, and these tests keep that from being forgotten again.
+    """
+
+    TASKS = ("disorder_pdb", "binding_idr")
+
+    def _head(self, **kw):
+        from colab.lite_head import WIDE_DILATIONS, MultiTaskLiteHead
+
+        return MultiTaskLiteHead(in_dim=32, tasks=self.TASKS, structure_dim=0,
+                                 dilations=WIDE_DILATIONS, protein_bias=False,
+                                 condition_binding=False, **kw)
+
+    def test_groupnorm_makes_the_dependency_global(self):
+        from colab.lite_head import (WIDE_DILATIONS, measured_dependency_span,
+                                     receptive_field)
+
+        m = self._head(private_trunk=False)
+        formula = receptive_field(WIDE_DILATIONS, 4) // 2      # +/- half-width
+        measured = measured_dependency_span(m, length=401,
+                                            task="disorder_pdb")
+        assert measured == 200, measured
+        assert measured > formula, (
+            f"measured {measured} should exceed the formula's {formula}")
+
+    def test_channel_norm_makes_the_dependency_match_the_formula(self):
+        from colab.lite_head import (DilatedResidualBlock,
+                                     measured_dependency_span)
+
+        class Stack(torch.nn.Module):
+            def __init__(self, local_norm):
+                super().__init__()
+                self.proj = torch.nn.Conv1d(32, 32, 1)
+                self.b1 = DilatedResidualBlock(32, 1, 0.0, local_norm=local_norm)
+                self.b2 = DilatedResidualBlock(32, 2, 0.0, local_norm=local_norm)
+                self.out = torch.nn.Conv1d(32, 1, 1)
+
+            def forward(self, x):
+                h = self.b2(self.b1(self.proj(x.transpose(1, 2))))
+                return self.out(h).squeeze(1)
+
+        local = measured_dependency_span(Stack(True), length=401)
+        globe = measured_dependency_span(Stack(False), length=401)
+        # Two blocks, dilations 1 and 2, two convs each: 2*(1+2) = 6 each side.
+        assert local == 6, local
+        assert globe == 200, globe
+
+    def test_the_docstring_says_so(self):
+        """The claim lived in prose that argued the opposite. Pin the
+        correction where it was wrong."""
+        import os
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        head = open(os.path.join(root, "colab", "lite_head.py")).read()
+        assert "normalises over the length axis" in head
+        for name in ("auc_decomposition.py", "sequence_biophysics.py"):
+            text = open(os.path.join(root, "colab", name)).read()
+            assert "213-residue receptive field over a 1,000-residue protein" \
+                not in text, f"{name} still asserts the model cannot see the protein"
