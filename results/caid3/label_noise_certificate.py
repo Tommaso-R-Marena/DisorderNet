@@ -38,6 +38,26 @@ missing-residue call at two coverage thresholds, or per-structure coverage for
 proteins with several deposited structures. Neither is in the cached data, and
 this analysis reports that rather than substituting something that is not it.
 
+## What to do without one: report the frontier, not a verdict
+
+`RobustCertificate.certificate_under_mean_error` is the pattern. A certificate
+whose input is known only to within `delta` does not become worthless; it
+degrades continuously and by a computable amount, and the honest output is the
+degraded bound rather than silence.
+
+The same applies here. The annotation error rate `eps` is unknown, but
+`ranking_certified` is monotone in it: every comparison certified at `eps` is
+certified at every smaller rate, and the bar is exactly `2*eps*n_evaluated`. So
+instead of one verdict this reports the **frontier** — how many of the field's
+comparisons against the leader survive, as a function of `eps`. A reader who
+believes the annotation is 1% wrong reads off one row; a reader who believes 5%
+reads off another. Nothing is assumed on their behalf.
+
+The largest `eps` at which a given comparison still certifies is its
+**breakdown rate**: the annotation error rate that would have to be exceeded
+before that ranking could be an artefact. Quoting it is the strongest honest
+form of "this margin is real", and it needs no estimate of the noise at all.
+
     export ANALYSIS_SCRIPT=results/caid3/label_noise_certificate.py
     sbatch rockfish/slurm/analysis_cpu.sbatch
 """
@@ -261,8 +281,36 @@ def main() -> int:
             print(f" {i:>3} {n:<28}{c['errors']:>10,}{c['error_rate']:>8.3f}"
                   f"{margin:>14,}{mark}")
 
+        # The frontier. ranking_certified needs margin > 2*eps*n_eval, so the
+        # breakdown rate of a comparison is margin/(2*n_eval): the annotation
+        # error rate that would have to be exceeded before that ranking could
+        # be an artefact. Monotone, so this is a complete answer for every eps
+        # at once rather than a verdict at one guessed value.
+        margins = [counts[n]["errors"] - counts[best]["errors"]
+                   for n in order[1:]]
+        breakdown = sorted(m / (2.0 * n_eval) for m in margins)
+        print(f"\n certification frontier — how many of the {len(margins)} "
+              f"comparisons against {best}\n survive at an assumed annotation "
+              f"error rate eps:")
+        print(f"   {'eps':>8}{'bar (residues)':>16}{'certified':>12}"
+              f"{'of':>5}")
+        for eps in (0.001, 0.0025, 0.005, 0.01, 0.02, 0.03, 0.05, 0.10):
+            k = sum(1 for b in breakdown if b > eps)
+            print(f"   {eps:>7.2%}{2.0 * eps * n_eval:>16,.0f}{k:>12}"
+                  f"{len(margins):>5}")
+        if breakdown:
+            print(f"\n breakdown rate of the closest comparison: "
+                  f"{breakdown[0]:.3%} — below that annotation error rate, "
+                  f"even\n the narrowest margin in the field is certified; "
+                  f"above it, that one is not.")
+            print(f" median breakdown rate: {breakdown[len(breakdown)//2]:.2%}")
+
         row = {"n_evaluated": n_eval, "best": best, "counts": counts,
-               "certified": bool(rate)}
+               "certified": bool(rate),
+               "breakdown_rates": breakdown,
+               "frontier": {str(e): sum(1 for b in breakdown if b > e)
+                            for e in (0.001, 0.0025, 0.005, 0.01, 0.02, 0.03,
+                                      0.05, 0.10)}}
         if rate:
             bar = 2.0 * rate * n_eval
             certified = [n for n in order[1:]

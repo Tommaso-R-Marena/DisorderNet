@@ -185,3 +185,43 @@ class TestAFailedEstimateRefusesRatherThanCertifying:
     def test_the_report_records_whether_it_certified(self):
         src = self._src()
         assert '"certified": bool(rate)' in src
+
+
+class TestTheFrontierReplacesTheVerdict:
+    """Without a noise estimate, report how the certification degrades with the
+    assumed rate — the pattern of `certificate_under_mean_error`, where a
+    bound whose input is known only to within delta degrades continuously
+    rather than becoming silence.
+    """
+
+    @staticmethod
+    def _src():
+        return open(os.path.join(REPO, "results", "caid3",
+                                 "label_noise_certificate.py")).read()
+
+    def test_the_breakdown_rate_is_the_margin_over_twice_the_residues(self):
+        """`ranking_certified` needs margin > 2*eps*n, so a comparison survives
+        exactly while eps < margin/(2n)."""
+        n_eval, margin = 100_000, 2_719
+        breakdown = margin / (2.0 * n_eval)
+        assert margin > 2.0 * (breakdown - 1e-9) * n_eval
+        assert not (margin > 2.0 * (breakdown + 1e-9) * n_eval)
+
+    def test_certification_is_monotone_in_the_rate(self):
+        """Every comparison certified at eps is certified at any smaller rate,
+        which is what makes one frontier a complete answer for all eps."""
+        margins = [460, 2719, 5000, 12000]
+        n_eval = 100_000
+        counts = [sum(1 for m in margins if m > 2.0 * e * n_eval)
+                  for e in (0.001, 0.005, 0.01, 0.05)]
+        assert counts == sorted(counts, reverse=True)
+
+    def test_the_frontier_is_computed_and_recorded(self):
+        src = self._src()
+        assert "certification frontier" in src
+        assert "breakdown_rates" in src
+        assert '"frontier":' in src
+
+    def test_it_does_not_assume_a_rate_on_the_readers_behalf(self):
+        src = self._src()
+        assert "Nothing is assumed on their behalf." in src

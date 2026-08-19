@@ -530,8 +530,8 @@ class TestNarrowPrivateFieldForBinding:
         src = open(os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "colab", "lite_head.py")).read()
-        assert "hp = (h_proj.detach() if self.private_narrow else h.detach())" \
-            in src
+        assert "src = h_proj if self.private_narrow else h" in src
+        assert "hp = src.detach() if self.private_detach else src" in src
 
     def test_a_distant_input_cannot_reach_a_narrow_binding_output(self):
         """The behavioural version of the claim: perturb a residue far outside
@@ -674,3 +674,66 @@ class TestTheReceptiveFieldFormulaIsNotTheDependencySpan:
             text = open(os.path.join(root, "colab", name)).read()
             assert "213-residue receptive field over a 1,000-residue protein" \
                 not in text, f"{name} still asserts the model cannot see the protein"
+
+
+class TestShapeAndGradientAreSeparable:
+    """mt_private detached the binding read-out and paid for it.
+
+    Against its regime-matched control it lost 0.0555 on Binding and 0.0262 on
+    Binding-IDR while sparing the disorder tasks about 0.006 — binding has 891
+    training proteins against disorder's 21,386, so cutting the gradient in
+    both directions loses an order of magnitude more than it protects. The
+    narrow read-out is worth keeping; the detach is not, and they are now
+    separate settings.
+    """
+
+    TASKS = ("disorder_pdb", "disorder_nox", "linker", "binding", "binding_idr")
+
+    def _head(self, **kw):
+        from colab.lite_head import WIDE_DILATIONS, MultiTaskLiteHead
+
+        return MultiTaskLiteHead(in_dim=32, tasks=self.TASKS, structure_dim=0,
+                                 dilations=WIDE_DILATIONS, private_trunk=True,
+                                 protein_bias=False, condition_binding=False,
+                                 **kw)
+
+    def test_attached_binding_does_reach_the_shared_trunk(self):
+        m = self._head(private_narrow=True, private_detach=False).eval()
+        x = torch.randn(2, 60, 32)
+        m(x)["binding_idr"].sum().backward()
+        g = m.proj.weight.grad
+        assert g is not None and torch.count_nonzero(g) > 0
+
+    def test_detached_binding_still_does_not(self):
+        """The isolation must remain available and exact where it is wanted."""
+        m = self._head(private_narrow=True, private_detach=True).eval()
+        x = torch.randn(2, 60, 32)
+        out = m(x)
+        out["disorder_pdb"].sum().backward()
+        alone = m.proj.weight.grad.clone()
+        m.zero_grad(set_to_none=True)
+        out = m(x)
+        (out["disorder_pdb"].sum() + out["binding_idr"].sum()).backward()
+        assert torch.allclose(alone, m.proj.weight.grad, atol=0, rtol=0)
+        assert torch.count_nonzero(alone) > 0
+
+    def test_attaching_does_not_widen_the_binding_read_out(self):
+        """The two settings are orthogonal: gradient flow must not change what
+        the binding output can see."""
+        from colab.lite_head import measured_dependency_span
+
+        for detach in (True, False):
+            m = self._head(private_narrow=True, private_detach=detach)
+            span = measured_dependency_span(m, task="binding_idr")
+            assert span <= 10, (detach, span)
+
+    def test_the_default_is_still_detached(self):
+        """Changing the default would silently alter every checkpoint that
+        records private_trunk without recording private_detach."""
+        assert self._head(private_narrow=True).private_detach is True
+        import inspect
+
+        from colab.lite_head import MultiTaskLiteHead
+
+        sig = inspect.signature(MultiTaskLiteHead.__init__)
+        assert sig.parameters["private_detach"].default is True

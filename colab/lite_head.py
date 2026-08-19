@@ -507,6 +507,7 @@ class MultiTaskLiteHead(nn.Module):
         protein_bias: bool = True,
         private_trunk: bool = True,
         private_narrow: bool = False,
+        private_detach: bool = True,
         chiral: bool = False,
         n_private_blocks: int = 2,
     ):
@@ -591,6 +592,14 @@ class MultiTaskLiteHead(nn.Module):
         # Both parts are needed: dilations alone cannot narrow a field the
         # trunk has already widened.
         self.private_narrow = bool(private_narrow) and bool(self.private_on)
+        # Detaching the private path is what mt_private measured, and it cost
+        # Binding 0.0555 and Binding-IDR 0.0262 against its regime-matched
+        # control while sparing the disorder tasks only ~0.006. Binding has 891
+        # training proteins against disorder's 21,386, so cutting the gradient
+        # both ways loses far more than it protects. Shape and gradient are
+        # therefore separable settings: narrow the binding read-out's view
+        # without also severing it.
+        self.private_detach = bool(private_detach)
         pdil = (list(NARROW_DILATIONS) if self.private_narrow else dil)
         # Narrow mode also takes position-local normalisation. Without it the
         # narrow dilations buy nothing: GroupNorm's statistics run over the
@@ -654,7 +663,8 @@ class MultiTaskLiteHead(nn.Module):
             # the binding read-out sees a motif-scale neighbourhood instead of
             # inheriting the trunk's 213 residues. Detached either way — the
             # projection is shared too.
-            hp = (h_proj.detach() if self.private_narrow else h.detach())
+            src = h_proj if self.private_narrow else h
+            hp = src.detach() if self.private_detach else src
             for blk in self.private:
                 hp = blk(hp)
             for t in self.private_on:

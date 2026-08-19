@@ -316,6 +316,7 @@ def main(argv=None) -> int:
     protein_bias = bool(payload.get("protein_bias", False))
     private_trunk = bool(payload.get("private_trunk", False))
     private_narrow = bool(payload.get("private_narrow", False))
+    private_detach = bool(payload.get("private_detach", True))
     chiral = bool(payload.get("chiral", False))
 
     from colab.disordernet_gpu import TrainConfig, setup_environment
@@ -336,6 +337,7 @@ def main(argv=None) -> int:
                              protein_bias=protein_bias,
                              private_trunk=private_trunk,
                              private_narrow=private_narrow,
+                             private_detach=private_detach,
                              chiral=chiral,
                              dilations=(WIDE_DILATIONS
                                         if payload.get("wide_receptive_field")

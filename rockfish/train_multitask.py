@@ -665,6 +665,12 @@ def main(argv=None) -> int:
              "structure from its reflection. See PREREGISTRATION_5.md.",
     )
     ap.add_argument(
+        "--private-attached", action="store_true",
+        help="Keep the binding tasks' gradient flowing into the shared trunk "
+             "while still narrowing their read-out. mt_private detached it and "
+             "lost 0.0555 on Binding to spare the disorder tasks 0.006.",
+    )
+    ap.add_argument(
         "--private-narrow", action="store_true",
         help="Give the binding tasks a motif-scale private stack: it reads the "
              "projection rather than the trunk output, uses narrow dilations, "
@@ -898,6 +904,7 @@ def main(argv=None) -> int:
                                  protein_bias=not args.no_protein_bias,
                                  private_trunk=not args.no_private_trunk,
                                  private_narrow=args.private_narrow,
+                                 private_detach=not args.private_attached,
                                  chiral=args.chiral,
                                  dilations=(WIDE_DILATIONS
                                             if args.wide_receptive_field else None)).to(device)
@@ -1029,6 +1036,7 @@ def main(argv=None) -> int:
                                  protein_bias=not args.no_protein_bias,
                                  private_trunk=not args.no_private_trunk,
                                  private_narrow=args.private_narrow,
+                                 private_detach=not args.private_attached,
                                  chiral=args.chiral,
                                  dilations=(WIDE_DILATIONS
                                             if args.wide_receptive_field else None)).to(device)
@@ -1142,6 +1150,7 @@ def main(argv=None) -> int:
             "protein_bias": not args.no_protein_bias,
             "private_trunk": not args.no_private_trunk,
             "private_narrow": args.private_narrow,
+            "private_detach": not args.private_attached,
             "chiral": args.chiral,
             "n_train_proteins": len(rows),
             "caid_leak_filter": None if args.no_caid_filter else leak,
