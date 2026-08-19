@@ -665,6 +665,13 @@ def main(argv=None) -> int:
              "structure from its reflection. See PREREGISTRATION_5.md.",
     )
     ap.add_argument(
+        "--distribution-weight", type=float, default=0.0,
+        help="Weight on the per-protein 1-Wasserstein term between predicted "
+             "probabilities and labels. BCE fits each residue's mean; this "
+             "fits the protein's distribution, which is 97-99.5%% of what CAID "
+             "weighs. See PREREGISTRATION_8.md.",
+    )
+    ap.add_argument(
         "--private-attached", action="store_true",
         help="Keep the binding tasks' gradient flowing into the shared trunk "
              "while still narrowing their read-out. mt_private detached it and "
@@ -938,7 +945,9 @@ def main(argv=None) -> int:
                         ev[t][bi, :n] = torch.from_numpy(
                             r["task_evidence"][t][:n]).to(device)
                 try:
-                    loss, _ = masked_multitask_loss(logits, lab, ev)
+                    loss, _ = masked_multitask_loss(
+                        logits, lab, ev,
+                        distribution_weight=args.distribution_weight)
                 except ValueError:
                     continue                     # batch had no evaluated residue
                 opt.zero_grad()
@@ -1067,7 +1076,9 @@ def main(argv=None) -> int:
                         ev[t][bi, :n] = torch.from_numpy(
                             r["task_evidence"][t][:n]).to(device)
                 try:
-                    loss, _ = masked_multitask_loss(logits, lab, ev)
+                    loss, _ = masked_multitask_loss(
+                        logits, lab, ev,
+                        distribution_weight=args.distribution_weight)
                 except ValueError:
                     continue
                 opt.zero_grad(); loss.backward()
@@ -1151,6 +1162,7 @@ def main(argv=None) -> int:
             "private_trunk": not args.no_private_trunk,
             "private_narrow": args.private_narrow,
             "private_detach": not args.private_attached,
+            "distribution_weight": args.distribution_weight,
             "chiral": args.chiral,
             "n_train_proteins": len(rows),
             "caid_leak_filter": None if args.no_caid_filter else leak,

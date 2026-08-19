@@ -717,11 +717,66 @@ class MultiTaskLiteHead(nn.Module):
         )
 
 
+def distribution_matching_loss(
+    logit: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+) -> Optional[torch.Tensor]:
+    """Per-protein 1-Wasserstein between predicted probabilities and labels.
+
+    Binary cross-entropy fits each residue's *mean*. The accompanying Lean
+    development is blunt about what that can and cannot do
+    (`DistributionVerdict.distributional_design_law`): a panel of averages,
+    however large, cannot bound the error at all, while along a measured
+    coordinate the transport distance **equals** the L1 distance between the
+    cumulative distributions (`transportCost_line_eq_cdfL1`) and **dominates**
+    the gap between the means (`mean_gap_le_cdfL1`).
+
+    For two empirical distributions with the same number of atoms the 1-D
+    transport distance has a closed form — sort both and average the absolute
+    differences — so this is one line and exactly the quantity the theorem
+    describes, not an approximation of it:
+
+        W1 = (1/n) * sum_i | sorted(p)_i - sorted(y)_i |
+
+    With binary labels, sorted(y) is `k` ones followed by `n-k` zeros, so the
+    term asks the k highest predicted probabilities to be 1 and the rest 0,
+    where k is the true count. It says nothing about *which* residues those
+    are — that is entirely BCE's job.
+
+    That split is the point, and it is the same split the CAID decomposition
+    exposes. BCE shapes the within-protein ordering; this shapes the
+    protein-level distribution, which is 97-99.5% of what the benchmark
+    actually weighs. The two are complementary rather than redundant.
+
+    Computed per protein and averaged over the batch, because a distribution
+    pooled across proteins is a different object entirely — the one CAID
+    already reports.
+    """
+    prob = torch.sigmoid(logit)
+    per_protein = []
+    for b in range(logit.shape[0]):
+        m = mask[b]
+        n = int(m.sum())
+        if n < 2:
+            continue
+        p = prob[b][m]
+        y = target[b][m]
+        # descending, so the quantile coupling is index-aligned
+        p_sorted, _ = torch.sort(p, descending=True)
+        y_sorted, _ = torch.sort(y, descending=True)
+        per_protein.append((p_sorted - y_sorted).abs().mean())
+    if not per_protein:
+        return None
+    return torch.stack(per_protein).mean()
+
+
 def masked_multitask_loss(
     logits: dict[str, torch.Tensor],
     labels: dict[str, torch.Tensor],
     evidence: Optional[dict[str, torch.Tensor]] = None,
     weights: Optional[dict[str, float]] = None,
+    distribution_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """Weighted BCE per task, skipping residues that task does not evaluate.
 
@@ -755,6 +810,12 @@ def masked_multitask_loss(
         w = (weights or {}).get(task, 1.0)
         total = w * loss if total is None else total + w * loss
         parts[task] = float(loss.detach())
+
+        if distribution_weight > 0.0:
+            dist = distribution_matching_loss(logit, target, mask)
+            if dist is not None:
+                total = total + w * distribution_weight * dist
+                parts[f"{task}/W1"] = float(dist.detach())
     if total is None:
         raise ValueError("no task contributed a loss — every mask was empty")
     return total, parts
