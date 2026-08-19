@@ -244,10 +244,14 @@ def main() -> int:
         if not order:
             print(" no achievable risk level at this sample size")
             continue
+        # The last two columns must name their own alpha. They were taken at
+        # ALPHAS[1] while the cost columns swept every alpha, which is
+        # internally consistent and impossible to read from the header.
+        mid_alpha = float(key.split("_")[1])
         head = "".join(f"{'risk<=' + format(a, '.2f'):>14}" for a in ALPHAS)
         print(f" {'#':>3} {'method':<28}{head}"
-              f"{'per-prot':>10}{'credit':>9}")
-        mid = f"alpha_{ALPHAS[1] if len(ALPHAS) > 1 else ALPHAS[0]}"
+              f"{f'per-prot@{mid_alpha:.2f}':>15}{'credit':>9}")
+        mid = key
         for i, n in enumerate(order[:20], 1):
             cells = ""
             for a in ALPHAS:

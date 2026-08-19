@@ -67,17 +67,43 @@ def main() -> int:
     cost = json.load(open(COST))
 
     report = {"alpha": ALPHA, "n_boot": N_BOOT, "tasks": {}}
-    key = f"alpha_{ALPHA}"
+
+    def find_key(entry):
+        """Match the alpha by value, not by spelling.
+
+        The cost tables key on `f"alpha_{a}"` with `a` a float, so 0.10 is
+        stored as "alpha_0.1" and looked up as "alpha_0.10" — a silent zero
+        overlap that reported "0 methods in both" for every benchmark rather
+        than failing.
+        """
+        want = float(ALPHA)
+        for k in entry:
+            if not k.startswith("alpha_"):
+                continue
+            try:
+                if abs(float(k.split("_", 1)[1]) - want) < 1e-9:
+                    return k
+            except ValueError:
+                continue
+        return None
+
     for task in cert.get("tasks", {}):
         if task not in cost.get("tasks", {}):
             continue
         cm = cert["tasks"][task]["methods"]
         om = cost["tasks"][task]["methods"]
+        probe = next((find_key(om[n]) for n in om if find_key(om[n])), None)
+        if probe is None:
+            print(f"{task}: no cost entry at alpha={ALPHA}; "
+                  f"available: {sorted({k for n in om for k in om[n] if k.startswith('alpha_')})}")
+            continue
+        key = probe
         names = [n for n in cm if n in om
                  and (om[n].get(key) or {}).get("flagged_quantile_median")
                  is not None]
         if len(names) < 20:
-            print(f"{task}: only {len(names)} methods in both — skipped")
+            print(f"{task}: only {len(names)} methods usable at {key} — "
+                  f"skipped ({len(set(cm) & set(om))} in both analyses)")
             continue
 
         pooled = np.array([cm[n]["pooled"] for n in names])

@@ -97,9 +97,41 @@ measurable training-free, and not usable by this architecture — which is a
 finding about the architecture worth having."* The mechanism turns out to be
 about the biology rather than the architecture, which is better.
 
-## Still to come
+## The registered endpoint: P1 fails at p = 0.89
 
-The CAID3 evaluation of both checkpoints (jobs 30050407, 30050408) reports P1,
-P2 and the four `PREREGISTRATION_6` floors on the official references. The
-holdout already decides the comparison; the CAID3 numbers are the registered
-endpoint and will be reported whatever they say.
+CAID3, both checkpoints, coverage 1.00, paired protein-clustered bootstrap
+between the two runs (10,000 resamples) — the comparison
+`PREREGISTRATION_6` actually registered, which the entrant-facing evaluator
+does not perform:
+
+| benchmark | chiral | control | Δ | 95% CI | p |
+|---|---:|---:|---:|---|---:|
+| Disorder-PDB | 0.9614 | 0.9587 | +0.0028 | [−0.0004, +0.0060] | 0.087 |
+| **Disorder-NOX** | 0.8576 | 0.8557 | **+0.0019** | [−0.0114, +0.0173] | **0.893** |
+| Binding | 0.7742 | 0.7247 | +0.0496 | [−0.0121, +0.1002] | 0.200 |
+| Binding-IDR | 0.6018 | 0.5422 | +0.0596 | [−0.0001, +0.1033] | 0.051 |
+| Linker | 0.9112 | 0.9009 | +0.0103 | [−0.0048, +0.0305] | 0.174 |
+
+**P1 — chiral beats control on pooled Disorder-NOX — fails at p = 0.8929.**
+
+Every delta is positive on CAID3 and **every interval contains zero.** On the
+fixed holdout every delta is negative. A channel that wins all five on one
+evaluation set, loses all five on another, and clears no significance test on
+either is a channel that does nothing.
+
+Three independent lines agree: the registered test (p = 0.89), the holdout
+(worse on all five, on identical chains), and the mechanism (residual AUC 0.493,
+chance). This is as clean as a negative gets.
+
+## A note on the floors, which do not apply here
+
+Both runs breach the `PREREGISTRATION_6` floors on Disorder-NOX and Binding.
+Those floors came from `mt_publication` and `mt_pbias`, which trained on the
+**full** union; these two reserved the validation holdout and trained on 22,382
+rows instead of 25,373 — 11.8% less data, homologues included.
+
+That is a cross-regime comparison of exactly the kind `PREREGISTRATION_6` was
+written to stop, and the correct control is `mt_control`, which lost the same
+11.8%. The floors are recorded as breached and are not used to reject anything
+here; a holdout-matched floor set has to come from a holdout-matched run, and
+`mt_control` is the first one.
