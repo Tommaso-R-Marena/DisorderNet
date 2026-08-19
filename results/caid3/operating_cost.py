@@ -51,7 +51,9 @@ sys.path.insert(0, os.environ.get("REPO", os.path.expanduser("~/dn_rigor")))
 
 from colab.conformal import (  # noqa: E402
     control_chain_risk,
+    control_chain_risk_quantile,
     evaluate_chain_risk,
+    evaluate_chain_risk_quantile,
     split_by_chain,
 )
 from colab.caid3_official import (  # noqa: E402
@@ -126,7 +128,7 @@ def price(ys, ps, alpha, n_splits, seed):
     draw; the spread is reported alongside.
     """
     rng = np.random.default_rng(seed)
-    flagged, realised = [], []
+    flagged, realised, quantile = [], [], []
     idx = np.arange(len(ys))
     for _ in range(n_splits):
         cal_m, _ = split_by_chain(idx, rng, 0.5)
@@ -140,6 +142,16 @@ def price(ys, ps, alpha, n_splits, seed):
             continue
         flagged.append(ev["mean_fraction_called_disordered"])
         realised.append(ev["mean_chain_miss_rate"])
+        # The calibration-invariant twin: flag a fixed quantile of each chain's
+        # own scores. Depends only on the within-chain ordering, so no
+        # per-protein recalibration can change it — the operational counterpart
+        # of auc_within_strictMono_invariant. The gap between the two costs is
+        # what calibration is worth operationally.
+        gq = control_chain_risk_quantile([ps[i] for i in cal],
+                                         [ys[i] for i in cal], alpha)
+        eq = evaluate_chain_risk_quantile([ps[i] for i in test],
+                                          [ys[i] for i in test], gq["q"])
+        quantile.append(eq["mean_fraction_called_disordered"])
     if not flagged:
         return None
     return {
@@ -147,6 +159,11 @@ def price(ys, ps, alpha, n_splits, seed):
         "flagged_iqr": [float(np.percentile(flagged, 25)),
                         float(np.percentile(flagged, 75))],
         "realised_risk_median": float(np.median(realised)),
+        "flagged_quantile_median": (float(np.median(quantile))
+                                    if quantile else None),
+        "calibration_credit": (float(np.median(quantile))
+                               - float(np.median(flagged))
+                               if quantile else None),
         "n_splits": len(flagged),
     }
 
@@ -203,13 +220,25 @@ def main() -> int:
         order = sorted((n for n in rows if key in rows[n]),
                        key=lambda n: rows[n][key]["flagged_median"])
         head = "".join(f"{'risk<=' + format(a, '.2f'):>14}" for a in ALPHAS)
-        print(f" {'#':>3} {'method':<28}{head}")
+        print(f" {'#':>3} {'method':<28}{head}"
+              f"{'per-prot':>10}{'credit':>9}")
+        mid = f"alpha_{ALPHAS[1] if len(ALPHAS) > 1 else ALPHAS[0]}"
         for i, n in enumerate(order[:20], 1):
             cells = ""
             for a in ALPHAS:
                 v = rows[n].get(f"alpha_{a}")
                 cells += f"{v['flagged_median']:>13.1%} " if v else f"{'—':>14}"
+            m = rows[n].get(mid) or {}
+            pq = m.get("flagged_quantile_median")
+            cr = m.get("calibration_credit")
+            cells += (f"{pq:>9.1%}" if pq is not None else f"{'—':>10}")
+            cells += (f"{cr:>+9.1%}" if cr is not None else f"{'—':>9}")
             print(f" {i:>3} {n:<28}{cells}")
+        print("\n per-prot: the same guarantee bought with a per-protein "
+              "quantile instead of a global\n threshold — calibration-"
+              "invariant, so it prices discrimination alone. credit is what\n "
+              "protein-level calibration saves: large means the method's "
+              "advantage is calibration.")
         if len(order) > 20:
             print(f"     … {len(order) - 20} more; worst: "
                   f"{order[-1]} at {rows[order[-1]][key]['flagged_median']:.1%}")

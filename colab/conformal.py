@@ -261,3 +261,80 @@ def evaluate_chain_risk(probs_by_chain, labels_by_chain,
         "n_chains": len(losses),
         "n_disordered_residues": n_pos,
     }
+
+
+# ── Two ways to spend a guarantee, and the gap between them ───────────────────
+#
+# `control_chain_risk` picks one global threshold. That makes the operating cost
+# **calibration-sensitive**: a per-protein recalibration moves residues across a
+# global cut, so a method whose advantage is protein-level calibration keeps
+# that advantage here.
+#
+# The alternative is to flag a fixed *quantile* of each protein — the top q
+# fraction of that chain's own scores. That is invariant under any per-protein
+# strictly monotone recalibration, exactly as `AUC_within` is
+# (`auc_within_strictMono_invariant`), because it depends only on the ordering
+# inside each chain.
+#
+# So the two costs bracket the same guarantee from the two sides the AUC
+# decomposition already separates:
+#
+#     global threshold      cost uses discrimination AND calibration
+#     per-protein quantile  cost uses discrimination ALONE
+#
+# and their difference is what calibration is worth operationally. A method
+# whose leaderboard position comes from protein-level calibration — the CAID3
+# winners that place 21st to 25th on the within-protein axis — should pay much
+# more under the per-protein rule than under the global one. That is a
+# prediction, and it is testable on the published field.
+
+
+def chain_quantile_miss_rate(prob: np.ndarray, labels: np.ndarray,
+                             q: float) -> float:
+    """Miss rate when the top ``q`` fraction of *this chain's own* scores is
+    flagged. Invariant under any strictly increasing per-chain recalibration,
+    since it depends only on the within-chain ordering."""
+    labels = np.asarray(labels).astype(np.int8)
+    pos = labels == 1
+    if not pos.any():
+        return 0.0
+    prob = np.asarray(prob, dtype=np.float64)
+    n = prob.size
+    k = int(np.ceil(q * n))
+    if k <= 0:
+        return 1.0
+    if k >= n:
+        return 0.0
+    # rank 0 = highest score; flag ranks < k
+    order = np.argsort(np.argsort(-prob, kind="stable"), kind="stable")
+    return float((order[pos] >= k).mean())
+
+
+def control_chain_risk_quantile(probs_by_chain, labels_by_chain, alpha: float,
+                                grid: np.ndarray | None = None) -> dict:
+    """The smallest per-chain flagged fraction whose expected miss rate is
+    under alpha. Same conformal risk control bound, different knob."""
+    if grid is None:
+        grid = np.linspace(0.0, 1.0, 501)
+    n = len(labels_by_chain)
+    if n == 0:
+        return {"q": 1.0, "reason": "no calibration chains"}
+    for q in grid:                       # ascending: loss is non-increasing
+        losses = [chain_quantile_miss_rate(p, y, q)
+                  for p, y in zip(probs_by_chain, labels_by_chain)]
+        bound = (n / (n + 1.0)) * float(np.mean(losses)) + 1.0 / (n + 1.0)
+        if bound <= alpha:
+            return {"q": float(q), "alpha": alpha, "n_chains": n}
+    return {"q": 1.0, "alpha": alpha, "n_chains": n, "reason": "grid exhausted"}
+
+
+def evaluate_chain_risk_quantile(probs_by_chain, labels_by_chain,
+                                 q: float) -> dict:
+    losses = [chain_quantile_miss_rate(p, y, q)
+              for p, y in zip(probs_by_chain, labels_by_chain)]
+    return {
+        "q": q,
+        "mean_chain_miss_rate": float(np.mean(losses)) if losses else None,
+        "mean_fraction_called_disordered": float(q),
+        "n_chains": len(losses),
+    }

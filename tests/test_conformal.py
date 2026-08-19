@@ -285,3 +285,96 @@ class TestConformalRiskControlAtTheChainLevel:
 
         got = control_chain_risk([], [], 0.10)
         assert "reason" in got
+
+
+class TestTheCalibrationInvariantOperatingCost:
+    """Two ways to spend the same guarantee, separating the same two abilities
+    the AUC decomposition does.
+
+    A global threshold uses discrimination *and* calibration. A per-protein
+    quantile uses discrimination alone, because it depends only on the ordering
+    inside each chain — the same invariance `auc_within_strictMono_invariant`
+    states for AUC_within. The difference between the two costs is what
+    calibration is worth operationally.
+    """
+
+    @staticmethod
+    def _chains(n_chains=200, seed=0, skill=0.32, offset=0.0):
+        rng = np.random.default_rng(seed)
+        P, Y = [], []
+        for _ in range(n_chains):
+            n = int(rng.integers(60, 400))
+            y = (rng.random(n) < rng.uniform(0.05, 0.6)).astype(np.int8)
+            p = 0.5 + skill * (2 * y - 1) + rng.normal(0, 0.18, n)
+            if offset:
+                p = p + rng.normal(0, offset)      # per-chain miscalibration
+            P.append(p)
+            Y.append(y)
+        return P, Y
+
+    def test_the_quantile_rule_is_invariant_under_per_chain_recalibration(self):
+        from colab.conformal import chain_quantile_miss_rate
+
+        rng = np.random.default_rng(0)
+        P, Y = self._chains(n_chains=30, seed=1)
+        maps = [lambda v, k: v * (0.2 + 3 * k),
+                lambda v, k: np.exp(v / (1 + k)),
+                lambda v, k: v ** 3 + 5 * k,
+                lambda v, k: np.arcsinh(v) + k]
+        for i, (p, y) in enumerate(zip(P, Y)):
+            k = float(rng.integers(0, 4))
+            recal = maps[i % len(maps)](p, k)
+            for q in (0.1, 0.3, 0.5, 0.8):
+                assert chain_quantile_miss_rate(p, y, q) == pytest.approx(
+                    chain_quantile_miss_rate(recal, y, q), abs=1e-12)
+
+    def test_the_global_rule_is_not_invariant(self):
+        """Guard the guard: if both were invariant the pair would measure
+        nothing and the difference between them would be identically zero."""
+        from colab.conformal import chain_miss_rate
+
+        p = np.array([0.2, 0.4, 0.6, 0.8])
+        y = np.array([0, 0, 1, 1], np.int8)
+        assert chain_miss_rate(p, y, 0.5) != chain_miss_rate(p - 0.3, y, 0.5)
+
+    def test_the_quantile_loss_is_monotone(self):
+        from colab.conformal import chain_quantile_miss_rate
+
+        P, Y = self._chains(n_chains=5, seed=2)
+        for p, y in zip(P, Y):
+            losses = [chain_quantile_miss_rate(p, y, q)
+                      for q in np.linspace(0.0, 1.0, 50)]
+            assert losses == sorted(losses, reverse=True)
+
+    @pytest.mark.parametrize("alpha", [0.10, 0.05])
+    def test_the_quantile_guarantee_holds(self, alpha):
+        from colab.conformal import (control_chain_risk_quantile,
+                                     evaluate_chain_risk_quantile)
+
+        P, Y = self._chains(n_chains=400, seed=3)
+        h = len(P) // 2
+        got = control_chain_risk_quantile(P[:h], Y[:h], alpha)
+        e = evaluate_chain_risk_quantile(P[h:], Y[h:], got["q"])
+        assert e["mean_chain_miss_rate"] <= alpha + 0.03, (alpha, e)
+
+    def test_miscalibration_costs_the_global_rule_and_not_the_quantile_rule(self):
+        """The prediction the pair exists to test. Adding per-chain offsets
+        leaves within-chain ordering untouched, so the quantile cost must not
+        move while the global cost must get worse."""
+        from colab.conformal import (control_chain_risk,
+                                     control_chain_risk_quantile,
+                                     evaluate_chain_risk,
+                                     evaluate_chain_risk_quantile)
+
+        costs_global, costs_quantile = [], []
+        for offset in (0.0, 0.5):
+            P, Y = self._chains(n_chains=400, seed=4, offset=offset)
+            h = len(P) // 2
+            g = control_chain_risk(P[:h], Y[:h], 0.10)
+            costs_global.append(evaluate_chain_risk(
+                P[h:], Y[h:], g["threshold"])["mean_fraction_called_disordered"])
+            q = control_chain_risk_quantile(P[:h], Y[:h], 0.10)
+            costs_quantile.append(evaluate_chain_risk_quantile(
+                P[h:], Y[h:], q["q"])["mean_fraction_called_disordered"])
+        assert costs_global[1] > costs_global[0] + 0.02, costs_global
+        assert abs(costs_quantile[1] - costs_quantile[0]) < 0.05, costs_quantile
