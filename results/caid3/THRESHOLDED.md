@@ -40,18 +40,40 @@ rank-based and threshold-free, the decomposition is calibration-invariant, the
 crossed count is a certified irreducible-error bound, and this is a raw
 disagreement count at each method's own operating point.
 
-## What is not claimed
+## Certified against an annotation error rate, without estimating one
 
-**Not certified.** `LabelNoise.ranking_certified` would turn a margin into a
-statement about which method is better *in truth*, given an estimate of the
-annotation error rate. This project does not have a defensible one — see
-`label_noise_certificate.py`, where the attempt to derive it from CAID3's own
-references returned exactly zero disagreements because those references are not
-independent annotations. A margin of 460 residues on Disorder-PDB is 0.46% of
-the evaluated set, and any plausible annotation error rate is larger than that,
-so the top two are near-certainly inside the noise however it is eventually
-measured. The NOX margin of 2,719 (2.7%) is a better candidate for surviving
-one.
+`LabelNoise.ranking_certified` turns a margin into a statement about which
+method is better *in truth*: a margin above `2·eps·n` certifies the ranking at
+annotation error rate `eps`. This project has no defensible estimate of `eps` —
+the attempt to derive one from CAID3's own references returned exactly zero
+disagreements, because those references are not independent annotations.
+
+An estimate is not needed. The criterion is monotone in `eps`, so the whole
+answer is a frontier, following the shape of
+`RobustCertificate.certificate_under_mean_error`: a bound whose input is known
+only to within `delta` degrades continuously rather than becoming silence.
+
+| assumed annotation error | certified vs 45 others, Disorder-PDB | Disorder-NOX |
+|---|---:|---:|
+| 0.25% | 43 | 45 |
+| 1% | 41 | 44 |
+| **2%** | **39** | **43** |
+| 3% | 34 | 34 |
+| 5% | 21 | 9 |
+
+**Even at 2% annotation error — an error rate few would defend as too
+generous for crystallographic disorder assignment — DisorderNet's lead is
+certified over 39 of 45 methods on Disorder-PDB and 43 of 45 on Disorder-NOX.**
+Only the top handful sit inside plausible noise.
+
+The **breakdown rate** of a comparison, `margin/(2n)`, is the annotation error
+rate that would have to be exceeded before that ranking could be an artefact.
+For the closest comparison it is **0.232%** on Disorder-PDB (PUNCH2, 460
+residues) and **0.450%** on Disorder-NOX. Median across the field: 4.78% and
+3.71%. So the top two on Disorder-PDB are near-certainly inseparable and most of
+the field is not.
+
+## What is not claimed
 
 **Thresholds are not comparable across methods.** Each entrant chose its own,
 and a method optimising AUC rather than accuracy is penalised here through no
