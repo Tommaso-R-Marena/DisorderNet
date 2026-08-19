@@ -665,6 +665,13 @@ def main(argv=None) -> int:
              "structure from its reflection. See PREREGISTRATION_5.md.",
     )
     ap.add_argument(
+        "--ranking-weight", type=float, default=0.0,
+        help="Weight on the within-protein pairwise ranking loss, a smooth "
+             "surrogate for AUC_within — the calibration-invariant part of "
+             "CAID's metric, which nothing in the standard recipe optimises. "
+             "See PREREGISTRATION_9.md.",
+    )
+    ap.add_argument(
         "--distribution-weight", type=float, default=0.0,
         help="Weight on the per-protein 1-Wasserstein term between predicted "
              "probabilities and labels. BCE fits each residue's mean; this "
@@ -947,7 +954,8 @@ def main(argv=None) -> int:
                 try:
                     loss, _ = masked_multitask_loss(
                         logits, lab, ev,
-                        distribution_weight=args.distribution_weight)
+                        distribution_weight=args.distribution_weight,
+                        ranking_weight=args.ranking_weight)
                 except ValueError:
                     continue                     # batch had no evaluated residue
                 opt.zero_grad()
@@ -1078,7 +1086,8 @@ def main(argv=None) -> int:
                 try:
                     loss, _ = masked_multitask_loss(
                         logits, lab, ev,
-                        distribution_weight=args.distribution_weight)
+                        distribution_weight=args.distribution_weight,
+                        ranking_weight=args.ranking_weight)
                 except ValueError:
                     continue
                 opt.zero_grad(); loss.backward()
@@ -1163,6 +1172,7 @@ def main(argv=None) -> int:
             "private_narrow": args.private_narrow,
             "private_detach": not args.private_attached,
             "distribution_weight": args.distribution_weight,
+            "ranking_weight": args.ranking_weight,
             "chiral": args.chiral,
             "n_train_proteins": len(rows),
             "caid_leak_filter": None if args.no_caid_filter else leak,

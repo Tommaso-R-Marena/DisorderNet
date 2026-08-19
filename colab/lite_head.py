@@ -771,12 +771,73 @@ def distribution_matching_loss(
     return torch.stack(per_protein).mean()
 
 
+def within_protein_ranking_loss(
+    logit: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    n_pairs: int = 256,
+    generator: Optional[torch.Generator] = None,
+) -> Optional[torch.Tensor]:
+    """A smooth surrogate for AUC_within, optimised directly.
+
+    The metric decomposes exactly into a part no per-protein recalibration can
+    change and a part that is nothing else:
+
+        AUC_pooled = w_within * AUC_within + w_between * AUC_between
+
+    and `auc_within_strictMono_invariant` identifies the first as the
+    calibration-invariant one — the irreducible skill, the quantity a
+    recalibration cannot buy and cannot lose. Nothing in the standard training
+    recipe optimises it. Binary cross-entropy fits each residue's mean;
+    `distribution_matching_loss` fits the protein's distribution. Neither
+    targets *ordering inside a chain*, which is what AUC_within is.
+
+    This does. AUC_within is the pair-weighted mean of per-protein
+    Mann-Whitney statistics, so its smooth surrogate is the logistic loss on
+    score differences of positive-negative pairs drawn **inside one protein**:
+
+        L = mean over (p, n) in the same chain of  softplus(s_n - s_p)
+
+    Pairs are sampled rather than enumerated — a 400-residue chain at 30%
+    prevalence has 33,600 of them — and the sample is per protein, so a long
+    chain does not drown a short one.
+
+    Together the three terms partition the objective the way the metric
+    partitions: BCE for per-residue means, W1 for the protein-level
+    distribution, this for the within-protein ordering. As far as we know no
+    disorder predictor is trained on the third.
+    """
+    per_protein = []
+    for b in range(logit.shape[0]):
+        m = mask[b]
+        if not bool(m.any()):
+            continue
+        s = logit[b][m]
+        y = target[b][m]
+        pos_idx = torch.nonzero(y > 0.5, as_tuple=False).flatten()
+        neg_idx = torch.nonzero(y <= 0.5, as_tuple=False).flatten()
+        if pos_idx.numel() == 0 or neg_idx.numel() == 0:
+            continue
+        k = min(n_pairs, int(pos_idx.numel()) * int(neg_idx.numel()))
+        pi = pos_idx[torch.randint(pos_idx.numel(), (k,), device=s.device,
+                                   generator=generator)]
+        ni = neg_idx[torch.randint(neg_idx.numel(), (k,), device=s.device,
+                                   generator=generator)]
+        per_protein.append(
+            nn.functional.softplus(s[ni] - s[pi]).mean())
+    if not per_protein:
+        return None
+    return torch.stack(per_protein).mean()
+
+
 def masked_multitask_loss(
     logits: dict[str, torch.Tensor],
     labels: dict[str, torch.Tensor],
     evidence: Optional[dict[str, torch.Tensor]] = None,
     weights: Optional[dict[str, float]] = None,
     distribution_weight: float = 0.0,
+    ranking_weight: float = 0.0,
+    ranking_pairs: int = 256,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """Weighted BCE per task, skipping residues that task does not evaluate.
 
@@ -816,6 +877,13 @@ def masked_multitask_loss(
             if dist is not None:
                 total = total + w * distribution_weight * dist
                 parts[f"{task}/W1"] = float(dist.detach())
+
+        if ranking_weight > 0.0:
+            rank = within_protein_ranking_loss(logit, target, mask,
+                                               n_pairs=ranking_pairs)
+            if rank is not None:
+                total = total + w * ranking_weight * rank
+                parts[f"{task}/rank"] = float(rank.detach())
     if total is None:
         raise ValueError("no task contributed a loss — every mask was empty")
     return total, parts
