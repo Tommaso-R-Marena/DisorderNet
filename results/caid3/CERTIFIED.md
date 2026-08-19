@@ -80,9 +80,26 @@ comparisons — positive of k below negative of l and positive of l below
 negative of k — can never be got right in both directions by any bias, and a
 matching of them costs a full comparison each.
 
-The count of irreducibly crossed comparisons is therefore a certified measure
-of the error no calibration can remove. Fewest, among the top twenty by pooled
-AUC:
+Each method's crossed count is therefore a **certified lower bound on its own**
+irreducible deficit: no per-protein bias can recover those comparisons.
+
+**It does not rank methods, and an earlier version of this document said it
+did.** `AUCCrossedMatchingLooseness.crossed_bound_loose_unbounded` constructs,
+for every `C`, a three-protein score table whose crossed graph has exactly one
+edge — so the certificate asserts a deficit of one comparison pair — while no
+bias comes within `C` pairs of the ceiling, the true deficit being exactly
+`h + 2` and attained at an explicit bias. The approximation ratio is unbounded.
+
+The obstruction is structural and worth stating, because it explains the
+failure rather than merely recording it: the third protein pins the two bias
+differences into narrow windows, forcing the first two into a configuration
+that loses an entire staircase of comparisons. **The conflict is cyclic across
+three proteins and the crossed-matching bound is a pairwise certificate**, so it
+cannot see it.
+
+A method with a smaller crossed count can therefore have a larger true
+irreducible deficit. The counts below are each valid as lower bounds on their
+own method and the ordering between them is not certified:
 
 | benchmark | fewest crossed | count | second |
 |---|---|---:|---|
@@ -92,11 +109,12 @@ AUC:
 | Linker | **DisorderNet-windowed** | 758,376 | LINKER-Pred2 797,298 |
 | Binding-IDR | LIPNet | 484,208 | bindEmbed21IDR-idrGeneral 558,002 |
 
-DisorderNet carries the smallest certified irreducible error on four of five.
-On Disorder-PDB that is 23% fewer crossed comparisons than PUNCH2, the CAID3
-winner. On Linker the three LINKER specialists that sweep the pooled table
-carry more irreducible error than we do while ranking 27th, 28th and 31st on
-the calibration-invariant part.
+DisorderNet has the smallest crossed count on four of five, 23% below PUNCH2 on
+Disorder-PDB. **That is a comparison of certificates, not of deficits**, and by
+the looseness theorem the two orderings need not agree. It is reported because
+each number is a valid lower bound and because the pattern is consistent with
+four other measurements, not as evidence that our irreducible error is the
+smallest.
 
 The crossed-matching bound is computed for the top twenty per benchmark only —
 it enumerates `|pos_k|·|neg_l|` per protein pair, which runs to billions — and
@@ -116,10 +134,15 @@ blocks over the cap are skipped and counted. Every skipped block could only
 - **The ranks here are recomputed** on full-coverage methods and two-class
   targets, and are not CAID's published ranks. Both columns come from the same
   subset, so comparing them is fair; neither is the official table.
-- **No NP-hardness is claimed.** The exact optimum over per-protein biases is a
-  weighted linear ordering problem (`exists_order_ge`, `exists_bias_of_order`),
-  but the reduction from an arbitrary instance to a score table is not
-  formalised and no hardness statement is made.
+- **NP-hardness is now proved**, end to end and from first principles rather
+  than by citation: `Complexity/biasThreshold_hard`, reached through a verifier
+  definition of NP, circuit satisfiability, a verified Tseitin transformation to
+  CNF, independent set, and weighted linear ordering. Every link is an explicit
+  total reduction with a machine-checked correctness proof and a machine-checked
+  polynomial bound on output size. The documented caveat is that Lean has no
+  cost model, so running time is captured through those output-size bounds on
+  explicitly given, structurally simple reduction functions rather than proved
+  directly.
 
 ## Reproduction
 

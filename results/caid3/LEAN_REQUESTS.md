@@ -6,7 +6,28 @@ that already exist, so none of them starts from nothing.
 
 ---
 
-## 1. NP-hardness of the recalibration optimum — **by far the most valuable**
+## 1. NP-hardness of the recalibration optimum — **DONE**
+
+`Complexity/biasThreshold_hard`, proved end to end from first principles rather
+than by citing Karp: a verifier definition of NP → circuit satisfiability → a
+verified Tseitin transformation to CNF → independent set → weighted linear
+ordering → the bias-threshold problem. Every link is an explicit total reduction
+with a machine-checked correctness proof and a machine-checked polynomial bound
+on output size, and the caveat is documented in `Problem.lean`: Lean has no cost
+model, so polynomiality is carried by those size bounds on structurally simple,
+explicitly given functions rather than proved as running time.
+
+**And the companion negative was proved too**, which this project did not ask
+for and which matters more to its own numbers:
+`AUCCrossedMatchingLooseness.crossed_bound_loose_unbounded` shows the greedy
+crossed-matching certificate is loose by an unbounded factor — one edge in the
+crossed graph while the true deficit exceeds any `C` — because the obstruction is
+cyclic across three proteins and the certificate is pairwise. That invalidated a
+ranking `CERTIFIED.md` was making and it has been corrected.
+
+The original ask is preserved below for the record.
+
+### (original) NP-hardness of the recalibration optimum
 
 `AUC_THEOREMS.md` already says the exact optimum over per-protein biases is a
 weighted linear ordering problem (`exists_order_ge`, `exists_bias_of_order`),
@@ -71,6 +92,33 @@ those would let the paper say the quantity is not merely uncomputed but
 uncomputable in practice.
 
 ---
+
+## 1b. The general capacity bound — **now the most valuable open item**
+
+The empirical instance is done: at the annotation error rate measured from
+MobiDB's per-structure disagreements (`ε = 0.0801`), `ranking_certified` leaves
+**30 of 45** comparisons unresolvable on CAID3 Disorder-PDB and **41 of 45** on
+Disorder-NOX. What is missing is the general statement:
+
+```
+theorem benchmark_capacity {n : ℕ} (eps : ℝ) (methods : Finset M)
+    (err : M → ℕ) (h : ∀ m, err m ≤ n) :
+    (certifiable eps n err).card ≤ f n eps   -- an explicit bound
+```
+
+i.e. *a benchmark with `n` scored items and annotation error rate `eps` can
+certify at most `f n eps` pairwise orderings*, plus **sharpness**: an instance
+attaining it.
+
+Why this is worth more than the hardness result. NP-hardness says the
+recalibration gap is expensive to compute. The capacity bound says what a
+benchmark can **ever** establish, whatever anyone computes and however many
+resamples they take — and it applies to every benchmark with noisy labels, which
+is all of them. That is a statement that leaves this field.
+
+The pieces exist: `ranking_certified` is the core, and the counting argument is
+elementary once the margins are ordered. Sharpness needs an instance where the
+margins are spaced exactly at the bar.
 
 ## 2. Conformal risk control for a grouped loss
 
