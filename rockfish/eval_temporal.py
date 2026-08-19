@@ -395,10 +395,101 @@ def main(argv=None) -> int:
                 "ci": [float(lo), float(hi)], "p": float(min(pval, 1.0)),
                 "n_chains": n}
 
+    # ── Distribution-free coverage ───────────────────────────────────────
+    # Split conformal, calibrated on half the chains and measured on the other
+    # half. Both halves are post-cutoff and homology-filtered, so the exchange-
+    # ability the guarantee needs is between two random halves of one set of
+    # structures nobody had seen — the cleanest version of that assumption
+    # available anywhere in this project.
+    from colab.conformal import (calibrate, control_chain_risk,
+                                 evaluate_chain_risk, evaluate_sets,
+                                 prediction_sets, split_by_chain)
+
+    conformal = {}
+    if preds_by_name:
+        print(f"\n{'=' * 100}")
+        print(" DISTRIBUTION-FREE COVERAGE — chains split 50/50, "
+              "class-conditional")
+        print(" Validity is guaranteed whatever the model does; what a model "
+              "earns is how much it")
+        print(" has to flag. Every method below is scored on the SAME chains, "
+              "so the comparison is")
+        print(" matched — the structural baselines exist only where an "
+              "AlphaFold model does.")
+        print("=" * 100)
+
+        def conformal_block(scope_name, scope_ref, names):
+            rng2 = np.random.default_rng(20260818)
+            # One split, shared by every method in the block, so differences
+            # are the methods and not the draw.
+            probe = arrays(scope_ref, preds_by_name[names[0]])[2]
+            if len(probe) < 20:
+                print(f" {scope_name}: only {len(probe)} chains — skipped")
+                return
+            split_rng = np.random.default_rng(20260818)
+            cal_chains, _ = split_by_chain(np.arange(len(probe)), split_rng,
+                                           0.5)
+            print(f"\n {scope_name}: {len(probe)} chains, "
+                  f"{int(cal_chains.sum())} calibrate / "
+                  f"{int((~cal_chains).sum())} test")
+            for name in names:
+                ys, ss, kept = arrays(scope_ref, preds_by_name[name])
+                if kept != probe:
+                    print(f"  {name}: chain set differs — skipped")
+                    continue
+                if name in baseline_preds:
+                    flat = np.concatenate(ss)
+                    rank = (np.argsort(np.argsort(flat)) + 0.5) / len(flat)
+                    P, off = [], 0
+                    for y in ys:
+                        P.append(rank[off:off + len(y)])
+                        off += len(y)
+                else:
+                    P = [np.clip(np.asarray(x), 1e-6, 1 - 1e-6) for x in ss]
+                cal_idx = [i for i in range(len(ys)) if cal_chains[i]]
+                test_idx = [i for i in range(len(ys)) if not cal_chains[i]]
+
+                y_cal = np.concatenate([ys[i] for i in cal_idx])
+                p_cal = np.concatenate([P[i] for i in cal_idx])
+                y_te = np.concatenate([ys[i] for i in test_idx])
+                p_te = np.concatenate([P[i] for i in test_idx])
+
+                row = {"scope": scope_name, "n_chains": len(probe)}
+                for alpha in (0.10, 0.05):
+                    c = calibrate(p_cal, y_cal, alpha, class_conditional=True)
+                    e = evaluate_sets(prediction_sets(p_te, c), y_te)
+                    row[f"split_alpha_{alpha}"] = e
+                    print(f"  {name:<24}{1-alpha:>5.0%} per-residue target |"
+                          f" realised {e['coverage']:.3f}"
+                          f" (ord {e.get('coverage_class0', float('nan')):.3f},"
+                          f" dis {e.get('coverage_class1', float('nan')):.3f})")
+                for alpha in (0.10, 0.05):
+                    got = control_chain_risk([P[i] for i in cal_idx],
+                                             [ys[i] for i in cal_idx], alpha)
+                    ev = evaluate_chain_risk([P[i] for i in test_idx],
+                                             [ys[i] for i in test_idx],
+                                             got["threshold"])
+                    row[f"risk_alpha_{alpha}"] = {"calibrated": got,
+                                                  "realised": ev}
+                    ok = "ok" if ev["mean_chain_miss_rate"] <= alpha else "MISSED"
+                    print(f"  {name:<24}chain risk <= {alpha:.2f}      |"
+                          f" realised {ev['mean_chain_miss_rate']:.3f} {ok:<7}|"
+                          f" flags {ev['mean_fraction_called_disordered']:.1%}")
+                conformal.setdefault(name, {})[scope_name] = row
+
+        ours = [n for n in preds_by_name if n not in baseline_preds]
+        base = [n for n in preds_by_name if n in baseline_preds]
+        if ours:
+            conformal_block("all chains", ref, ours)
+        if base and sub_ref:
+            conformal_block("chains with an AlphaFold model", sub_ref,
+                            ours + base)
+
     print(f"\nfilter: {json.dumps(filt)}")
     if args.out:
         with open(args.out + ".part", "w") as fh:
             json.dump({"filter": filt, "results": results,
+                       "conformal": conformal,
                        "reference": args.reference, "task": args.task}, fh,
                       indent=2, default=float)
         os.replace(args.out + ".part", args.out)
