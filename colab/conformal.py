@@ -230,6 +230,19 @@ def control_chain_risk(probs_by_chain, labels_by_chain, alpha: float,
     n = len(labels_by_chain)
     if n == 0:
         return {"threshold": 0.0, "reason": "no calibration chains"}
+    # The bound is (n/(n+1))*mean + 1/(n+1) and the mean is non-negative, so
+    # no risk below 1/(n+1) can be certified at all, whatever the model does.
+    # On CAID3 Linker that is 1/16 = 0.0625 with 31 targets split in half, so
+    # an alpha of 0.05 is unachievable by *sample size* — and the search
+    # exhausts its grid and returns "flag everything", which reads as a fact
+    # about the methods when it is a fact about n. Say so instead.
+    if alpha < 1.0 / (n + 1.0):
+        return {"threshold": 0.0, "alpha": alpha, "n_chains": n,
+                "achievable": False,
+                "min_achievable_alpha": 1.0 / (n + 1.0),
+                "reason": (f"alpha={alpha} is below 1/(n+1)={1.0/(n+1.0):.4f} "
+                           f"with {n} calibration chains; no method can "
+                           f"certify it")}
     curve = []
     chosen = 0.0
     for t in grid:                       # descending: loss is non-increasing
@@ -241,7 +254,7 @@ def control_chain_risk(probs_by_chain, labels_by_chain, alpha: float,
             chosen = float(t)
             break
     return {"threshold": chosen, "alpha": alpha, "n_chains": n,
-            "curve": curve[-5:]}
+            "achievable": True, "curve": curve[-5:]}
 
 
 def evaluate_chain_risk(probs_by_chain, labels_by_chain,
@@ -319,13 +332,20 @@ def control_chain_risk_quantile(probs_by_chain, labels_by_chain, alpha: float,
     n = len(labels_by_chain)
     if n == 0:
         return {"q": 1.0, "reason": "no calibration chains"}
+    if alpha < 1.0 / (n + 1.0):
+        return {"q": 1.0, "alpha": alpha, "n_chains": n, "achievable": False,
+                "min_achievable_alpha": 1.0 / (n + 1.0),
+                "reason": (f"alpha={alpha} is below 1/(n+1)={1.0/(n+1.0):.4f} "
+                           f"with {n} calibration chains")}
     for q in grid:                       # ascending: loss is non-increasing
         losses = [chain_quantile_miss_rate(p, y, q)
                   for p, y in zip(probs_by_chain, labels_by_chain)]
         bound = (n / (n + 1.0)) * float(np.mean(losses)) + 1.0 / (n + 1.0)
         if bound <= alpha:
-            return {"q": float(q), "alpha": alpha, "n_chains": n}
-    return {"q": 1.0, "alpha": alpha, "n_chains": n, "reason": "grid exhausted"}
+            return {"q": float(q), "alpha": alpha, "n_chains": n,
+                    "achievable": True}
+    return {"q": 1.0, "alpha": alpha, "n_chains": n, "achievable": False,
+            "reason": "grid exhausted"}
 
 
 def evaluate_chain_risk_quantile(probs_by_chain, labels_by_chain,

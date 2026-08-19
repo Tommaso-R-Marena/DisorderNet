@@ -378,3 +378,62 @@ class TestTheCalibrationInvariantOperatingCost:
                 P[h:], Y[h:], q["q"])["mean_fraction_called_disordered"])
         assert costs_global[1] > costs_global[0] + 0.02, costs_global
         assert abs(costs_quantile[1] - costs_quantile[0]) < 0.05, costs_quantile
+
+
+class TestAnUnachievableLevelIsNamedNotFaked:
+    """The bound is (n/(n+1))*mean + 1/(n+1), so no risk below 1/(n+1) can be
+    certified whatever the model does.
+
+    On CAID3 Linker — 31 targets, ~15 per calibration half — that floor is
+    0.0625, and a requested alpha of 0.05 sent the search through its whole
+    grid and returned "flag 100% of every protein" for all 92 methods. That
+    reads as a devastating fact about the field. It is a fact about `n`.
+    """
+
+    @staticmethod
+    def _chains(n_chains, seed=0):
+        rng = np.random.default_rng(seed)
+        P, Y = [], []
+        for _ in range(n_chains):
+            n = int(rng.integers(60, 200))
+            y = (rng.random(n) < 0.3).astype(np.int8)
+            p = np.clip(0.5 + 0.3 * (2 * y - 1) + rng.normal(0, 0.2, n),
+                        1e-6, 1 - 1e-6)
+            P.append(p)
+            Y.append(y)
+        return P, Y
+
+    def test_a_level_below_one_over_n_plus_one_is_refused(self):
+        from colab.conformal import control_chain_risk
+
+        P, Y = self._chains(15)
+        got = control_chain_risk(P, Y, 0.05)          # 1/16 = 0.0625 > 0.05
+        assert got["achievable"] is False
+        assert got["min_achievable_alpha"] == pytest.approx(1 / 16)
+        assert "no method can certify it" in got["reason"]
+
+    def test_an_achievable_level_is_not_refused(self):
+        from colab.conformal import control_chain_risk
+
+        P, Y = self._chains(15)
+        got = control_chain_risk(P, Y, 0.10)          # above 1/16
+        assert got.get("achievable") is True
+
+    def test_the_quantile_variant_refuses_too(self):
+        from colab.conformal import control_chain_risk_quantile
+
+        P, Y = self._chains(15)
+        got = control_chain_risk_quantile(P, Y, 0.05)
+        assert got["achievable"] is False
+
+    def test_more_chains_lower_the_floor(self):
+        from colab.conformal import control_chain_risk
+
+        P, Y = self._chains(200)
+        assert control_chain_risk(P, Y, 0.05)["achievable"] is True
+
+    def test_the_operating_cost_reports_it_rather_than_a_number(self):
+        src = open(os.path.join(REPO, "results", "caid3",
+                                "operating_cost.py")).read()
+        assert 'if not got.get("achievable", True):' in src
+        assert '"unachievable"' in src

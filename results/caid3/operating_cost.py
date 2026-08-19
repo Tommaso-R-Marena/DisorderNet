@@ -136,6 +136,9 @@ def price(ys, ps, alpha, n_splits, seed):
         test = [i for i in idx if not cal_m[i]]
         got = control_chain_risk([ps[i] for i in cal], [ys[i] for i in cal],
                                  alpha)
+        if not got.get("achievable", True):
+            return {"unachievable": got.get("reason"),
+                    "min_achievable_alpha": got.get("min_achievable_alpha")}
         ev = evaluate_chain_risk([ps[i] for i in test], [ys[i] for i in test],
                                  got["threshold"])
         if ev["mean_fraction_called_disordered"] is None:
@@ -217,8 +220,30 @@ def main() -> int:
                 rows[name] = row
 
         key = f"alpha_{ALPHAS[1] if len(ALPHAS) > 1 else ALPHAS[0]}"
-        order = sorted((n for n in rows if key in rows[n]),
+        # Rank on the tightest level that is actually achievable at this
+        # sample size, not on one the finite-sample correction forbids.
+        for k in [f"alpha_{a}" for a in sorted(ALPHAS)]:
+            if any("flagged_median" in (rows[n].get(k) or {}) for n in rows):
+                key = k
+                break
+        unach = {a for a in ALPHAS
+                 if all((rows[n].get(f"alpha_{a}") or {}).get("unachievable")
+                        for n in rows)}
+        for a in sorted(unach):
+            floor = next((rows[n][f"alpha_{a}"].get("min_achievable_alpha")
+                          for n in rows
+                          if (rows[n].get(f"alpha_{a}") or {}).get(
+                              "min_achievable_alpha")), None)
+            print(f" risk <= {a:.2f} is unachievable here: with this many "
+                  f"calibration proteins no method can certify a risk below "
+                  f"{floor:.4f}" if floor else
+                  f" risk <= {a:.2f} is unachievable at this sample size")
+        order = sorted((n for n in rows if "flagged_median" in
+                        (rows[n].get(key) or {})),
                        key=lambda n: rows[n][key]["flagged_median"])
+        if not order:
+            print(" no achievable risk level at this sample size")
+            continue
         head = "".join(f"{'risk<=' + format(a, '.2f'):>14}" for a in ALPHAS)
         print(f" {'#':>3} {'method':<28}{head}"
               f"{'per-prot':>10}{'credit':>9}")
@@ -227,7 +252,12 @@ def main() -> int:
             cells = ""
             for a in ALPHAS:
                 v = rows[n].get(f"alpha_{a}")
-                cells += f"{v['flagged_median']:>13.1%} " if v else f"{'—':>14}"
+                if v and "flagged_median" in v:
+                    cells += f"{v['flagged_median']:>13.1%} "
+                elif v and v.get("unachievable"):
+                    cells += f"{'n too small':>13} "
+                else:
+                    cells += f"{'—':>14}"
             m = rows[n].get(mid) or {}
             pq = m.get("flagged_quantile_median")
             cr = m.get("calibration_credit")
