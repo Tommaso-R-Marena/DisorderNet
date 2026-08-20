@@ -1,0 +1,16 @@
+services:
+  cli:
+    build: {context: ., dockerfile: Dockerfile}
+    image: disordernet:latest
+    volumes: ["./:/work:ro"]
+    command: ["table"]
+
+  web:
+    build: {context: ., dockerfile: Dockerfile.web}
+    image: disordernet-web:latest
+    ports: ["7860:7860"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:7860')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

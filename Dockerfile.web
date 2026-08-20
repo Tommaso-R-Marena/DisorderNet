@@ -1,0 +1,12 @@
+# The Gradio app, for running the Space locally.
+FROM python:3.12-slim
+RUN useradd -m -u 1000 app
+WORKDIR /app
+COPY pyproject.toml README.md LICENSE ./
+COPY disordernet ./disordernet
+COPY hf_space ./hf_space
+RUN pip install --no-cache-dir ".[web]"
+USER app
+EXPOSE 7860
+ENV GRADIO_SERVER_NAME=0.0.0.0 GRADIO_SERVER_PORT=7860
+CMD ["python", "hf_space/app.py"]
