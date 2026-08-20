@@ -84,6 +84,19 @@ So the bound holds wherever the theorem says it holds, and the pooled rate
 exceeds it — 0.00996 against 0.00848 — because the hypothesis the theorem needs
 is false on a reference that is 31.6% disordered.
 
+**A candidate that would restore the closed form, checked before asking for
+it.** Dropping `d·u` from the denominator and substituting `a + e = n(1 − ε)`
+gives, with `κ = (a+e)²/(4ae)` the imbalance factor and no balance hypothesis at
+all:
+
+    ν_pair ≤ κ · ε² / (1 − ε)²
+
+`κ = 1` recovers the balanced case, and `κ ≤ 2(1−ε)²` recovers `2ε²`, so the
+published bound would become a corollary. It holds on **2,266 of the 2,266**
+CAID3 structure pairs where both agreement classes are nonempty — every one
+(`relative_noise.py`, job 30101834). It is stated as request 1 in
+`LEAN_REQUESTS.md` and is **not** used anywhere in the paper until it is proved.
+
 **This does not weaken the result; it relocates it.** The identity
 `discordant = 2·d·u` is unconditional, `discordant ≤ ν²/2` is unconditional, and
 `ν_pair = d·u / (|T ∩ L|·|(T ∪ L)ᶜ| + d·u)` is exact. The capacity of 51 is

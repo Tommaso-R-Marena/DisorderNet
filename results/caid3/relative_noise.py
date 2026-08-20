@@ -148,6 +148,7 @@ def rates(rec) -> dict | None:
     agree_dis = agree_ord = flip_d = flip_u = 0
     sp_checked = sp_bound_ok = sp_balanced = sp_eps_small = 0
     sp_hyp_ok = sp_bound_ok_under_hyp = 0
+    sp_imb_checked = sp_imb_ok = 0
     used = 0
     for i in range(len(sids)):
         for j in range(i + 1, len(sids)):
@@ -214,6 +215,18 @@ def rates(rec) -> dict | None:
                 sp_eps_small += int(4 * (n10 + n01) <= n)
                 sp_hyp_ok += int(min(n11, n00) >= 0.9 * max(n11, n00, 1)
                                  and 4 * (n10 + n01) <= n)
+                # Candidate generalisation, checked before it is asked for:
+                #   nu_pair <= kappa * eps^2 / (1-eps)^2,
+                #   kappa = (a+e)^2 / (4*a*e)   the imbalance factor, >= 1,
+                # from nu_pair <= du/ae, du <= nu^2/4 and a+e = n(1-eps). It
+                # needs no balance hypothesis, and reduces to the balanced form
+                # when kappa = 1. If it holds here it restores a closed form on
+                # references the published bound cannot reach.
+                if n11 * n00 > 0 and n10 + n01 > 0:
+                    kap = (n11 + n00) ** 2 / (4.0 * n11 * n00)
+                    sp_imb_checked += 1
+                    sp_imb_ok += int(nu_ij <= kap * eps_ij ** 2
+                                     / (1 - eps_ij) ** 2 + 1e-12)
                 if (min(n11, n00) >= 0.9 * max(n11, n00, 1)
                         and 4 * (n10 + n01) <= n):
                     sp_bound_ok_under_hyp += int(nu_ij <= 2 * eps_ij ** 2)
@@ -239,7 +252,9 @@ def rates(rec) -> dict | None:
             "sp_checked": sp_checked, "sp_bound_ok": sp_bound_ok,
             "sp_balanced": sp_balanced, "sp_eps_small": sp_eps_small,
             "sp_hypotheses_ok": sp_hyp_ok,
-            "sp_bound_ok_under_hypotheses": sp_bound_ok_under_hyp}
+            "sp_bound_ok_under_hypotheses": sp_bound_ok_under_hyp,
+            "sp_imbalanced_checked": sp_imb_checked,
+            "sp_imbalanced_ok": sp_imb_ok}
 
 
 def main() -> int:
@@ -314,6 +329,11 @@ def main() -> int:
           f"  ({spb / spc:6.1%})")
     print(f"  ... among those satisfying both         {spok:6,d}"
           f"  ({spok / sphyp:6.1%})" if sphyp else "  ... none satisfy both")
+    spic = sum(r["sp_imbalanced_checked"] for r in rows)
+    spio = sum(r["sp_imbalanced_ok"] for r in rows)
+    if spic:
+        print(f"  candidate: nu <= kappa*eps^2/(1-eps)^2  {spio:6,d}"
+              f"  ({spio / spic:6.1%} of {spic:,}, no balance needed)")
 
     report = {"n_proteins": len(rows), "eps_label_pooled": lab,
               "eps_pairwise_pooled": prs,
@@ -332,7 +352,8 @@ def main() -> int:
                   "checked": spc, "bound_holds": spb,
                   "balanced_within_10pct": spbal, "eps_le_quarter": speps,
                   "both_hypotheses": sphyp,
-                  "bound_holds_under_hypotheses": spok},
+                  "bound_holds_under_hypotheses": spok,
+                  "imbalanced_checked": spic, "imbalanced_holds": spio},
               "proteins": rows}
     if OUT:
         with open(OUT + ".part", "w") as fh:
