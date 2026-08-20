@@ -47,3 +47,4 @@ htmlcov/
 # for exploratory plots.
 !paper/figures/*.png
 !paper/figures/*.pdf
+paper/manuscript_web.html

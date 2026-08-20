@@ -249,7 +249,7 @@ d = |T \ L| and u = |L \ T|,
 and by AM–GM, d·u ≤ ((d+u)/2)², so discordant ≤ noise²/2. As rates over n
 residues with balanced classes,
 
-    **ε_pair ≤ 2·ε_label²**,
+    ε_pair ≤ 2·ε_label²,
 
 and the capacity improves from ⌈1/(2ε)⌉ to ⌈1/(4ε²)⌉ — quadratic in the label
 quality rather than linear.
