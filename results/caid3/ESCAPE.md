@@ -60,35 +60,45 @@ AUC the same comparison separates:
 resolves a pair the pooled statistic provably cannot, and it was predicted by
 the decomposition before it was measured.
 
-## What to prove next
+## What to prove next — superseded, and what replaced it
 
-The capacity theorem is stated for a benchmark scoring items with noisy labels.
-The escape route needs its companion:
+An earlier version of this document asked for a **block-correlation lemma**:
+that when label noise flips whole regions, pairwise discordance is bounded by
+the boundary-to-area ratio times the label rate, `O(1/L)` for compact blocks in
+a chain. That was the wrong mechanism, and measuring it is what showed so. The
+block statistics are real — mass-weighted mean block length 73.8 residues,
+67.4% of context-dependent residues in blocks of ten or more — but `1/L`
+predicts `ε_pair/ε_label = 0.0136` against a measured **0.1075**, over-predicting
+the reduction eightfold.
 
+The correct mechanism needs no correlation assumption at all. A pair is
+discordant only when **both** its residues flip, in **opposite** directions:
+
+    discordant(T, L) = 2·d·u        exactly,  d = |T \ L|, u = |L \ T|
+    noise(T, L)      = d + u
+
+so by AM–GM `discordant ≤ noise²/2`, and as rates over `n` residues with
+balanced classes `ε_pair ≤ 2·ε_label²`. That predicts **0.00848** against a
+measured **0.0070** — the bound holds, and is tight to 20%. Pairwise scoring
+does not need the noise to be correlated; it squares it.
+
+The open Lean items are therefore:
+
+```lean
+theorem discordant_eq_flip_product (T L : Finset ι) :
+    discordant T L = 2 * (T \ L).card * (L \ T).card
+
+theorem discordant_le_noise_sq (T L : Finset ι) :
+    (discordant T L : ℝ) ≤ (noise T L : ℝ) ^ 2 / 2
+
+theorem pairwise_capacity_quadratic (eps : ℝ) (h : 0 < eps) :
+    benchCapacity_pairwise eps = ⌈1 / (4 * eps ^ 2)⌉
 ```
-theorem pairwise_capacity {G : Type*} (groups : Finset G) (nu_pair : ℝ) :
-    -- a benchmark scored on within-group ordered pairs, whose annotation
-    -- reverses a pair with rate at most nu_pair, has capacity
-    k ≤ ⌈1 / (2 * nu_pair)⌉
-```
 
-plus the part that makes it a *theorem about structure* rather than a
-restatement:
-
-```
-theorem correlated_noise_reduces_pair_discordance
-    (blocks : Finset (Finset α)) (h : noise flips whole blocks) :
-    nu_pair ≤ (boundary mass / total pairs) * nu_label
-```
-
-i.e. **when label noise is block-correlated, pairwise discordance is bounded by
-the boundary-to-area ratio times the label rate.** For compact blocks in a
-one-dimensional chain that ratio is `O(1/|block|)`, which predicts exactly the
-order-of-magnitude gap measured here.
-
-That pair — the pairwise capacity bound, and the block-correlation lemma
-explaining why it is larger — turns "CAID3 cannot order its field" into
-"**here is the protocol that can, and here is why it works**".
+The first is a counting identity, the second is AM–GM on it, and the third
+substitutes into `benchCapacity_noise_only`. Together they turn the escape route
+from a measurement into a theorem, and they upgrade the capacity from linear in
+`1/ε` to **quadratic**.
 
 ## Scope
 

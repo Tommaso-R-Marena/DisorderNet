@@ -1,0 +1,83 @@
+{
+  "epsilon": 0.08008129415042696,
+  "delta": 0.0,
+  "rounds": {
+    "CAID3": {
+      "disorder_pdb": {
+        "n_targets": 233,
+        "n_residues": 99239,
+        "capacity_targets": 7,
+        "capacity_residues": 7,
+        "nu": 7947,
+        "n_entrants": 117
+      },
+      "disorder_nox": {
+        "n_targets": 178,
+        "n_residues": 99977,
+        "capacity_targets": 7,
+        "capacity_residues": 7,
+        "nu": 8006,
+        "n_entrants": 117
+      },
+      "binding": {
+        "n_targets": 49,
+        "n_residues": 28263,
+        "capacity_targets": 7,
+        "capacity_residues": 7,
+        "nu": 2263,
+        "n_entrants": 117
+      },
+      "binding_idr": {
+        "n_targets": 42,
+        "n_residues": 7741,
+        "capacity_targets": 7,
+        "capacity_residues": 7,
+        "nu": 620,
+        "n_entrants": 117
+      },
+      "linker": {
+        "n_targets": 31,
+        "n_residues": 20498,
+        "capacity_targets": 7,
+        "capacity_residues": 7,
+        "nu": 1642,
+        "n_entrants": 117
+      }
+    },
+    "CAID2": {
+      "disorder_pdb": {
+        "n_targets": 256,
+        "n_residues": 130877,
+        "capacity_targets": 7,
+        "capacity_residues": 7,
+        "nu": 10481,
+        "n_entrants": 0
+      },
+      "disorder_nox": {
+        "n_targets": 181,
+        "n_residues": 160802,
+        "capacity_targets": 7,
+        "capacity_residues": 7,
+        "nu": 12877,
+        "n_entrants": 0
+      },
+      "binding": {
+        "n_targets": 71,
+        "n_residues": 67169,
+        "capacity_targets": 6,
+        "capacity_residues": 7,
+        "nu": 5379,
+        "n_entrants": 0
+      },
+      "linker": {
+        "n_targets": 40,
+        "n_residues": 37150,
+        "capacity_targets": 6,
+        "capacity_residues": 7,
+        "nu": 2975,
+        "n_entrants": 0
+      }
+    }
+  },
+  "eps_required_for_full_field": 0.004273504273504274
+}

@@ -1,0 +1,3646 @@
+{
+  "benchmark": "caid3",
+  "n_boot": 200,
+  "tasks": {
+    "disorder_pdb": {
+      "n_targets_two_class": 233,
+      "n_full_coverage_methods": 59,
+      "w_within": 0.005091089954386818,
+      "spearman_pooled_vs_within": 0.9672121566335476,
+      "spearman_ci": [
+        0.9184964932787844,
+        0.9827819988310929
+      ],
+      "spearman_within_weighted_vs_unweighted": 0.9635885447106955,
+      "hydropathy_baseline": {
+        "pooled": 0.6269029469766808,
+        "auc_within": 0.5,
+        "auc_within_unweighted": 0.5,
+        "auc_between": 0.6275523273491065,
+        "w_within": 0.005091089954386818,
+        "w_between": 0.9949089100456132,
+        "within_pairs": 6192818,
+        "between_pairs": 1210210360,
+        "n_targets_with_both_classes": 233
+      },
+      "methods": [
+        {
+          "method": "DisorderNet-pbias",
+          "pooled": 0.9531023578105121,
+          "auc_within": 0.9550393697990156,
+          "auc_within_unweighted": 0.9512349731398255,
+          "auc_between": 0.9530924458455305,
+          "rank_pooled": 1,
+          "rank_within": 1,
+          "rank_within_unweighted": 1
+        },
+        {
+          "method": "DisorderNet-windowed",
+          "pooled": 0.9511608974931501,
+          "auc_within": 0.9535838127327495,
+          "auc_within_unweighted": 0.9481171312710609,
+          "auc_between": 0.9511484990923396,
+          "rank_pooled": 2,
+          "rank_within": 2,
+          "rank_within_unweighted": 2
+        },
+        {
+          "method": "PUNCH2",
+          "pooled": 0.9409707601076327,
+          "auc_within": 0.9359462848738652,
+          "auc_within_unweighted": 0.9322850634924165,
+          "auc_between": 0.9409964710597916,
+          "rank_pooled": 3,
+          "rank_within": 5,
+          "rank_within_unweighted": 6
+        },
+        {
+          "method": "PUNCH2-Light",
+          "pooled": 0.9377402210305636,
+          "auc_within": 0.9318644597661355,
+          "auc_within_unweighted": 0.9277996591217987,
+          "auc_between": 0.9377702881340397,
+          "rank_pooled": 4,
+          "rank_within": 6,
+          "rank_within_unweighted": 9
+        },
+        {
+          "method": "AlphaFold3-pLDDT",
+          "pooled": 0.930544971825123,
+          "auc_within": 0.9374982439335372,
+          "auc_within_unweighted": 0.9289008841406906,
+          "auc_between": 0.9305093909458848,
+          "rank_pooled": 5,
+          "rank_within": 4,
+          "rank_within_unweighted": 8
+        },
+        {
+          "method": "PredIDR2-Prof-Art",
+          "pooled": 0.930134852048208,
+          "auc_within": 0.914606565217967,
+          "auc_within_unweighted": 0.9371166749587801,
+          "auc_between": 0.9302143124935734,
+          "rank_pooled": 6,
+          "rank_within": 12,
+          "rank_within_unweighted": 3
+        },
+        {
+          "method": "AlphaFold-rsa",
+          "pooled": 0.9300115113642033,
+          "auc_within": 0.9248837928064413,
+          "auc_within_unweighted": 0.9175906549395809,
+          "auc_between": 0.9300377506270894,
+          "rank_pooled": 7,
+          "rank_within": 9,
+          "rank_within_unweighted": 12
+        },
+        {
+          "method": "PredIDR2-Prof-Rnd",
+          "pooled": 0.929954123319464,
+          "auc_within": 0.9148046172194952,
+          "auc_within_unweighted": 0.9315592057760541,
+          "auc_between": 0.9300316454901277,
+          "rank_pooled": 8,
+          "rank_within": 11,
+          "rank_within_unweighted": 7
+        },
+        {
+          "method": "PredIDR2-Seq-Art",
+          "pooled": 0.927585983748556,
+          "auc_within": 0.9288206919693103,
+          "auc_within_unweighted": 0.9345041752204054,
+          "auc_between": 0.9275796655715292,
+          "rank_pooled": 9,
+          "rank_within": 7,
+          "rank_within_unweighted": 4
+        },
+        {
+          "method": "AlphaFold3-rsa",
+          "pooled": 0.9274918204792786,
+          "auc_within": 0.9207062116148093,
+          "auc_within_unweighted": 0.9211373888982591,
+          "auc_between": 0.9275265434019255,
+          "rank_pooled": 10,
+          "rank_within": 10,
+          "rank_within_unweighted": 11
+        },
+        {
+          "method": "AlphaFold-pLDDT",
+          "pooled": 0.9269582839744932,
+          "auc_within": 0.9391663052264736,
+          "auc_within_unweighted": 0.9344675595102857,
+          "auc_between": 0.9268958137988506,
+          "rank_pooled": 11,
+          "rank_within": 3,
+          "rank_within_unweighted": 5
+        },
+        {
+          "method": "PredIDR2-Seq-Rnd",
+          "pooled": 0.9224412799914602,
+          "auc_within": 0.927602991077729,
+          "auc_within_unweighted": 0.925952077441591,
+          "auc_between": 0.9224148667839862,
+          "rank_pooled": 12,
+          "rank_within": 8,
+          "rank_within_unweighted": 10
+        },
+        {
+          "method": "LMDisorder",
+          "pooled": 0.9183169768075039,
+          "auc_within": 0.9110530940841471,
+          "auc_within_unweighted": 0.9107039045088802,
+          "auc_between": 0.9183541471252981,
+          "rank_pooled": 13,
+          "rank_within": 15,
+          "rank_within_unweighted": 13
+        },
+        {
+          "method": "AlphaFold-binding",
+          "pooled": 0.9145464420185854,
+          "auc_within": 0.8982232321376149,
+          "auc_within_unweighted": 0.8738103137747406,
+          "auc_between": 0.9146299701979084,
+          "rank_pooled": 14,
+          "rank_within": 18,
+          "rank_within_unweighted": 22
+        },
+        {
+          "method": "AUCpred-profile",
+          "pooled": 0.9119809303885261,
+          "auc_within": 0.9065448072266938,
+          "auc_within_unweighted": 0.9015269110876167,
+          "auc_between": 0.9120087478014978,
+          "rank_pooled": 15,
+          "rank_within": 16,
+          "rank_within_unweighted": 16
+        },
+        {
+          "method": "DeepIDP-2L",
+          "pooled": 0.9102075640088471,
+          "auc_within": 0.9111971319034404,
+          "auc_within_unweighted": 0.8851391052241668,
+          "auc_between": 0.910202500249626,
+          "rank_pooled": 16,
+          "rank_within": 14,
+          "rank_within_unweighted": 18
+        },
+        {
+          "method": "AlphaFold3-binding",
+          "pooled": 0.909732303001267,
+          "auc_within": 0.8893121031491641,
+          "auc_within_unweighted": 0.8722758823164132,
+          "auc_between": 0.9098367960591578,
+          "rank_pooled": 17,
+          "rank_within": 22,
+          "rank_within_unweighted": 23
+        },
+        {
+          "method": "SETH-0",
+          "pooled": 0.9080872731820502,
+          "auc_within": 0.8867786845988369,
+          "auc_within_unweighted": 0.909893267752447,
+          "auc_between": 0.908196312251037,
+          "rank_pooled": 18,
+          "rank_within": 23,
+          "rank_within_unweighted": 14
+        },
+        {
+          "method": "Metapredict-v3",
+          "pooled": 0.9045368286599461,
+          "auc_within": 0.9131398662127646,
+          "auc_within_unweighted": 0.8808599722677299,
+          "auc_between": 0.9044928056970194,
+          "rank_pooled": 19,
+          "rank_within": 13,
+          "rank_within_unweighted": 20
+        },
+        {
+          "method": "AIUPred-2-disorder",
+          "pooled": 0.8998232360751034,
+          "auc_within": 0.8987951850030148,
+          "auc_within_unweighted": 0.8577116750553523,
+          "auc_between": 0.8998284967582,
+          "rank_pooled": 20,
+          "rank_within": 17,
+          "rank_within_unweighted": 28
+        },
+        {
+          "method": "rawMSA",
+          "pooled": 0.8972817526624384,
+          "auc_within": 0.8763604065225233,
+          "auc_within_unweighted": 0.8544073582080693,
+          "auc_between": 0.8973888101569383,
+          "rank_pooled": 21,
+          "rank_within": 27,
+          "rank_within_unweighted": 29
+        },
+        {
+          "method": "Metapredict-v2",
+          "pooled": 0.8961513564871663,
+          "auc_within": 0.890778156244863,
+          "auc_within_unweighted": 0.877836919657803,
+          "auc_between": 0.8961788519146373,
+          "rank_pooled": 22,
+          "rank_within": 21,
+          "rank_within_unweighted": 21
+        },
+        {
+          "method": "SETH-1",
+          "pooled": 0.8911673605476227,
+          "auc_within": 0.8659573880582313,
+          "auc_within_unweighted": 0.8997209226079768,
+          "auc_between": 0.8912963635512093,
+          "rank_pooled": 23,
+          "rank_within": 28,
+          "rank_within_unweighted": 17
+        },
+        {
+          "method": "DARUMA-beta",
+          "pooled": 0.8877261824286355,
+          "auc_within": 0.8859392444602764,
+          "auc_within_unweighted": 0.8542823273585674,
+          "auc_between": 0.8877353264435779,
+          "rank_pooled": 24,
+          "rank_within": 24,
+          "rank_within_unweighted": 30
+        },
+        {
+          "method": "SPOT-Disorder-Single",
+          "pooled": 0.8865037739978676,
+          "auc_within": 0.8830309561818223,
+          "auc_within_unweighted": 0.8596726181193041,
+          "auc_between": 0.8865215448990206,
+          "rank_pooled": 25,
+          "rank_within": 26,
+          "rank_within_unweighted": 27
+        },
+        {
+          "method": "AUCpred-no-profile",
+          "pooled": 0.8742204654943774,
+          "auc_within": 0.8658832699426982,
+          "auc_within_unweighted": 0.8607427987465618,
+          "auc_between": 0.8742631281060922,
+          "rank_pooled": 26,
+          "rank_within": 29,
+          "rank_within_unweighted": 25
+        },
+        {
+          "method": "IsUnstruct",
+          "pooled": 0.8714528469441404,
+          "auc_within": 0.8636725639280858,
+          "auc_within_unweighted": 0.8461481546835523,
+          "auc_between": 0.8714926597554493,
+          "rank_pooled": 27,
+          "rank_within": 30,
+          "rank_within_unweighted": 32
+        },
+        {
+          "method": "flDPnn3a",
+          "pooled": 0.8608263295740912,
+          "auc_within": 0.8975778070661854,
+          "auc_within_unweighted": 0.9025891211390453,
+          "auc_between": 0.8606382670530104,
+          "rank_pooled": 28,
+          "rank_within": 19,
+          "rank_within_unweighted": 15
+        },
+        {
+          "method": "Metapredict-v1",
+          "pooled": 0.8606755132137611,
+          "auc_within": 0.8484452473817251,
+          "auc_within_unweighted": 0.8363143814258693,
+          "auc_between": 0.8607380972180737,
+          "rank_pooled": 29,
+          "rank_within": 33,
+          "rank_within_unweighted": 34
+        },
+        {
+          "method": "flDPnn3b",
+          "pooled": 0.8578406698309367,
+          "auc_within": 0.8494407554040826,
+          "auc_within_unweighted": 0.8811866562775518,
+          "auc_between": 0.8578836533840282,
+          "rank_pooled": 30,
+          "rank_within": 32,
+          "rank_within_unweighted": 19
+        },
+        {
+          "method": "ESpritz-X",
+          "pooled": 0.8512929201669679,
+          "auc_within": 0.8415508093407557,
+          "auc_within_unweighted": 0.8377530160441063,
+          "auc_between": 0.8513427719293363,
+          "rank_pooled": 31,
+          "rank_within": 35,
+          "rank_within_unweighted": 33
+        },
+        {
+          "method": "ESpritz-N",
+          "pooled": 0.8470130209574313,
+          "auc_within": 0.8334662830394822,
+          "auc_within_unweighted": 0.8346967185180136,
+          "auc_between": 0.8470823415360614,
+          "rank_pooled": 32,
+          "rank_within": 37,
+          "rank_within_unweighted": 35
+        },
+        {
+          "method": "flDPnn2",
+          "pooled": 0.8434400238799771,
+          "auc_within": 0.8834403013297016,
+          "auc_within_unweighted": 0.8649703416669341,
+          "auc_between": 0.8432353367888868,
+          "rank_pooled": 33,
+          "rank_within": 25,
+          "rank_within_unweighted": 24
+        },
+        {
+          "method": "flDPlr",
+          "pooled": 0.8427774610763142,
+          "auc_within": 0.8552108264767349,
+          "auc_within_unweighted": 0.8523621351719274,
+          "auc_between": 0.842713837782714,
+          "rank_pooled": 34,
+          "rank_within": 31,
+          "rank_within_unweighted": 31
+        },
+        {
+          "method": "MobiDB-lite",
+          "pooled": 0.834494429033792,
+          "auc_within": 0.8232218353583135,
+          "auc_within_unweighted": 0.8034659892360487,
+          "auc_between": 0.8345521124938974,
+          "rank_pooled": 35,
+          "rank_within": 41,
+          "rank_within_unweighted": 36
+        },
+        {
+          "method": "pyHCA",
+          "pooled": 0.8302497295021043,
+          "auc_within": 0.8306627935779801,
+          "auc_within_unweighted": 0.7864472687563961,
+          "auc_between": 0.8302476157946623,
+          "rank_pooled": 36,
+          "rank_within": 39,
+          "rank_within_unweighted": 38
+        },
+        {
+          "method": "DeepDISObind-all",
+          "pooled": 0.8289133674887521,
+          "auc_within": 0.8384222659215885,
+          "auc_within_unweighted": 0.7403741079238251,
+          "auc_between": 0.8288647091072662,
+          "rank_pooled": 37,
+          "rank_within": 36,
+          "rank_within_unweighted": 42
+        },
+        {
+          "method": "AIUPred-2-binding",
+          "pooled": 0.8270032290231323,
+          "auc_within": 0.809215207034988,
+          "auc_within_unweighted": 0.7119364337470971,
+          "auc_between": 0.8270942528536939,
+          "rank_pooled": 38,
+          "rank_within": 43,
+          "rank_within_unweighted": 47
+        },
+        {
+          "method": "ESpritz-D",
+          "pooled": 0.8228147102884337,
+          "auc_within": 0.8456864871533444,
+          "auc_within_unweighted": 0.724464566536519,
+          "auc_between": 0.822697672163375,
+          "rank_pooled": 39,
+          "rank_within": 34,
+          "rank_within_unweighted": 44
+        },
+        {
+          "method": "DeepDISObind-protein",
+          "pooled": 0.8191363106583399,
+          "auc_within": 0.8316230187937058,
+          "auc_within_unweighted": 0.7216620990932474,
+          "auc_between": 0.8190724144024019,
+          "rank_pooled": 40,
+          "rank_within": 38,
+          "rank_within_unweighted": 45
+        },
+        {
+          "method": "flDPlr2",
+          "pooled": 0.8126914195714146,
+          "auc_within": 0.8941137943986082,
+          "auc_within_unweighted": 0.8599044650140224,
+          "auc_between": 0.8122747697350732,
+          "rank_pooled": 41,
+          "rank_within": 20,
+          "rank_within_unweighted": 26
+        },
+        {
+          "method": "DisoRDPbind-prot",
+          "pooled": 0.8055716247890302,
+          "auc_within": 0.8126507996844086,
+          "auc_within_unweighted": 0.702647696782572,
+          "auc_between": 0.8055353996473802,
+          "rank_pooled": 42,
+          "rank_within": 42,
+          "rank_within_unweighted": 48
+        },
+        {
+          "method": "DisoMine",
+          "pooled": 0.8017984539497808,
+          "auc_within": 0.8253443747256903,
+          "auc_within_unweighted": 0.788536126241444,
+          "auc_between": 0.801677966134747,
+          "rank_pooled": 43,
+          "rank_within": 40,
+          "rank_within_unweighted": 37
+        },
+        {
+          "method": "DisEMBL-dis465",
+          "pooled": 0.7855704393761457,
+          "auc_within": 0.7883793775305523,
+          "auc_within_unweighted": 0.7777308371270594,
+          "auc_between": 0.7855560656413484,
+          "rank_pooled": 44,
+          "rank_within": 44,
+          "rank_within_unweighted": 39
+        },
+        {
+          "method": "DeepDISObind-nucleic",
+          "pooled": 0.7755702809418342,
+          "auc_within": 0.7143386096604163,
+          "auc_within_unweighted": 0.6812774882790276,
+          "auc_between": 0.7758836120854229,
+          "rank_pooled": 45,
+          "rank_within": 48,
+          "rank_within_unweighted": 49
+        },
+        {
+          "method": "LINKER-Pred2",
+          "pooled": 0.7520411131316528,
+          "auc_within": 0.7396849867055676,
+          "auc_within_unweighted": 0.7463413451633647,
+          "auc_between": 0.7521043411824702,
+          "rank_pooled": 46,
+          "rank_within": 45,
+          "rank_within_unweighted": 41
+        },
+        {
+          "method": "LINKER-Pred",
+          "pooled": 0.7452210935443643,
+          "auc_within": 0.7315139892695054,
+          "auc_within_unweighted": 0.737827316885109,
+          "auc_between": 0.7452912347403801,
+          "rank_pooled": 47,
+          "rank_within": 46,
+          "rank_within_unweighted": 43
+        },
+        {
+          "method": "LINKER-Pred-Lite",
+          "pooled": 0.7446581095663661,
+          "auc_within": 0.7300333224712885,
+          "auc_within_unweighted": 0.7504876469699676,
+          "auc_between": 0.7447329466754854,
+          "rank_pooled": 48,
+          "rank_within": 47,
+          "rank_within_unweighted": 40
+        },
+        {
+          "method": "DisEMBL-disHL",
+          "pooled": 0.6849531866316778,
+          "auc_within": 0.6778743538079111,
+          "auc_within_unweighted": 0.7184684133982085,
+          "auc_between": 0.6849894100228988,
+          "rank_pooled": 49,
+          "rank_within": 49,
+          "rank_within_unweighted": 46
+        },
+        {
+          "method": "DisoRDPbind-dna",
+          "pooled": 0.5514711200466791,
+          "auc_within": 0.5534435211885769,
+          "auc_within_unweighted": 0.5520964199884189,
+          "auc_between": 0.5514610269903819,
+          "rank_pooled": 50,
+          "rank_within": 51,
+          "rank_within_unweighted": 51
+        },
+        {
+          "method": "ProBiPred-nucleic",
+          "pooled": 0.5216895240633777,
+          "auc_within": 0.5546471735484556,
+          "auc_within_unweighted": 0.520508832467333,
+          "auc_between": 0.5215208750981111,
+          "rank_pooled": 51,
+          "rank_within": 50,
+          "rank_within_unweighted": 53
+        },
+        {
+          "method": "LIPNet",
+          "pooled": 0.5097517128486161,
+          "auc_within": 0.5044164869692602,
+          "auc_within_unweighted": 0.5630998568111624,
+          "auc_between": 0.5097790139558878,
+          "rank_pooled": 52,
+          "rank_within": 52,
+          "rank_within_unweighted": 50
+        },
+        {
+          "method": "DFLpred",
+          "pooled": 0.41288701442376535,
+          "auc_within": 0.43699217383750016,
+          "auc_within_unweighted": 0.5296519833739909,
+          "auc_between": 0.412763664905331,
+          "rank_pooled": 53,
+          "rank_within": 53,
+          "rank_within_unweighted": 52
+        },
+        {
+          "method": "DisoRDPbind-rna",
+          "pooled": 0.3600606928042735,
+          "auc_within": 0.32256688312170645,
+          "auc_within_unweighted": 0.40775454245996773,
+          "auc_between": 0.36025255394442335,
+          "rank_pooled": 54,
+          "rank_within": 54,
+          "rank_within_unweighted": 54
+        },
+        {
+          "method": "bindEmbed21IDR-idrNuc",
+          "pooled": 0.3293089238377508,
+          "auc_within": 0.30077648010970126,
+          "auc_within_unweighted": 0.3346659105594943,
+          "auc_between": 0.32945492839773743,
+          "rank_pooled": 55,
+          "rank_within": 55,
+          "rank_within_unweighted": 55
+        },
+        {
+          "method": "bindEmbed21IDR-rawNuc",
+          "pooled": 0.3269047082348218,
+          "auc_within": 0.29832654536270886,
+          "auc_within_unweighted": 0.33048396688563003,
+          "auc_between": 0.3270509467461508,
+          "rank_pooled": 56,
+          "rank_within": 56,
+          "rank_within_unweighted": 56
+        },
+        {
+          "method": "ProBiPred-protein",
+          "pooled": 0.239426331472475,
+          "auc_within": 0.22212044662058533,
+          "auc_within_unweighted": 0.3196423689669382,
+          "auc_between": 0.2395148881389513,
+          "rank_pooled": 57,
+          "rank_within": 57,
+          "rank_within_unweighted": 57
+        },
+        {
+          "method": "bindEmbed21IDR-idrGeneral",
+          "pooled": 0.22806433427453607,
+          "auc_within": 0.21330878769568232,
+          "auc_within_unweighted": 0.26670113678027446,
+          "auc_between": 0.22813984049847333,
+          "rank_pooled": 58,
+          "rank_within": 58,
+          "rank_within_unweighted": 58
+        },
+        {
+          "method": "bindEmbed21IDR-rawGeneral",
+          "pooled": 0.21607783114489693,
+          "auc_within": 0.19950618603679293,
+          "auc_within_unweighted": 0.24779041510034408,
+          "auc_between": 0.21616263060250118,
+          "rank_pooled": 59,
+          "rank_within": 59,
+          "rank_within_unweighted": 59
+        }
+      ]
+    },
+    "disorder_nox": {
+      "n_targets_two_class": 178,
+      "n_full_coverage_methods": 59,
+      "w_within": 0.006747391400712042,
+      "spearman_pooled_vs_within": 0.8503214494447692,
+      "spearman_ci": [
+        0.7464874342489771,
+        0.9372282291057861
+      ],
+      "spearman_within_weighted_vs_unweighted": 0.817124488603156,
+      "hydropathy_baseline": {
+        "pooled": 0.6175372251804819,
+        "auc_within": 0.5,
+        "auc_within_unweighted": 0.5,
+        "auc_between": 0.6183356823459403,
+        "w_within": 0.006747391400712042,
+        "w_between": 0.993252608599288,
+        "within_pairs": 10067612,
+        "between_pairs": 1482007088,
+        "n_targets_with_both_classes": 178
+      },
+      "methods": [
+        {
+          "method": "DisorderNet-windowed",
+          "pooled": 0.8863041635918094,
+          "auc_within": 0.8346063098180582,
+          "auc_within_unweighted": 0.8579018522869126,
+          "auc_between": 0.8866553588979865,
+          "rank_pooled": 1,
+          "rank_within": 5,
+          "rank_within_unweighted": 2
+        },
+        {
+          "method": "DisorderNet-pbias",
+          "pooled": 0.8550091550376131,
+          "auc_within": 0.8180277507714838,
+          "auc_within_unweighted": 0.8581270190436288,
+          "auc_between": 0.8552603781473952,
+          "rank_pooled": 2,
+          "rank_within": 16,
+          "rank_within_unweighted": 1
+        },
+        {
+          "method": "flDPnn3a",
+          "pooled": 0.8348125067062662,
+          "auc_within": 0.8060591230571857,
+          "auc_within_unweighted": 0.8424626917226251,
+          "auc_between": 0.8350078349962655,
+          "rank_pooled": 3,
+          "rank_within": 27,
+          "rank_within_unweighted": 3
+        },
+        {
+          "method": "AlphaFold3-rsa",
+          "pooled": 0.8344279984775561,
+          "auc_within": 0.83794285079719,
+          "auc_within_unweighted": 0.8085470303482795,
+          "auc_between": 0.8344041212844725,
+          "rank_pooled": 4,
+          "rank_within": 4,
+          "rank_within_unweighted": 6
+        },
+        {
+          "method": "rawMSA",
+          "pooled": 0.8331810662696714,
+          "auc_within": 0.8173976112706767,
+          "auc_within_unweighted": 0.8034296786217173,
+          "auc_between": 0.8332882868776131,
+          "rank_pooled": 5,
+          "rank_within": 17,
+          "rank_within_unweighted": 9
+        },
+        {
+          "method": "AlphaFold-rsa",
+          "pooled": 0.8306741331382403,
+          "auc_within": 0.8306381394118089,
+          "auc_within_unweighted": 0.8005723437446015,
+          "auc_between": 0.8306743776518294,
+          "rank_pooled": 6,
+          "rank_within": 7,
+          "rank_within_unweighted": 14
+        },
+        {
+          "method": "PUNCH2",
+          "pooled": 0.8291760992261312,
+          "auc_within": 0.8300106817783601,
+          "auc_within_unweighted": 0.8056952878044409,
+          "auc_between": 0.8291704297165952,
+          "rank_pooled": 7,
+          "rank_within": 9,
+          "rank_within_unweighted": 7
+        },
+        {
+          "method": "PUNCH2-Light",
+          "pooled": 0.8260133919568504,
+          "auc_within": 0.8318197999684533,
+          "auc_within_unweighted": 0.8056556725984267,
+          "auc_between": 0.8259739477035484,
+          "rank_pooled": 8,
+          "rank_within": 6,
+          "rank_within_unweighted": 8
+        },
+        {
+          "method": "SETH-0",
+          "pooled": 0.8254439211388009,
+          "auc_within": 0.8276389674135237,
+          "auc_within_unweighted": 0.8022998455299485,
+          "auc_between": 0.8254290096890549,
+          "rank_pooled": 9,
+          "rank_within": 10,
+          "rank_within_unweighted": 11
+        },
+        {
+          "method": "AIUPred-2-disorder",
+          "pooled": 0.8173518215944551,
+          "auc_within": 0.843886663490806,
+          "auc_within_unweighted": 0.7681689478074368,
+          "auc_between": 0.81717156436434,
+          "rank_pooled": 10,
+          "rank_within": 2,
+          "rank_within_unweighted": 31
+        },
+        {
+          "method": "AUCpred-profile",
+          "pooled": 0.8161060676117623,
+          "auc_within": 0.8124202641102974,
+          "auc_within_unweighted": 0.7852368840022363,
+          "auc_between": 0.8161311061151956,
+          "rank_pooled": 11,
+          "rank_within": 19,
+          "rank_within_unweighted": 22
+        },
+        {
+          "method": "SETH-1",
+          "pooled": 0.8132568369398664,
+          "auc_within": 0.8078398333189638,
+          "auc_within_unweighted": 0.797235419201328,
+          "auc_between": 0.8132936358803704,
+          "rank_pooled": 12,
+          "rank_within": 25,
+          "rank_within_unweighted": 18
+        },
+        {
+          "method": "flDPnn2",
+          "pooled": 0.8108443256895919,
+          "auc_within": 0.821533398386827,
+          "auc_within_unweighted": 0.8027436866940498,
+          "auc_between": 0.8107717123819856,
+          "rank_pooled": 13,
+          "rank_within": 13,
+          "rank_within_unweighted": 10
+        },
+        {
+          "method": "AlphaFold-binding",
+          "pooled": 0.8096646779816051,
+          "auc_within": 0.7961628338477883,
+          "auc_within_unweighted": 0.7755515188736449,
+          "auc_between": 0.8097563990868039,
+          "rank_pooled": 14,
+          "rank_within": 30,
+          "rank_within_unweighted": 26
+        },
+        {
+          "method": "flDPlr",
+          "pooled": 0.8049293413392774,
+          "auc_within": 0.7719010724688238,
+          "auc_within_unweighted": 0.7891448691037332,
+          "auc_between": 0.8051537098991256,
+          "rank_pooled": 15,
+          "rank_within": 41,
+          "rank_within_unweighted": 21
+        },
+        {
+          "method": "Metapredict-v3",
+          "pooled": 0.8037593141281734,
+          "auc_within": 0.8564138149145994,
+          "auc_within_unweighted": 0.7981094579114937,
+          "auc_between": 0.8034016201007536,
+          "rank_pooled": 16,
+          "rank_within": 1,
+          "rank_within_unweighted": 16
+        },
+        {
+          "method": "AlphaFold3-pLDDT",
+          "pooled": 0.8036628849748608,
+          "auc_within": 0.8423442421102442,
+          "auc_within_unweighted": 0.801477270658242,
+          "auc_between": 0.8034001136977017,
+          "rank_pooled": 17,
+          "rank_within": 3,
+          "rank_within_unweighted": 13
+        },
+        {
+          "method": "LMDisorder",
+          "pooled": 0.8034578443022994,
+          "auc_within": 0.8154324977959023,
+          "auc_within_unweighted": 0.7954376424731702,
+          "auc_between": 0.8033764977512713,
+          "rank_pooled": 18,
+          "rank_within": 18,
+          "rank_within_unweighted": 19
+        },
+        {
+          "method": "DeepIDP-2L",
+          "pooled": 0.8034075120367633,
+          "auc_within": 0.8104588754512987,
+          "auc_within_unweighted": 0.7829624157617308,
+          "auc_between": 0.8033596105175982,
+          "rank_pooled": 19,
+          "rank_within": 22,
+          "rank_within_unweighted": 24
+        },
+        {
+          "method": "flDPnn3b",
+          "pooled": 0.803380504005597,
+          "auc_within": 0.7720343215451688,
+          "auc_within_unweighted": 0.8239475742338241,
+          "auc_between": 0.8035934457689988,
+          "rank_pooled": 20,
+          "rank_within": 40,
+          "rank_within_unweighted": 4
+        },
+        {
+          "method": "PredIDR2-Prof-Rnd",
+          "pooled": 0.8019394940481197,
+          "auc_within": 0.7945130384444693,
+          "auc_within_unweighted": 0.7977808627792243,
+          "auc_between": 0.8019899436540346,
+          "rank_pooled": 21,
+          "rank_within": 31,
+          "rank_within_unweighted": 17
+        },
+        {
+          "method": "AlphaFold3-binding",
+          "pooled": 0.8018004674967011,
+          "auc_within": 0.7801164268150182,
+          "auc_within_unweighted": 0.7678360974759528,
+          "auc_between": 0.8019477721283341,
+          "rank_pooled": 22,
+          "rank_within": 36,
+          "rank_within_unweighted": 32
+        },
+        {
+          "method": "DARUMA-beta",
+          "pooled": 0.7947376223857961,
+          "auc_within": 0.8253793948356373,
+          "auc_within_unweighted": 0.7726010495519893,
+          "auc_between": 0.7945294658401797,
+          "rank_pooled": 23,
+          "rank_within": 12,
+          "rank_within_unweighted": 27
+        },
+        {
+          "method": "SPOT-Disorder-Single",
+          "pooled": 0.7903807959480849,
+          "auc_within": 0.8183494755260731,
+          "auc_within_unweighted": 0.7709337864654068,
+          "auc_between": 0.7901907983317283,
+          "rank_pooled": 24,
+          "rank_within": 15,
+          "rank_within_unweighted": 29
+        },
+        {
+          "method": "PredIDR2-Seq-Art",
+          "pooled": 0.7872735771875229,
+          "auc_within": 0.81033675115807,
+          "auc_within_unweighted": 0.791569921790122,
+          "auc_between": 0.7871169037890594,
+          "rank_pooled": 25,
+          "rank_within": 23,
+          "rank_within_unweighted": 20
+        },
+        {
+          "method": "AlphaFold-pLDDT",
+          "pooled": 0.7870798281748226,
+          "auc_within": 0.830065709723418,
+          "auc_within_unweighted": 0.8093863735639131,
+          "auc_between": 0.7867878152820278,
+          "rank_pooled": 26,
+          "rank_within": 8,
+          "rank_within_unweighted": 5
+        },
+        {
+          "method": "Metapredict-v2",
+          "pooled": 0.7848038258406231,
+          "auc_within": 0.8255409525118766,
+          "auc_within_unweighted": 0.7838131788142143,
+          "auc_between": 0.7845270892523558,
+          "rank_pooled": 27,
+          "rank_within": 11,
+          "rank_within_unweighted": 23
+        },
+        {
+          "method": "PredIDR2-Prof-Art",
+          "pooled": 0.7828770958987509,
+          "auc_within": 0.7898047223115074,
+          "auc_within_unweighted": 0.7983460056953523,
+          "auc_between": 0.7828300349532471,
+          "rank_pooled": 28,
+          "rank_within": 33,
+          "rank_within_unweighted": 15
+        },
+        {
+          "method": "ESpritz-D",
+          "pooled": 0.7816860761059751,
+          "auc_within": 0.8104853464754105,
+          "auc_within_unweighted": 0.7269496776933759,
+          "auc_between": 0.7814904360970235,
+          "rank_pooled": 29,
+          "rank_within": 21,
+          "rank_within_unweighted": 39
+        },
+        {
+          "method": "IsUnstruct",
+          "pooled": 0.781194557149183,
+          "auc_within": 0.7936464973024387,
+          "auc_within_unweighted": 0.7659251629481685,
+          "auc_between": 0.7811099682810694,
+          "rank_pooled": 30,
+          "rank_within": 32,
+          "rank_within_unweighted": 33
+        },
+        {
+          "method": "PredIDR2-Seq-Rnd",
+          "pooled": 0.7803637478740173,
+          "auc_within": 0.8019465291272647,
+          "auc_within_unweighted": 0.7813638096101422,
+          "auc_between": 0.7802171311207656,
+          "rank_pooled": 31,
+          "rank_within": 28,
+          "rank_within_unweighted": 25
+        },
+        {
+          "method": "flDPlr2",
+          "pooled": 0.7799178811221718,
+          "auc_within": 0.8199126565465574,
+          "auc_within_unweighted": 0.8021874051858195,
+          "auc_between": 0.7796461874951572,
+          "rank_pooled": 32,
+          "rank_within": 14,
+          "rank_within_unweighted": 12
+        },
+        {
+          "method": "Metapredict-v1",
+          "pooled": 0.7799070753629158,
+          "auc_within": 0.7986866696888995,
+          "auc_within_unweighted": 0.7690356400089375,
+          "auc_between": 0.7797795012974998,
+          "rank_pooled": 33,
+          "rank_within": 29,
+          "rank_within_unweighted": 30
+        },
+        {
+          "method": "pyHCA",
+          "pooled": 0.7784680160450411,
+          "auc_within": 0.8080236902256464,
+          "auc_within_unweighted": 0.7553342012065186,
+          "auc_between": 0.7782672376125639,
+          "rank_pooled": 34,
+          "rank_within": 24,
+          "rank_within_unweighted": 34
+        },
+        {
+          "method": "AUCpred-no-profile",
+          "pooled": 0.7780870445025306,
+          "auc_within": 0.7874450266855735,
+          "auc_within_unweighted": 0.7714397260184773,
+          "auc_between": 0.7780234735962342,
+          "rank_pooled": 35,
+          "rank_within": 34,
+          "rank_within_unweighted": 28
+        },
+        {
+          "method": "DeepDISObind-all",
+          "pooled": 0.7712633057178706,
+          "auc_within": 0.8111565086139593,
+          "auc_within_unweighted": 0.7250352778676343,
+          "auc_between": 0.7709923020961962,
+          "rank_pooled": 36,
+          "rank_within": 20,
+          "rank_within_unweighted": 40
+        },
+        {
+          "method": "ESpritz-X",
+          "pooled": 0.770082261967179,
+          "auc_within": 0.7762206668274463,
+          "auc_within_unweighted": 0.7533797093531153,
+          "auc_between": 0.7700405623835991,
+          "rank_pooled": 37,
+          "rank_within": 39,
+          "rank_within_unweighted": 35
+        },
+        {
+          "method": "MobiDB-lite",
+          "pooled": 0.7699106646604221,
+          "auc_within": 0.7799494557398517,
+          "auc_within_unweighted": 0.7530229621943856,
+          "auc_between": 0.7698424688640895,
+          "rank_pooled": 38,
+          "rank_within": 37,
+          "rank_within_unweighted": 36
+        },
+        {
+          "method": "DeepDISObind-protein",
+          "pooled": 0.7669180782302656,
+          "auc_within": 0.8068602564341971,
+          "auc_within_unweighted": 0.7132266392822383,
+          "auc_between": 0.7666467419081602,
+          "rank_pooled": 39,
+          "rank_within": 26,
+          "rank_within_unweighted": 41
+        },
+        {
+          "method": "ESpritz-N",
+          "pooled": 0.7667197145022296,
+          "auc_within": 0.77849732389369,
+          "auc_within_unweighted": 0.7480350778965918,
+          "auc_between": 0.7666397065167073,
+          "rank_pooled": 40,
+          "rank_within": 38,
+          "rank_within_unweighted": 37
+        },
+        {
+          "method": "DisoRDPbind-prot",
+          "pooled": 0.7541211495644287,
+          "auc_within": 0.7832267969802571,
+          "auc_within_unweighted": 0.7123545152515832,
+          "auc_between": 0.7539234282663566,
+          "rank_pooled": 41,
+          "rank_within": 35,
+          "rank_within_unweighted": 42
+        },
+        {
+          "method": "DisoMine",
+          "pooled": 0.7541201630186478,
+          "auc_within": 0.770817349734972,
+          "auc_within_unweighted": 0.729600757993255,
+          "auc_between": 0.754006735222848,
+          "rank_pooled": 42,
+          "rank_within": 43,
+          "rank_within_unweighted": 38
+        },
+        {
+          "method": "AIUPred-2-binding",
+          "pooled": 0.7495421439020445,
+          "auc_within": 0.7710351769615277,
+          "auc_within_unweighted": 0.6750922665786071,
+          "auc_between": 0.7493961368287329,
+          "rank_pooled": 43,
+          "rank_within": 42,
+          "rank_within_unweighted": 48
+        },
+        {
+          "method": "LINKER-Pred2",
+          "pooled": 0.7228295456655086,
+          "auc_within": 0.6980932022410081,
+          "auc_within_unweighted": 0.6857205598992091,
+          "auc_between": 0.7229975852855031,
+          "rank_pooled": 44,
+          "rank_within": 45,
+          "rank_within_unweighted": 45
+        },
+        {
+          "method": "LINKER-Pred",
+          "pooled": 0.7171064786501641,
+          "auc_within": 0.6944318076620355,
+          "auc_within_unweighted": 0.683796562581493,
+          "auc_between": 0.7172605128593015,
+          "rank_pooled": 45,
+          "rank_within": 47,
+          "rank_within_unweighted": 47
+        },
+        {
+          "method": "LINKER-Pred-Lite",
+          "pooled": 0.7073961575114168,
+          "auc_within": 0.6964282095893246,
+          "auc_within_unweighted": 0.703936805062048,
+          "auc_between": 0.7074706652820003,
+          "rank_pooled": 46,
+          "rank_within": 46,
+          "rank_within_unweighted": 44
+        },
+        {
+          "method": "DisEMBL-dis465",
+          "pooled": 0.7043095556810929,
+          "auc_within": 0.7170119388788523,
+          "auc_within_unweighted": 0.712270113528769,
+          "auc_between": 0.7042232654962848,
+          "rank_pooled": 47,
+          "rank_within": 44,
+          "rank_within_unweighted": 43
+        },
+        {
+          "method": "DeepDISObind-nucleic",
+          "pooled": 0.6996017880338029,
+          "auc_within": 0.6876701247525232,
+          "auc_within_unweighted": 0.6565004699938457,
+          "auc_between": 0.6996828425425183,
+          "rank_pooled": 48,
+          "rank_within": 48,
+          "rank_within_unweighted": 49
+        },
+        {
+          "method": "DisEMBL-disHL",
+          "pooled": 0.6431966938384519,
+          "auc_within": 0.6327082827586125,
+          "auc_within_unweighted": 0.6840079143896185,
+          "auc_between": 0.6432679440059466,
+          "rank_pooled": 49,
+          "rank_within": 49,
+          "rank_within_unweighted": 46
+        },
+        {
+          "method": "DisoRDPbind-dna",
+          "pooled": 0.5304717387809069,
+          "auc_within": 0.5398830924354256,
+          "auc_within_unweighted": 0.5236837629505893,
+          "auc_between": 0.5304078053100378,
+          "rank_pooled": 50,
+          "rank_within": 51,
+          "rank_within_unweighted": 52
+        },
+        {
+          "method": "ProBiPred-nucleic",
+          "pooled": 0.5225057173746059,
+          "auc_within": 0.5399677202498467,
+          "auc_within_unweighted": 0.5322322626369957,
+          "auc_between": 0.5223870940082844,
+          "rank_pooled": 51,
+          "rank_within": 50,
+          "rank_within_unweighted": 50
+        },
+        {
+          "method": "LIPNet",
+          "pooled": 0.48966330807700176,
+          "auc_within": 0.48627087535753266,
+          "auc_within_unweighted": 0.5301770110823346,
+          "auc_between": 0.4896863536458335,
+          "rank_pooled": 52,
+          "rank_within": 52,
+          "rank_within_unweighted": 51
+        },
+        {
+          "method": "DFLpred",
+          "pooled": 0.39440719187852996,
+          "auc_within": 0.39369286380921314,
+          "auc_within_unweighted": 0.48049187066330257,
+          "auc_between": 0.3944120444719493,
+          "rank_pooled": 53,
+          "rank_within": 53,
+          "rank_within_unweighted": 53
+        },
+        {
+          "method": "DisoRDPbind-rna",
+          "pooled": 0.3885958705686786,
+          "auc_within": 0.3246956676518722,
+          "auc_within_unweighted": 0.4040859016516728,
+          "auc_between": 0.3890299592143381,
+          "rank_pooled": 54,
+          "rank_within": 56,
+          "rank_within_unweighted": 54
+        },
+        {
+          "method": "bindEmbed21IDR-idrNuc",
+          "pooled": 0.3547979849802426,
+          "auc_within": 0.33075038052717964,
+          "auc_within_unweighted": 0.3602503294605972,
+          "auc_between": 0.35496134583939315,
+          "rank_pooled": 55,
+          "rank_within": 54,
+          "rank_within_unweighted": 55
+        },
+        {
+          "method": "bindEmbed21IDR-rawNuc",
+          "pooled": 0.35301616065201025,
+          "auc_within": 0.3285862128973584,
+          "auc_within_unweighted": 0.3554578688499386,
+          "auc_between": 0.3531821188563708,
+          "rank_pooled": 56,
+          "rank_within": 55,
+          "rank_within_unweighted": 56
+        },
+        {
+          "method": "ProBiPred-protein",
+          "pooled": 0.2985545978361539,
+          "auc_within": 0.2542875609429525,
+          "auc_within_unweighted": 0.34223062102229174,
+          "auc_between": 0.29885531390926784,
+          "rank_pooled": 57,
+          "rank_within": 58,
+          "rank_within_unweighted": 57
+        },
+        {
+          "method": "bindEmbed21IDR-idrGeneral",
+          "pooled": 0.2888722290512667,
+          "auc_within": 0.26029097068897766,
+          "auc_within_unweighted": 0.32464373562111914,
+          "auc_between": 0.28906638805495377,
+          "rank_pooled": 58,
+          "rank_within": 57,
+          "rank_within_unweighted": 58
+        },
+        {
+          "method": "bindEmbed21IDR-rawGeneral",
+          "pooled": 0.28008818961946075,
+          "auc_within": 0.250410226377417,
+          "auc_within_unweighted": 0.308336542157377,
+          "auc_between": 0.2802897987894104,
+          "rank_pooled": 59,
+          "rank_within": 59,
+          "rank_within_unweighted": 59
+        }
+      ]
+    },
+    "binding": {
+      "n_targets_two_class": 49,
+      "n_full_coverage_methods": 71,
+      "w_within": 0.02551841566002786,
+      "spearman_pooled_vs_within": 0.9164654594232059,
+      "spearman_ci": [
+        0.4231237424547284,
+        0.9511711938296445
+      ],
+      "spearman_within_weighted_vs_unweighted": 0.8478202548625083,
+      "hydropathy_baseline": {
+        "pooled": 0.576622470767351,
+        "auc_within": 0.5,
+        "auc_within_unweighted": 0.5,
+        "auc_between": 0.5786289571795739,
+        "w_within": 0.02551841566002786,
+        "w_between": 0.9744815843399721,
+        "within_pairs": 1151149,
+        "between_pairs": 43959371,
+        "n_targets_with_both_classes": 49
+      },
+      "methods": [
+        {
+          "method": "DisorderNet-windowed",
+          "pooled": 0.8368764314842746,
+          "auc_within": 0.853409072153127,
+          "auc_within_unweighted": 0.7416186783134981,
+          "auc_between": 0.8364434968826101,
+          "rank_pooled": 1,
+          "rank_within": 1,
+          "rank_within_unweighted": 2
+        },
+        {
+          "method": "DisorderNet-pbias",
+          "pooled": 0.77055051681958,
+          "auc_within": 0.7335210298579941,
+          "auc_within_unweighted": 0.7322961851347654,
+          "auc_between": 0.7715201953185363,
+          "rank_pooled": 2,
+          "rank_within": 17,
+          "rank_within_unweighted": 3
+        },
+        {
+          "method": "UdonPred-combined",
+          "pooled": 0.7702433933370753,
+          "auc_within": 0.7253800333406014,
+          "auc_within_unweighted": 0.6805349560122514,
+          "auc_between": 0.7714182147874682,
+          "rank_pooled": 3,
+          "rank_within": 23,
+          "rank_within_unweighted": 9
+        },
+        {
+          "method": "DisorderUnetLM",
+          "pooled": 0.7605886054960129,
+          "auc_within": 0.7448844589188715,
+          "auc_within_unweighted": 0.7083773971088985,
+          "auc_between": 0.7609998446065118,
+          "rank_pooled": 4,
+          "rank_within": 12,
+          "rank_within_unweighted": 6
+        },
+        {
+          "method": "flDPnn3b",
+          "pooled": 0.7605471960864117,
+          "auc_within": 0.7612446347084522,
+          "auc_within_unweighted": 0.6710270823412012,
+          "auc_between": 0.7605289324999669,
+          "rank_pooled": 5,
+          "rank_within": 9,
+          "rank_within_unweighted": 11
+        },
+        {
+          "method": "AlphaFold3-binding",
+          "pooled": 0.7601303421020197,
+          "auc_within": 0.7997787428039289,
+          "auc_within_unweighted": 0.7309244674553765,
+          "auc_between": 0.7590920830054643,
+          "rank_pooled": 6,
+          "rank_within": 2,
+          "rank_within_unweighted": 4
+        },
+        {
+          "method": "IPA-All-bind",
+          "pooled": 0.7594633579927698,
+          "auc_within": 0.7710418025815946,
+          "auc_within_unweighted": 0.6676028372052613,
+          "auc_between": 0.7591601572279094,
+          "rank_pooled": 7,
+          "rank_within": 6,
+          "rank_within_unweighted": 13
+        },
+        {
+          "method": "AlphaFold-binding",
+          "pooled": 0.7591201564513111,
+          "auc_within": 0.7903598925942689,
+          "auc_within_unweighted": 0.7481326451184637,
+          "auc_between": 0.7583020921750678,
+          "rank_pooled": 8,
+          "rank_within": 3,
+          "rank_within_unweighted": 1
+        },
+        {
+          "method": "flDPnn2",
+          "pooled": 0.7567585565406916,
+          "auc_within": 0.7180295513439181,
+          "auc_within_unweighted": 0.6617505620709674,
+          "auc_between": 0.7577727397418856,
+          "rank_pooled": 9,
+          "rank_within": 28,
+          "rank_within_unweighted": 14
+        },
+        {
+          "method": "flDPnn3a",
+          "pooled": 0.755512561149816,
+          "auc_within": 0.7440752674067388,
+          "auc_within_unweighted": 0.6875185178453099,
+          "auc_between": 0.7558120656457983,
+          "rank_pooled": 10,
+          "rank_within": 14,
+          "rank_within_unweighted": 8
+        },
+        {
+          "method": "DeepIDP-2L",
+          "pooled": 0.7552571107582001,
+          "auc_within": 0.728148571557635,
+          "auc_within_unweighted": 0.6399697227721158,
+          "auc_between": 0.7559669927943238,
+          "rank_pooled": 11,
+          "rank_within": 20,
+          "rank_within_unweighted": 22
+        },
+        {
+          "method": "ESpritz-D",
+          "pooled": 0.7524906939667289,
+          "auc_within": 0.7744258128183232,
+          "auc_within_unweighted": 0.6443566150453116,
+          "auc_between": 0.7519162865182943,
+          "rank_pooled": 12,
+          "rank_within": 5,
+          "rank_within_unweighted": 20
+        },
+        {
+          "method": "flDPlr",
+          "pooled": 0.7519988131371573,
+          "auc_within": 0.7532856302702777,
+          "auc_within_unweighted": 0.6681609157913352,
+          "auc_between": 0.7519651156974015,
+          "rank_pooled": 13,
+          "rank_within": 10,
+          "rank_within_unweighted": 12
+        },
+        {
+          "method": "IPA-Protein-bind",
+          "pooled": 0.7515972881713623,
+          "auc_within": 0.7784040119914972,
+          "auc_within_unweighted": 0.6739749333433595,
+          "auc_between": 0.7508953096712873,
+          "rank_pooled": 14,
+          "rank_within": 4,
+          "rank_within_unweighted": 10
+        },
+        {
+          "method": "flDPnn",
+          "pooled": 0.7492327842818038,
+          "auc_within": 0.7273654409637675,
+          "auc_within_unweighted": 0.645466396550951,
+          "auc_between": 0.7498054169155423,
+          "rank_pooled": 15,
+          "rank_within": 21,
+          "rank_within_unweighted": 19
+        },
+        {
+          "method": "rawMSA",
+          "pooled": 0.7423227109773951,
+          "auc_within": 0.7127370131929055,
+          "auc_within_unweighted": 0.6071965189014381,
+          "auc_between": 0.7430974615173633,
+          "rank_pooled": 16,
+          "rank_within": 31,
+          "rank_within_unweighted": 39
+        },
+        {
+          "method": "flDPlr2",
+          "pooled": 0.7405218560991982,
+          "auc_within": 0.7226366873445574,
+          "auc_within_unweighted": 0.6248604338490136,
+          "auc_between": 0.7409902088908416,
+          "rank_pooled": 17,
+          "rank_within": 26,
+          "rank_within_unweighted": 28
+        },
+        {
+          "method": "UdonPred-DisProt",
+          "pooled": 0.733570484224079,
+          "auc_within": 0.7080768866584604,
+          "auc_within_unweighted": 0.6510024005209596,
+          "auc_between": 0.7342380763364426,
+          "rank_pooled": 18,
+          "rank_within": 33,
+          "rank_within_unweighted": 17
+        },
+        {
+          "method": "AIUPred-2-binding",
+          "pooled": 0.7314443061175088,
+          "auc_within": 0.7634446105586679,
+          "auc_within_unweighted": 0.7023502922347449,
+          "auc_between": 0.7306063250996017,
+          "rank_pooled": 19,
+          "rank_within": 7,
+          "rank_within_unweighted": 7
+        },
+        {
+          "method": "DeepDISObind-all",
+          "pooled": 0.725189113315475,
+          "auc_within": 0.7618670563063513,
+          "auc_within_unweighted": 0.6475773110756695,
+          "auc_between": 0.7242286405781375,
+          "rank_pooled": 20,
+          "rank_within": 8,
+          "rank_within_unweighted": 18
+        },
+        {
+          "method": "DeepDISObind-protein",
+          "pooled": 0.7248459339417945,
+          "auc_within": 0.7448414584037341,
+          "auc_within_unweighted": 0.643616838846685,
+          "auc_between": 0.724322317987671,
+          "rank_pooled": 21,
+          "rank_within": 13,
+          "rank_within_unweighted": 21
+        },
+        {
+          "method": "DeepDISObind-nucleic",
+          "pooled": 0.7207115213923493,
+          "auc_within": 0.7455715984637957,
+          "auc_within_unweighted": 0.655356023367679,
+          "auc_between": 0.7200605190642969,
+          "rank_pooled": 22,
+          "rank_within": 11,
+          "rank_within_unweighted": 15
+        },
+        {
+          "method": "AlphaFold3-rsa",
+          "pooled": 0.7206368713993986,
+          "auc_within": 0.736315194644655,
+          "auc_within_unweighted": 0.6379355118052974,
+          "auc_between": 0.7202263085156518,
+          "rank_pooled": 23,
+          "rank_within": 16,
+          "rank_within_unweighted": 23
+        },
+        {
+          "method": "LIPNet",
+          "pooled": 0.7190869890216296,
+          "auc_within": 0.7153383271844045,
+          "auc_within_unweighted": 0.7087097090153207,
+          "auc_between": 0.7191851539459017,
+          "rank_pooled": 24,
+          "rank_within": 30,
+          "rank_within_unweighted": 5
+        },
+        {
+          "method": "AUCpred-profile",
+          "pooled": 0.7163175463284396,
+          "auc_within": 0.7285916071681424,
+          "auc_within_unweighted": 0.6357458714612886,
+          "auc_between": 0.7159961296989441,
+          "rank_pooled": 25,
+          "rank_within": 19,
+          "rank_within_unweighted": 24
+        },
+        {
+          "method": "Metapredict-v3",
+          "pooled": 0.7144666587749376,
+          "auc_within": 0.733084509477053,
+          "auc_within_unweighted": 0.6195746323510241,
+          "auc_between": 0.7139791194919509,
+          "rank_pooled": 26,
+          "rank_within": 18,
+          "rank_within_unweighted": 32
+        },
+        {
+          "method": "AIUPred-2-disorder",
+          "pooled": 0.7111107120911042,
+          "auc_within": 0.7425185618890343,
+          "auc_within_unweighted": 0.6112956233776184,
+          "auc_between": 0.7102882454801275,
+          "rank_pooled": 27,
+          "rank_within": 15,
+          "rank_within_unweighted": 37
+        },
+        {
+          "method": "PUNCH2-Light",
+          "pooled": 0.7097306127262555,
+          "auc_within": 0.699979325004843,
+          "auc_within_unweighted": 0.6152299290359736,
+          "auc_between": 0.7099859663597098,
+          "rank_pooled": 28,
+          "rank_within": 36,
+          "rank_within_unweighted": 34
+        },
+        {
+          "method": "DisoMine",
+          "pooled": 0.7090436443649951,
+          "auc_within": 0.7271760649577075,
+          "auc_within_unweighted": 0.6246752334658525,
+          "auc_between": 0.7085688168741086,
+          "rank_pooled": 29,
+          "rank_within": 22,
+          "rank_within_unweighted": 29
+        },
+        {
+          "method": "PredIDR2-Prof-Rnd",
+          "pooled": 0.7076018631574187,
+          "auc_within": 0.6829537271022257,
+          "auc_within_unweighted": 0.6200973131902485,
+          "auc_between": 0.7082473154586312,
+          "rank_pooled": 30,
+          "rank_within": 42,
+          "rank_within_unweighted": 31
+        },
+        {
+          "method": "AlphaFold-rsa",
+          "pooled": 0.7070318298259475,
+          "auc_within": 0.7120481362534302,
+          "auc_within_unweighted": 0.6282402788582033,
+          "auc_between": 0.7069004695267365,
+          "rank_pooled": 31,
+          "rank_within": 32,
+          "rank_within_unweighted": 25
+        },
+        {
+          "method": "IPA-Nucleotide-bind",
+          "pooled": 0.7039371525754968,
+          "auc_within": 0.7251433133330264,
+          "auc_within_unweighted": 0.5898832973367109,
+          "auc_between": 0.7033818341031313,
+          "rank_pooled": 32,
+          "rank_within": 24,
+          "rank_within_unweighted": 49
+        },
+        {
+          "method": "PUNCH2",
+          "pooled": 0.7028218362368689,
+          "auc_within": 0.695801325458303,
+          "auc_within_unweighted": 0.6146711170626474,
+          "auc_between": 0.7030056799493332,
+          "rank_pooled": 33,
+          "rank_within": 39,
+          "rank_within_unweighted": 35
+        },
+        {
+          "method": "LMDisorder",
+          "pooled": 0.7024287682784415,
+          "auc_within": 0.7006234640346297,
+          "auc_within_unweighted": 0.6030002425352861,
+          "auc_between": 0.702476043162674,
+          "rank_pooled": 34,
+          "rank_within": 35,
+          "rank_within_unweighted": 42
+        },
+        {
+          "method": "SETH-1",
+          "pooled": 0.7023093282897205,
+          "auc_within": 0.7026853170180403,
+          "auc_within_unweighted": 0.627768419354763,
+          "auc_between": 0.7022994824016021,
+          "rank_pooled": 35,
+          "rank_within": 34,
+          "rank_within_unweighted": 26
+        },
+        {
+          "method": "DARUMA-beta",
+          "pooled": 0.6989208614753277,
+          "auc_within": 0.6999649914997972,
+          "auc_within_unweighted": 0.5951626957771382,
+          "auc_between": 0.6988935191998084,
+          "rank_pooled": 36,
+          "rank_within": 37,
+          "rank_within_unweighted": 46
+        },
+        {
+          "method": "DisoRDPbind-prot",
+          "pooled": 0.6952380287347608,
+          "auc_within": 0.6546020541215777,
+          "auc_within_unweighted": 0.5765027303148459,
+          "auc_between": 0.6963021490912598,
+          "rank_pooled": 37,
+          "rank_within": 55,
+          "rank_within_unweighted": 58
+        },
+        {
+          "method": "Metapredict-v2",
+          "pooled": 0.6947491183874626,
+          "auc_within": 0.7210864970564193,
+          "auc_within_unweighted": 0.6037659360783167,
+          "auc_between": 0.6940594304681931,
+          "rank_pooled": 38,
+          "rank_within": 27,
+          "rank_within_unweighted": 40
+        },
+        {
+          "method": "PredIDR2-Prof-Art",
+          "pooled": 0.6930979070957285,
+          "auc_within": 0.6758508238290613,
+          "auc_within_unweighted": 0.6106970701182783,
+          "auc_between": 0.6935495505611307,
+          "rank_pooled": 39,
+          "rank_within": 43,
+          "rank_within_unweighted": 38
+        },
+        {
+          "method": "SETH-0",
+          "pooled": 0.6921599662340403,
+          "auc_within": 0.6989633835411402,
+          "auc_within_unweighted": 0.6028263137244152,
+          "auc_between": 0.6919818074739968,
+          "rank_pooled": 40,
+          "rank_within": 38,
+          "rank_within_unweighted": 43
+        },
+        {
+          "method": "AUCpred-no-profile",
+          "pooled": 0.6904312120543057,
+          "auc_within": 0.6718926046932239,
+          "auc_within_unweighted": 0.5805970952580479,
+          "auc_between": 0.6909166762190477,
+          "rank_pooled": 41,
+          "rank_within": 46,
+          "rank_within_unweighted": 55
+        },
+        {
+          "method": "SPOT-Disorder-Single",
+          "pooled": 0.6894488137135196,
+          "auc_within": 0.6841334180023612,
+          "auc_within_unweighted": 0.589602411175541,
+          "auc_between": 0.6895880061614167,
+          "rank_pooled": 42,
+          "rank_within": 41,
+          "rank_within_unweighted": 51
+        },
+        {
+          "method": "AIUPred",
+          "pooled": 0.6798467519328085,
+          "auc_within": 0.6719942422744579,
+          "auc_within_unweighted": 0.5932528638868929,
+          "auc_between": 0.6800523829151239,
+          "rank_pooled": 43,
+          "rank_within": 45,
+          "rank_within_unweighted": 47
+        },
+        {
+          "method": "pyHCA",
+          "pooled": 0.6783917808972275,
+          "auc_within": 0.6693681704106071,
+          "auc_within_unweighted": 0.5683620511306947,
+          "auc_between": 0.6786280790960362,
+          "rank_pooled": 44,
+          "rank_within": 47,
+          "rank_within_unweighted": 62
+        },
+        {
+          "method": "MobiDB-lite",
+          "pooled": 0.677577680328225,
+          "auc_within": 0.664346665809552,
+          "auc_within_unweighted": 0.595456186920364,
+          "auc_between": 0.6779241563761228,
+          "rank_pooled": 45,
+          "rank_within": 49,
+          "rank_within_unweighted": 44
+        },
+        {
+          "method": "AlphaFold3-pLDDT",
+          "pooled": 0.6761452095874754,
+          "auc_within": 0.7249630586483592,
+          "auc_within_unweighted": 0.6118432433539474,
+          "auc_between": 0.674866833285672,
+          "rank_pooled": 46,
+          "rank_within": 25,
+          "rank_within_unweighted": 36
+        },
+        {
+          "method": "PredIDR2-Seq-Rnd",
+          "pooled": 0.6723820962383054,
+          "auc_within": 0.6596730744673366,
+          "auc_within_unweighted": 0.5780358965157544,
+          "auc_between": 0.67271490304081,
+          "rank_pooled": 47,
+          "rank_within": 53,
+          "rank_within_unweighted": 56
+        },
+        {
+          "method": "UdonPred-TriZOD",
+          "pooled": 0.6702320988541032,
+          "auc_within": 0.691440899483907,
+          "auc_within_unweighted": 0.6260331167865467,
+          "auc_between": 0.6696767112523061,
+          "rank_pooled": 48,
+          "rank_within": 40,
+          "rank_within_unweighted": 27
+        },
+        {
+          "method": "PredIDR2-Seq-Art",
+          "pooled": 0.6681791298349032,
+          "auc_within": 0.6640382782767479,
+          "auc_within_unweighted": 0.5894937982431183,
+          "auc_between": 0.668287564897141,
+          "rank_pooled": 49,
+          "rank_within": 50,
+          "rank_within_unweighted": 52
+        },
+        {
+          "method": "VSL2",
+          "pooled": 0.666603854267253,
+          "auc_within": 0.6589181765349229,
+          "auc_within_unweighted": 0.5719080543053146,
+          "auc_between": 0.6668051164790325,
+          "rank_pooled": 50,
+          "rank_within": 54,
+          "rank_within_unweighted": 59
+        },
+        {
+          "method": "IsUnstruct",
+          "pooled": 0.6591518896257459,
+          "auc_within": 0.644671975565283,
+          "auc_within_unweighted": 0.5697862425824566,
+          "auc_between": 0.6595310701784155,
+          "rank_pooled": 51,
+          "rank_within": 56,
+          "rank_within_unweighted": 61
+        },
+        {
+          "method": "AlphaFold-pLDDT",
+          "pooled": 0.6588582884879182,
+          "auc_within": 0.7178497310078886,
+          "auc_within_unweighted": 0.6035546098154075,
+          "auc_between": 0.6573134997768736,
+          "rank_pooled": 52,
+          "rank_within": 29,
+          "rank_within_unweighted": 41
+        },
+        {
+          "method": "Metapredict-v1",
+          "pooled": 0.6587742171892499,
+          "auc_within": 0.6630497007772235,
+          "auc_within_unweighted": 0.589664363079641,
+          "auc_between": 0.6586622565641351,
+          "rank_pooled": 53,
+          "rank_within": 51,
+          "rank_within_unweighted": 50
+        },
+        {
+          "method": "ESpritz-X",
+          "pooled": 0.6576898138172648,
+          "auc_within": 0.6750737741161222,
+          "auc_within_unweighted": 0.5772236132758872,
+          "auc_between": 0.657234585999877,
+          "rank_pooled": 54,
+          "rank_within": 44,
+          "rank_within_unweighted": 57
+        },
+        {
+          "method": "LINKER-Pred2",
+          "pooled": 0.6519125361445622,
+          "auc_within": 0.5952513532131809,
+          "auc_within_unweighted": 0.6225562187356994,
+          "auc_between": 0.6533963031454658,
+          "rank_pooled": 55,
+          "rank_within": 58,
+          "rank_within_unweighted": 30
+        },
+        {
+          "method": "DISOPRED3-diso",
+          "pooled": 0.6514652125490905,
+          "auc_within": 0.6675995027576795,
+          "auc_within_unweighted": 0.5952675874845759,
+          "auc_between": 0.6510427094145637,
+          "rank_pooled": 56,
+          "rank_within": 48,
+          "rank_within_unweighted": 45
+        },
+        {
+          "method": "LINKER-Pred",
+          "pooled": 0.6468185248141675,
+          "auc_within": 0.5938475384159653,
+          "auc_within_unweighted": 0.617307781377768,
+          "auc_between": 0.648205657901702,
+          "rank_pooled": 57,
+          "rank_within": 60,
+          "rank_within_unweighted": 33
+        },
+        {
+          "method": "ESpritz-N",
+          "pooled": 0.6367599398100487,
+          "auc_within": 0.6613943981187492,
+          "auc_within_unweighted": 0.5912007496844275,
+          "auc_between": 0.6361148456833016,
+          "rank_pooled": 58,
+          "rank_within": 52,
+          "rank_within_unweighted": 48
+        },
+        {
+          "method": "LINKER-Pred-Lite",
+          "pooled": 0.6112635921731783,
+          "auc_within": 0.5943453019548295,
+          "auc_within_unweighted": 0.587543154808074,
+          "auc_between": 0.6117066256475782,
+          "rank_pooled": 59,
+          "rank_within": 59,
+          "rank_within_unweighted": 53
+        },
+        {
+          "method": "ProBiPred-nucleic",
+          "pooled": 0.6075671262490434,
+          "auc_within": 0.5841285532976183,
+          "auc_within_unweighted": 0.6542065745181034,
+          "auc_between": 0.6081809041353208,
+          "rank_pooled": 60,
+          "rank_within": 62,
+          "rank_within_unweighted": 16
+        },
+        {
+          "method": "DisEMBL-disHL",
+          "pooled": 0.5966508477401724,
+          "auc_within": 0.596926201560354,
+          "auc_within_unweighted": 0.5809253168688423,
+          "auc_between": 0.5966436371439438,
+          "rank_pooled": 61,
+          "rank_within": 57,
+          "rank_within_unweighted": 54
+        },
+        {
+          "method": "DisEMBL-dis465",
+          "pooled": 0.5901404373081933,
+          "auc_within": 0.5878748102982324,
+          "auc_within_unweighted": 0.5396772542171885,
+          "auc_between": 0.5901997665071231,
+          "rank_pooled": 62,
+          "rank_within": 61,
+          "rank_within_unweighted": 65
+        },
+        {
+          "method": "ProBiPred-protein",
+          "pooled": 0.5487343861254537,
+          "auc_within": 0.5092811616914926,
+          "auc_within_unweighted": 0.5716157650916631,
+          "auc_between": 0.5497675342078939,
+          "rank_pooled": 63,
+          "rank_within": 65,
+          "rank_within_unweighted": 60
+        },
+        {
+          "method": "DISOPRED3-bind",
+          "pooled": 0.5387511383154084,
+          "auc_within": 0.5274708139432862,
+          "auc_within_unweighted": 0.5602152529419254,
+          "auc_between": 0.539046532308208,
+          "rank_pooled": 64,
+          "rank_within": 64,
+          "rank_within_unweighted": 63
+        },
+        {
+          "method": "DisoRDPbind-dna",
+          "pooled": 0.5336054317263468,
+          "auc_within": 0.5421626566152601,
+          "auc_within_unweighted": 0.5258782118384926,
+          "auc_between": 0.53338134660753,
+          "rank_pooled": 65,
+          "rank_within": 63,
+          "rank_within_unweighted": 67
+        },
+        {
+          "method": "bindEmbed21IDR-idrNuc",
+          "pooled": 0.4814604220922304,
+          "auc_within": 0.48461450255353566,
+          "auc_within_unweighted": 0.5194079506648475,
+          "auc_between": 0.48137782726690975,
+          "rank_pooled": 66,
+          "rank_within": 66,
+          "rank_within_unweighted": 68
+        },
+        {
+          "method": "bindEmbed21IDR-rawNuc",
+          "pooled": 0.4795780895454098,
+          "auc_within": 0.4834621756175786,
+          "auc_within_unweighted": 0.5178360201404868,
+          "auc_between": 0.4794763783130564,
+          "rank_pooled": 67,
+          "rank_within": 67,
+          "rank_within_unweighted": 69
+        },
+        {
+          "method": "bindEmbed21IDR-idrGeneral",
+          "pooled": 0.4709180585814573,
+          "auc_within": 0.40712583688123777,
+          "auc_within_unweighted": 0.5400687506665467,
+          "auc_between": 0.47258856365346996,
+          "rank_pooled": 68,
+          "rank_within": 69,
+          "rank_within_unweighted": 64
+        },
+        {
+          "method": "bindEmbed21IDR-rawGeneral",
+          "pooled": 0.46093260507748524,
+          "auc_within": 0.40162481138410405,
+          "auc_within_unweighted": 0.5324873620760351,
+          "auc_between": 0.4624856779684131,
+          "rank_pooled": 69,
+          "rank_within": 70,
+          "rank_within_unweighted": 66
+        },
+        {
+          "method": "DisoRDPbind-rna",
+          "pooled": 0.44299096973388913,
+          "auc_within": 0.43596788947390824,
+          "auc_within_unweighted": 0.4302489189233877,
+          "auc_between": 0.4431748807324836,
+          "rank_pooled": 70,
+          "rank_within": 68,
+          "rank_within_unweighted": 70
+        },
+        {
+          "method": "DFLpred",
+          "pooled": 0.3270882490381401,
+          "auc_within": 0.3272556376281437,
+          "auc_within_unweighted": 0.4103602483266669,
+          "auc_between": 0.32708386569043496,
+          "rank_pooled": 71,
+          "rank_within": 71,
+          "rank_within_unweighted": 71
+        }
+      ]
+    },
+    "binding_idr": {
+      "n_targets_two_class": 42,
+      "n_full_coverage_methods": 71,
+      "w_within": 0.02891305065170764,
+      "spearman_pooled_vs_within": 0.9196512407780013,
+      "spearman_ci": [
+        0.7480432595573441,
+        0.919948021462106
+      ],
+      "spearman_within_weighted_vs_unweighted": 0.8503353454057679,
+      "hydropathy_baseline": {
+        "pooled": 0.4366380135291206,
+        "auc_within": 0.5,
+        "auc_within_unweighted": 0.5,
+        "auc_between": 0.43475147975842704,
+        "w_within": 0.02891305065170764,
+        "w_between": 0.9710869493482923,
+        "within_pairs": 175242,
+        "between_pairs": 5885758,
+        "n_targets_with_both_classes": 42
+      },
+      "methods": [
+        {
+          "method": "LIPNet",
+          "pooled": 0.7476803332783369,
+          "auc_within": 0.7619862818274158,
+          "auc_within_unweighted": 0.7223024393583013,
+          "auc_between": 0.7472543893241959,
+          "rank_pooled": 1,
+          "rank_within": 1,
+          "rank_within_unweighted": 1
+        },
+        {
+          "method": "ProBiPred-protein",
+          "pooled": 0.6827120112192707,
+          "auc_within": 0.6964797251800368,
+          "auc_within_unweighted": 0.6741571478425956,
+          "auc_between": 0.6823020926106713,
+          "rank_pooled": 2,
+          "rank_within": 3,
+          "rank_within_unweighted": 4
+        },
+        {
+          "method": "bindEmbed21IDR-idrGeneral",
+          "pooled": 0.6822278501897376,
+          "auc_within": 0.6961373415048904,
+          "auc_within_unweighted": 0.6935180278495925,
+          "auc_between": 0.6818137103156466,
+          "rank_pooled": 3,
+          "rank_within": 4,
+          "rank_within_unweighted": 2
+        },
+        {
+          "method": "bindEmbed21IDR-rawGeneral",
+          "pooled": 0.6811969147005444,
+          "auc_within": 0.6958177834080871,
+          "auc_within_unweighted": 0.6933585235760542,
+          "auc_between": 0.6807615943434984,
+          "rank_pooled": 4,
+          "rank_within": 5,
+          "rank_within_unweighted": 3
+        },
+        {
+          "method": "DisorderNet-windowed",
+          "pooled": 0.6462501237419568,
+          "auc_within": 0.674042181668778,
+          "auc_within_unweighted": 0.6429122846525763,
+          "auc_between": 0.6454226456473406,
+          "rank_pooled": 5,
+          "rank_within": 7,
+          "rank_within_unweighted": 8
+        },
+        {
+          "method": "DisorderNet-pbias",
+          "pooled": 0.628088269262498,
+          "auc_within": 0.6533793268736947,
+          "auc_within_unweighted": 0.6627967963063137,
+          "auc_between": 0.6273352557138775,
+          "rank_pooled": 6,
+          "rank_within": 8,
+          "rank_within_unweighted": 6
+        },
+        {
+          "method": "ProBiPred-nucleic",
+          "pooled": 0.6064224550404224,
+          "auc_within": 0.6158141313155522,
+          "auc_within_unweighted": 0.6491874166917777,
+          "auc_between": 0.6061428281624899,
+          "rank_pooled": 7,
+          "rank_within": 12,
+          "rank_within_unweighted": 7
+        },
+        {
+          "method": "bindEmbed21IDR-idrNuc",
+          "pooled": 0.589614337568058,
+          "auc_within": 0.601753575056208,
+          "auc_within_unweighted": 0.5980800091374145,
+          "auc_between": 0.589252905063375,
+          "rank_pooled": 8,
+          "rank_within": 14,
+          "rank_within_unweighted": 10
+        },
+        {
+          "method": "bindEmbed21IDR-rawNuc",
+          "pooled": 0.5888715558488699,
+          "auc_within": 0.6016508599536641,
+          "auc_within_unweighted": 0.598207285170185,
+          "auc_between": 0.5884910660614997,
+          "rank_pooled": 9,
+          "rank_within": 15,
+          "rank_within_unweighted": 9
+        },
+        {
+          "method": "AIUPred-2-binding",
+          "pooled": 0.5832154759940604,
+          "auc_within": 0.7140696864906815,
+          "auc_within_unweighted": 0.6663476151817629,
+          "auc_between": 0.5793194351517682,
+          "rank_pooled": 10,
+          "rank_within": 2,
+          "rank_within_unweighted": 5
+        },
+        {
+          "method": "UdonPred-combined",
+          "pooled": 0.5636344662596932,
+          "auc_within": 0.536871868615971,
+          "auc_within_unweighted": 0.484727941795092,
+          "auc_between": 0.5644312933015595,
+          "rank_pooled": 11,
+          "rank_within": 19,
+          "rank_within_unweighted": 24
+        },
+        {
+          "method": "flDPlr",
+          "pooled": 0.5519736017158885,
+          "auc_within": 0.49947501169810893,
+          "auc_within_unweighted": 0.4543874443112057,
+          "auc_between": 0.5535366897517703,
+          "rank_pooled": 12,
+          "rank_within": 22,
+          "rank_within_unweighted": 31
+        },
+        {
+          "method": "AlphaFold-binding",
+          "pooled": 0.5476150800197988,
+          "auc_within": 0.6365112244781502,
+          "auc_within_unweighted": 0.5940325519090058,
+          "auc_between": 0.5449682946529573,
+          "rank_pooled": 13,
+          "rank_within": 10,
+          "rank_within_unweighted": 12
+        },
+        {
+          "method": "IPA-Protein-bind",
+          "pooled": 0.541281554198977,
+          "auc_within": 0.6276891384485455,
+          "auc_within_unweighted": 0.58525053554414,
+          "auc_between": 0.538708862987571,
+          "rank_pooled": 14,
+          "rank_within": 11,
+          "rank_within_unweighted": 13
+        },
+        {
+          "method": "IPA-All-bind",
+          "pooled": 0.5386932849364792,
+          "auc_within": 0.6126499355177412,
+          "auc_within_unweighted": 0.5687813668795477,
+          "auc_between": 0.5364913066422371,
+          "rank_pooled": 15,
+          "rank_within": 13,
+          "rank_within_unweighted": 15
+        },
+        {
+          "method": "DisoRDPbind-rna",
+          "pooled": 0.5380810922290051,
+          "auc_within": 0.43997728854954865,
+          "auc_within_unweighted": 0.5144704388956435,
+          "auc_between": 0.54100202556748,
+          "rank_pooled": 16,
+          "rank_within": 31,
+          "rank_within_unweighted": 19
+        },
+        {
+          "method": "flDPnn3b",
+          "pooled": 0.5369038937469065,
+          "auc_within": 0.43279293776606065,
+          "auc_within_unweighted": 0.5126838351908701,
+          "auc_between": 0.5400036834677879,
+          "rank_pooled": 17,
+          "rank_within": 33,
+          "rank_within_unweighted": 20
+        },
+        {
+          "method": "ESpritz-D",
+          "pooled": 0.5354804487708299,
+          "auc_within": 0.6499012793736662,
+          "auc_within_unweighted": 0.5657268667869386,
+          "auc_between": 0.5320736938215945,
+          "rank_pooled": 18,
+          "rank_within": 9,
+          "rank_within_unweighted": 16
+        },
+        {
+          "method": "flDPnn3a",
+          "pooled": 0.5304644448110872,
+          "auc_within": 0.5052641490053754,
+          "auc_within_unweighted": 0.4569627711131311,
+          "auc_between": 0.5312147560263265,
+          "rank_pooled": 19,
+          "rank_within": 21,
+          "rank_within_unweighted": 30
+        },
+        {
+          "method": "AlphaFold3-binding",
+          "pooled": 0.5298660287081339,
+          "auc_within": 0.6763875098435307,
+          "auc_within_unweighted": 0.578434985913087,
+          "auc_between": 0.5255035120370223,
+          "rank_pooled": 20,
+          "rank_within": 6,
+          "rank_within_unweighted": 14
+        },
+        {
+          "method": "DeepDISObind-nucleic",
+          "pooled": 0.5238638013529121,
+          "auc_within": 0.4833943917554011,
+          "auc_within_unweighted": 0.5958935045040596,
+          "auc_between": 0.525068733712803,
+          "rank_pooled": 21,
+          "rank_within": 25,
+          "rank_within_unweighted": 11
+        },
+        {
+          "method": "UdonPred-DisProt",
+          "pooled": 0.5138567893086949,
+          "auc_within": 0.4973779116878374,
+          "auc_within_unweighted": 0.47592876687453106,
+          "auc_between": 0.514347429846759,
+          "rank_pooled": 22,
+          "rank_within": 24,
+          "rank_within_unweighted": 27
+        },
+        {
+          "method": "DisoRDPbind-dna",
+          "pooled": 0.5111660617059891,
+          "auc_within": 0.44428846965909996,
+          "auc_within_unweighted": 0.5099131335199144,
+          "auc_between": 0.5131572687833921,
+          "rank_pooled": 23,
+          "rank_within": 29,
+          "rank_within_unweighted": 21
+        },
+        {
+          "method": "DisorderUnetLM",
+          "pooled": 0.5078917670351427,
+          "auc_within": 0.5414027459170747,
+          "auc_within_unweighted": 0.4987449694100112,
+          "auc_between": 0.5068940143308645,
+          "rank_pooled": 24,
+          "rank_within": 18,
+          "rank_within_unweighted": 22
+        },
+        {
+          "method": "DeepDISObind-protein",
+          "pooled": 0.50490414123082,
+          "auc_within": 0.5859925132103034,
+          "auc_within_unweighted": 0.5470201648779361,
+          "auc_between": 0.5024898237406294,
+          "rank_pooled": 25,
+          "rank_within": 16,
+          "rank_within_unweighted": 18
+        },
+        {
+          "method": "DeepDISObind-all",
+          "pooled": 0.4990102293350932,
+          "auc_within": 0.5804687232512754,
+          "auc_within_unweighted": 0.5560711860759773,
+          "auc_between": 0.49658489186949245,
+          "rank_pooled": 26,
+          "rank_within": 17,
+          "rank_within_unweighted": 17
+        },
+        {
+          "method": "flDPnn2",
+          "pooled": 0.4975915690480119,
+          "auc_within": 0.46264308784423824,
+          "auc_within_unweighted": 0.46082975886703664,
+          "auc_between": 0.49863212180996913,
+          "rank_pooled": 27,
+          "rank_within": 27,
+          "rank_within_unweighted": 28
+        },
+        {
+          "method": "rawMSA",
+          "pooled": 0.4960654182478139,
+          "auc_within": 0.43871902854338574,
+          "auc_within_unweighted": 0.42385622449392185,
+          "auc_between": 0.4977728442113999,
+          "rank_pooled": 28,
+          "rank_within": 32,
+          "rank_within_unweighted": 43
+        },
+        {
+          "method": "flDPnn",
+          "pooled": 0.4958945718528296,
+          "auc_within": 0.4327786717795962,
+          "auc_within_unweighted": 0.4316023304122369,
+          "auc_between": 0.4977737786704789,
+          "rank_pooled": 29,
+          "rank_within": 34,
+          "rank_within_unweighted": 39
+        },
+        {
+          "method": "IPA-Nucleotide-bind",
+          "pooled": 0.4952752021118627,
+          "auc_within": 0.4127007224295546,
+          "auc_within_unweighted": 0.4829149150368419,
+          "auc_between": 0.49773376683173176,
+          "rank_pooled": 30,
+          "rank_within": 39,
+          "rank_within_unweighted": 25
+        },
+        {
+          "method": "LINKER-Pred2",
+          "pooled": 0.4812880712753671,
+          "auc_within": 0.4059129660697778,
+          "auc_within_unweighted": 0.3706225752072657,
+          "auc_between": 0.4835322825029504,
+          "rank_pooled": 31,
+          "rank_within": 44,
+          "rank_within_unweighted": 65
+        },
+        {
+          "method": "flDPlr2",
+          "pooled": 0.4790248308859924,
+          "auc_within": 0.4180048161970304,
+          "auc_within_unweighted": 0.4307147305868718,
+          "auc_between": 0.48084163501115745,
+          "rank_pooled": 32,
+          "rank_within": 37,
+          "rank_within_unweighted": 40
+        },
+        {
+          "method": "DeepIDP-2L",
+          "pooled": 0.47176216795908266,
+          "auc_within": 0.49778591890072016,
+          "auc_within_unweighted": 0.43446583266884325,
+          "auc_between": 0.4709873392687909,
+          "rank_pooled": 33,
+          "rank_within": 23,
+          "rank_within_unweighted": 37
+        },
+        {
+          "method": "LINKER-Pred",
+          "pooled": 0.4693397129186603,
+          "auc_within": 0.4057788657970121,
+          "auc_within_unweighted": 0.3668779678352137,
+          "auc_between": 0.4712321675474935,
+          "rank_pooled": 34,
+          "rank_within": 45,
+          "rank_within_unweighted": 67
+        },
+        {
+          "method": "DisoRDPbind-prot",
+          "pooled": 0.46428287411318264,
+          "auc_within": 0.46957350406865933,
+          "auc_within_unweighted": 0.44811481636920325,
+          "auc_between": 0.4641253513990891,
+          "rank_pooled": 35,
+          "rank_within": 26,
+          "rank_within_unweighted": 32
+        },
+        {
+          "method": "DisEMBL-disHL",
+          "pooled": 0.46234779739316945,
+          "auc_within": 0.39099930381986053,
+          "auc_within_unweighted": 0.460471282193,
+          "auc_between": 0.46447212066823,
+          "rank_pooled": 36,
+          "rank_within": 52,
+          "rank_within_unweighted": 29
+        },
+        {
+          "method": "DISOPRED3-bind",
+          "pooled": 0.45938261013034154,
+          "auc_within": 0.41518300407436576,
+          "auc_within_unweighted": 0.49368795003801547,
+          "auc_between": 0.4606986050055065,
+          "rank_pooled": 37,
+          "rank_within": 38,
+          "rank_within_unweighted": 23
+        },
+        {
+          "method": "DisoMine",
+          "pooled": 0.4590932189407689,
+          "auc_within": 0.5338046815261182,
+          "auc_within_unweighted": 0.4828366942101861,
+          "auc_between": 0.45686876694556594,
+          "rank_pooled": 38,
+          "rank_within": 20,
+          "rank_within_unweighted": 26
+        },
+        {
+          "method": "LINKER-Pred-Lite",
+          "pooled": 0.42828864873783207,
+          "auc_within": 0.4408075689617786,
+          "auc_within_unweighted": 0.35460770270702996,
+          "auc_between": 0.4279159115954139,
+          "rank_pooled": 39,
+          "rank_within": 30,
+          "rank_within_unweighted": 69
+        },
+        {
+          "method": "AUCpred-profile",
+          "pooled": 0.4235559313644613,
+          "auc_within": 0.4067489528765935,
+          "auc_within_unweighted": 0.4441450568554167,
+          "auc_between": 0.42405634074659543,
+          "rank_pooled": 40,
+          "rank_within": 43,
+          "rank_within_unweighted": 34
+        },
+        {
+          "method": "DARUMA-beta",
+          "pooled": 0.4214670021448606,
+          "auc_within": 0.4102812111251869,
+          "auc_within_unweighted": 0.4223100033282886,
+          "auc_between": 0.42180004682489497,
+          "rank_pooled": 41,
+          "rank_within": 42,
+          "rank_within_unweighted": 45
+        },
+        {
+          "method": "pyHCA",
+          "pooled": 0.42044761590496615,
+          "auc_within": 0.4113283345316762,
+          "auc_within_unweighted": 0.4065875512260295,
+          "auc_between": 0.4207191325229478,
+          "rank_pooled": 42,
+          "rank_within": 40,
+          "rank_within_unweighted": 56
+        },
+        {
+          "method": "AUCpred-no-profile",
+          "pooled": 0.4185710278831876,
+          "auc_within": 0.3955644194884788,
+          "auc_within_unweighted": 0.411815906620181,
+          "auc_between": 0.4192560244576825,
+          "rank_pooled": 43,
+          "rank_within": 49,
+          "rank_within_unweighted": 52
+        },
+        {
+          "method": "DFLpred",
+          "pooled": 0.40729904306220094,
+          "auc_within": 0.42777416372787347,
+          "auc_within_unweighted": 0.3928099899992718,
+          "auc_between": 0.4066894187630548,
+          "rank_pooled": 44,
+          "rank_within": 36,
+          "rank_within_unweighted": 62
+        },
+        {
+          "method": "ESpritz-X",
+          "pooled": 0.40582131661442006,
+          "auc_within": 0.4446337065315392,
+          "auc_within_unweighted": 0.43952795776967574,
+          "auc_between": 0.40466572020120434,
+          "rank_pooled": 45,
+          "rank_within": 28,
+          "rank_within_unweighted": 35
+        },
+        {
+          "method": "SPOT-Disorder-Single",
+          "pooled": 0.4034680745751526,
+          "auc_within": 0.39523630179979685,
+          "auc_within_unweighted": 0.4095194706069091,
+          "auc_between": 0.403713166596384,
+          "rank_pooled": 46,
+          "rank_within": 50,
+          "rank_within_unweighted": 53
+        },
+        {
+          "method": "VSL2",
+          "pooled": 0.4032168784029038,
+          "auc_within": 0.3559420686821652,
+          "auc_within_unweighted": 0.4481068298463147,
+          "auc_between": 0.40462443410007687,
+          "rank_pooled": 47,
+          "rank_within": 63,
+          "rank_within_unweighted": 33
+        },
+        {
+          "method": "SETH-1",
+          "pooled": 0.4030113842600231,
+          "auc_within": 0.428287739240593,
+          "auc_within_unweighted": 0.42263971946632095,
+          "auc_between": 0.4022588084661313,
+          "rank_pooled": 48,
+          "rank_within": 35,
+          "rank_within_unweighted": 44
+        },
+        {
+          "method": "MobiDB-lite",
+          "pooled": 0.39834886982346146,
+          "auc_within": 0.39196368450485614,
+          "auc_within_unweighted": 0.42453989175540113,
+          "auc_between": 0.39853898172503865,
+          "rank_pooled": 49,
+          "rank_within": 51,
+          "rank_within_unweighted": 41
+        },
+        {
+          "method": "AIUPred",
+          "pooled": 0.3934517406368586,
+          "auc_within": 0.4104695221465174,
+          "auc_within_unweighted": 0.43329213181581056,
+          "auc_between": 0.39294505482556374,
+          "rank_pooled": 50,
+          "rank_within": 41,
+          "rank_within_unweighted": 38
+        },
+        {
+          "method": "DisEMBL-dis465",
+          "pooled": 0.3893904471209371,
+          "auc_within": 0.3175522991063786,
+          "auc_within_unweighted": 0.38271245479365573,
+          "auc_between": 0.3915293493208521,
+          "rank_pooled": 51,
+          "rank_within": 65,
+          "rank_within_unweighted": 63
+        },
+        {
+          "method": "IsUnstruct",
+          "pooled": 0.38923428477148986,
+          "auc_within": 0.31701304481802306,
+          "auc_within_unweighted": 0.4180635896477526,
+          "auc_between": 0.3913845931144298,
+          "rank_pooled": 52,
+          "rank_within": 66,
+          "rank_within_unweighted": 48
+        },
+        {
+          "method": "PredIDR2-Prof-Rnd",
+          "pooled": 0.38064931529450585,
+          "auc_within": 0.40223519475924724,
+          "auc_within_unweighted": 0.4383503142628326,
+          "auc_between": 0.3800066193683124,
+          "rank_pooled": 53,
+          "rank_within": 46,
+          "rank_within_unweighted": 36
+        },
+        {
+          "method": "PredIDR2-Prof-Art",
+          "pooled": 0.37948820326678767,
+          "auc_within": 0.3783681994042524,
+          "auc_within_unweighted": 0.39640536862945347,
+          "auc_between": 0.379521550155477,
+          "rank_pooled": 54,
+          "rank_within": 58,
+          "rank_within_unweighted": 59
+        },
+        {
+          "method": "PUNCH2-Light",
+          "pooled": 0.3785273882197657,
+          "auc_within": 0.35761118909850376,
+          "auc_within_unweighted": 0.4083091565713994,
+          "auc_between": 0.37915014514698026,
+          "rank_pooled": 55,
+          "rank_within": 62,
+          "rank_within_unweighted": 54
+        },
+        {
+          "method": "LMDisorder",
+          "pooled": 0.37376208546444484,
+          "auc_within": 0.3872131110122003,
+          "auc_within_unweighted": 0.42441234055334837,
+          "auc_between": 0.37336159590659357,
+          "rank_pooled": 56,
+          "rank_within": 54,
+          "rank_within_unweighted": 42
+        },
+        {
+          "method": "ESpritz-N",
+          "pooled": 0.37365616234944726,
+          "auc_within": 0.39663722167060406,
+          "auc_within_unweighted": 0.4128380468169864,
+          "auc_between": 0.3729719264706432,
+          "rank_pooled": 57,
+          "rank_within": 47,
+          "rank_within_unweighted": 51
+        },
+        {
+          "method": "UdonPred-TriZOD",
+          "pooled": 0.37215682230655006,
+          "auc_within": 0.3956300430262152,
+          "auc_within_unweighted": 0.379588409312056,
+          "auc_between": 0.3714579328609841,
+          "rank_pooled": 58,
+          "rank_within": 48,
+          "rank_within_unweighted": 64
+        },
+        {
+          "method": "AlphaFold3-pLDDT",
+          "pooled": 0.3676687015344003,
+          "auc_within": 0.3116090891452962,
+          "auc_within_unweighted": 0.34949488258283296,
+          "auc_between": 0.36933781511234415,
+          "rank_pooled": 59,
+          "rank_within": 68,
+          "rank_within_unweighted": 70
+        },
+        {
+          "method": "PUNCH2",
+          "pooled": 0.36649843260188086,
+          "auc_within": 0.32449412811997125,
+          "auc_within_unweighted": 0.40685948057437543,
+          "auc_between": 0.3677490647763636,
+          "rank_pooled": 60,
+          "rank_within": 64,
+          "rank_within_unweighted": 55
+        },
+        {
+          "method": "Metapredict-v3",
+          "pooled": 0.36635596436231643,
+          "auc_within": 0.3792270117894112,
+          "auc_within_unweighted": 0.4198340260812251,
+          "auc_between": 0.3659727430179766,
+          "rank_pooled": 61,
+          "rank_within": 57,
+          "rank_within_unweighted": 47
+        },
+        {
+          "method": "Metapredict-v1",
+          "pooled": 0.3638433426827256,
+          "auc_within": 0.37229374236769724,
+          "auc_within_unweighted": 0.40608324044206057,
+          "auc_between": 0.36359174128463995,
+          "rank_pooled": 62,
+          "rank_within": 60,
+          "rank_within_unweighted": 57
+        },
+        {
+          "method": "DISOPRED3-diso",
+          "pooled": 0.3585611285266458,
+          "auc_within": 0.390460049531505,
+          "auc_within_unweighted": 0.40185391051018676,
+          "auc_between": 0.3576113730805786,
+          "rank_pooled": 63,
+          "rank_within": 53,
+          "rank_within_unweighted": 58
+        },
+        {
+          "method": "PredIDR2-Seq-Rnd",
+          "pooled": 0.35749892756970797,
+          "auc_within": 0.38715034067175674,
+          "auc_within_unweighted": 0.42062452599799166,
+          "auc_between": 0.35661608921059956,
+          "rank_pooled": 64,
+          "rank_within": 55,
+          "rank_within_unweighted": 46
+        },
+        {
+          "method": "PredIDR2-Seq-Art",
+          "pooled": 0.3556662266952648,
+          "auc_within": 0.37384017530044167,
+          "auc_within_unweighted": 0.4135502582929693,
+          "auc_between": 0.3551251172746145,
+          "rank_pooled": 65,
+          "rank_within": 59,
+          "rank_within_unweighted": 50
+        },
+        {
+          "method": "AIUPred-2-disorder",
+          "pooled": 0.3550221085629434,
+          "auc_within": 0.36324054735736866,
+          "auc_within_unweighted": 0.3941061276034141,
+          "auc_between": 0.3547774135463945,
+          "rank_pooled": 66,
+          "rank_within": 61,
+          "rank_within_unweighted": 61
+        },
+        {
+          "method": "Metapredict-v2",
+          "pooled": 0.3499773964692295,
+          "auc_within": 0.382950434256628,
+          "auc_within_unweighted": 0.3693178602155727,
+          "auc_between": 0.348995660372037,
+          "rank_pooled": 67,
+          "rank_within": 56,
+          "rank_within_unweighted": 66
+        },
+        {
+          "method": "AlphaFold3-rsa",
+          "pooled": 0.33879170103943246,
+          "auc_within": 0.29426164960454687,
+          "auc_within_unweighted": 0.41639738367332346,
+          "auc_between": 0.3401175345639424,
+          "rank_pooled": 68,
+          "rank_within": 69,
+          "rank_within_unweighted": 49
+        },
+        {
+          "method": "AlphaFold-pLDDT",
+          "pooled": 0.331086619369741,
+          "auc_within": 0.29201047694045945,
+          "auc_within_unweighted": 0.33060261942582647,
+          "auc_between": 0.3322500687252178,
+          "rank_pooled": 69,
+          "rank_within": 70,
+          "rank_within_unweighted": 71
+        },
+        {
+          "method": "AlphaFold-rsa",
+          "pooled": 0.3266690315129517,
+          "auc_within": 0.2860644137820842,
+          "auc_within_unweighted": 0.39546389893770223,
+          "auc_between": 0.3278779895469709,
+          "rank_pooled": 70,
+          "rank_within": 71,
+          "rank_within_unweighted": 60
+        },
+        {
+          "method": "SETH-0",
+          "pooled": 0.3228119122257053,
+          "auc_within": 0.3126020018032207,
+          "auc_within_unweighted": 0.3624754649076869,
+          "auc_between": 0.3231159011294722,
+          "rank_pooled": 71,
+          "rank_within": 67,
+          "rank_within_unweighted": 68
+        }
+      ]
+    },
+    "linker": {
+      "n_targets_two_class": 31,
+      "n_full_coverage_methods": 92,
+      "w_within": 0.028826401992543098,
+      "spearman_pooled_vs_within": 0.8718154216050429,
+      "spearman_ci": [
+        0.6472300140252454,
+        0.9548783964983123
+      ],
+      "spearman_within_weighted_vs_unweighted": 0.8949801951204476,
+      "hydropathy_baseline": {
+        "pooled": 0.581997220492347,
+        "auc_within": 0.5,
+        "auc_within_unweighted": 0.5,
+        "auc_between": 0.584431064292295,
+        "w_within": 0.028826401992543098,
+        "w_between": 0.971173598007457,
+        "within_pairs": 760011,
+        "between_pairs": 25605090,
+        "n_targets_with_both_classes": 31
+      },
+      "methods": [
+        {
+          "method": "DisorderNet-windowed",
+          "pooled": 0.915442538983636,
+          "auc_within": 0.8890022644409095,
+          "auc_within_unweighted": 0.8790644735128661,
+          "auc_between": 0.9162273399546731,
+          "rank_pooled": 1,
+          "rank_within": 1,
+          "rank_within_unweighted": 1
+        },
+        {
+          "method": "DisorderNet-pbias",
+          "pooled": 0.8907887931094973,
+          "auc_within": 0.7858603362319756,
+          "auc_within_unweighted": 0.8615220295978934,
+          "auc_between": 0.8939032825114068,
+          "rank_pooled": 2,
+          "rank_within": 10,
+          "rank_within_unweighted": 2
+        },
+        {
+          "method": "LINKER-Pred2",
+          "pooled": 0.8746166570725445,
+          "auc_within": 0.7472701053011075,
+          "auc_within_unweighted": 0.8587211843875577,
+          "auc_between": 0.8783965609962706,
+          "rank_pooled": 3,
+          "rank_within": 27,
+          "rank_within_unweighted": 3
+        },
+        {
+          "method": "LINKER-Pred",
+          "pooled": 0.8699511145434262,
+          "auc_within": 0.7446346171305416,
+          "auc_within_unweighted": 0.8569467662603023,
+          "auc_between": 0.8736707623367073,
+          "rank_pooled": 4,
+          "rank_within": 28,
+          "rank_within_unweighted": 4
+        },
+        {
+          "method": "LINKER-Pred-Lite",
+          "pooled": 0.8543055078757331,
+          "auc_within": 0.73992613264808,
+          "auc_within_unweighted": 0.8299027962052808,
+          "auc_between": 0.8577005197013562,
+          "rank_pooled": 5,
+          "rank_within": 31,
+          "rank_within_unweighted": 5
+        },
+        {
+          "method": "DisorderUnetLM",
+          "pooled": 0.8512293580821101,
+          "auc_within": 0.7876800467361657,
+          "auc_within_unweighted": 0.7972759618184149,
+          "auc_between": 0.8531156305250245,
+          "rank_pooled": 6,
+          "rank_within": 9,
+          "rank_within_unweighted": 8
+        },
+        {
+          "method": "APOD",
+          "pooled": 0.8430026306366132,
+          "auc_within": 0.8344425278055186,
+          "auc_within_unweighted": 0.8166656456008925,
+          "auc_between": 0.8432567118490893,
+          "rank_pooled": 7,
+          "rank_within": 2,
+          "rank_within_unweighted": 7
+        },
+        {
+          "method": "flDPnn3a",
+          "pooled": 0.8412059563132339,
+          "auc_within": 0.7547068397694244,
+          "auc_within_unweighted": 0.7588906247143465,
+          "auc_between": 0.8437734255181293,
+          "rank_pooled": 8,
+          "rank_within": 24,
+          "rank_within_unweighted": 20
+        },
+        {
+          "method": "flDPnn3b",
+          "pooled": 0.8353037790372964,
+          "auc_within": 0.76025544367121,
+          "auc_within_unweighted": 0.7580696868643501,
+          "auc_between": 0.8375313658339025,
+          "rank_pooled": 9,
+          "rank_within": 20,
+          "rank_within_unweighted": 21
+        },
+        {
+          "method": "flDPnn",
+          "pooled": 0.8274160034509255,
+          "auc_within": 0.7551127549469678,
+          "auc_within_unweighted": 0.7334920938874921,
+          "auc_between": 0.8295621105022477,
+          "rank_pooled": 10,
+          "rank_within": 23,
+          "rank_within_unweighted": 34
+        },
+        {
+          "method": "AUCpred-profile",
+          "pooled": 0.8229175947401074,
+          "auc_within": 0.8058100474861548,
+          "auc_within_unweighted": 0.7641336847832418,
+          "auc_between": 0.8234253814378312,
+          "rank_pooled": 11,
+          "rank_within": 5,
+          "rank_within_unweighted": 17
+        },
+        {
+          "method": "SETH-0",
+          "pooled": 0.8220949731996096,
+          "auc_within": 0.7804814667156134,
+          "auc_within_unweighted": 0.7953893420115086,
+          "auc_between": 0.823330146466972,
+          "rank_pooled": 12,
+          "rank_within": 12,
+          "rank_within_unweighted": 9
+        },
+        {
+          "method": "UdonPred-combined",
+          "pooled": 0.8175384004787237,
+          "auc_within": 0.7091634200031315,
+          "auc_within_unweighted": 0.7230449060295,
+          "auc_between": 0.8207551896907997,
+          "rank_pooled": 13,
+          "rank_within": 53,
+          "rank_within_unweighted": 39
+        },
+        {
+          "method": "flDPlr",
+          "pooled": 0.8099724897697149,
+          "auc_within": 0.7794755602221547,
+          "auc_within_unweighted": 0.7327155888109023,
+          "auc_between": 0.8108777004884575,
+          "rank_pooled": 14,
+          "rank_within": 13,
+          "rank_within_unweighted": 35
+        },
+        {
+          "method": "AlphaFold3-rsa",
+          "pooled": 0.8097599170964678,
+          "auc_within": 0.8004890718686967,
+          "auc_within_unweighted": 0.7566040130228383,
+          "auc_between": 0.8100350945847095,
+          "rank_pooled": 15,
+          "rank_within": 6,
+          "rank_within_unweighted": 23
+        },
+        {
+          "method": "PredIDR2-Seq-Art",
+          "pooled": 0.8082739565458141,
+          "auc_within": 0.7412872971575412,
+          "auc_within_unweighted": 0.7736390099994394,
+          "auc_between": 0.8102622564497919,
+          "rank_pooled": 16,
+          "rank_within": 30,
+          "rank_within_unweighted": 13
+        },
+        {
+          "method": "flDPlr2",
+          "pooled": 0.8062781363894642,
+          "auc_within": 0.7320953249360864,
+          "auc_within_unweighted": 0.7109404291621984,
+          "auc_between": 0.808480032681002,
+          "rank_pooled": 17,
+          "rank_within": 40,
+          "rank_within_unweighted": 45
+        },
+        {
+          "method": "PredIDR2-Prof-Rnd",
+          "pooled": 0.804367845964254,
+          "auc_within": 0.7424504382173416,
+          "auc_within_unweighted": 0.7574670794947146,
+          "auc_between": 0.8062056801987416,
+          "rank_pooled": 18,
+          "rank_within": 29,
+          "rank_within_unweighted": 22
+        },
+        {
+          "method": "SETH-1",
+          "pooled": 0.8041907178736012,
+          "auc_within": 0.7689204498355945,
+          "auc_within_unweighted": 0.7883100265489477,
+          "auc_between": 0.8052376109593834,
+          "rank_pooled": 19,
+          "rank_within": 18,
+          "rank_within_unweighted": 12
+        },
+        {
+          "method": "flDPnn2",
+          "pooled": 0.8041408034052288,
+          "auc_within": 0.7067838491811302,
+          "auc_within_unweighted": 0.7041697341055492,
+          "auc_between": 0.8070305552528813,
+          "rank_pooled": 20,
+          "rank_within": 54,
+          "rank_within_unweighted": 49
+        },
+        {
+          "method": "AlphaFold-binding",
+          "pooled": 0.8006421632900249,
+          "auc_within": 0.771477649665597,
+          "auc_within_unweighted": 0.7481828591195421,
+          "auc_between": 0.8015078252019422,
+          "rank_pooled": 21,
+          "rank_within": 17,
+          "rank_within_unweighted": 28
+        },
+        {
+          "method": "AlphaFold-rsa",
+          "pooled": 0.8001282263246403,
+          "auc_within": 0.7810893526541063,
+          "auc_within_unweighted": 0.7538951246697752,
+          "auc_between": 0.8006933387072649,
+          "rank_pooled": 22,
+          "rank_within": 11,
+          "rank_within_unweighted": 25
+        },
+        {
+          "method": "DeepIDP-2L",
+          "pooled": 0.7998792798100792,
+          "auc_within": 0.7364531565990492,
+          "auc_within_unweighted": 0.7535972184917451,
+          "auc_between": 0.8017618957793157,
+          "rank_pooled": 23,
+          "rank_within": 36,
+          "rank_within_unweighted": 26
+        },
+        {
+          "method": "PredIDR2-Seq-Rnd",
+          "pooled": 0.7972505775722232,
+          "auc_within": 0.7294019428666164,
+          "auc_within_unweighted": 0.7646050491701707,
+          "auc_between": 0.7992644626517617,
+          "rank_pooled": 24,
+          "rank_within": 41,
+          "rank_within_unweighted": 16
+        },
+        {
+          "method": "AlphaFold3-pLDDT",
+          "pooled": 0.797130304943645,
+          "auc_within": 0.7976963491317889,
+          "auc_within_unweighted": 0.7883849306775976,
+          "auc_between": 0.7971135036041661,
+          "rank_pooled": 25,
+          "rank_within": 7,
+          "rank_within_unweighted": 11
+        },
+        {
+          "method": "UdonPred-DisProt",
+          "pooled": 0.7940951183915435,
+          "auc_within": 0.7238263656710232,
+          "auc_within_unweighted": 0.7287466113498123,
+          "auc_between": 0.7961808374819225,
+          "rank_pooled": 26,
+          "rank_within": 44,
+          "rank_within_unweighted": 37
+        },
+        {
+          "method": "PUNCH2-Light",
+          "pooled": 0.7908023944228395,
+          "auc_within": 0.7378866884821403,
+          "auc_within_unweighted": 0.76291785451008,
+          "auc_between": 0.7923730398916777,
+          "rank_pooled": 27,
+          "rank_within": 34,
+          "rank_within_unweighted": 18
+        },
+        {
+          "method": "AlphaFold3-binding",
+          "pooled": 0.7907889296536357,
+          "auc_within": 0.7975095097307802,
+          "auc_within_unweighted": 0.7678934035626617,
+          "auc_between": 0.7905894492071693,
+          "rank_pooled": 28,
+          "rank_within": 8,
+          "rank_within_unweighted": 14
+        },
+        {
+          "method": "PUNCH2",
+          "pooled": 0.7880824162213527,
+          "auc_within": 0.7377945845520657,
+          "auc_within_unweighted": 0.755307611689946,
+          "auc_between": 0.7895750610523142,
+          "rank_pooled": 29,
+          "rank_within": 35,
+          "rank_within_unweighted": 24
+        },
+        {
+          "method": "LMDisorder",
+          "pooled": 0.783121028059024,
+          "auc_within": 0.7342972667500866,
+          "auc_within_unweighted": 0.7660882413621894,
+          "auc_between": 0.7845702163124597,
+          "rank_pooled": 30,
+          "rank_within": 38,
+          "rank_within_unweighted": 15
+        },
+        {
+          "method": "SPOT-Disorder",
+          "pooled": 0.782799106288271,
+          "auc_within": 0.7604685984808115,
+          "auc_within_unweighted": 0.747323972014872,
+          "auc_between": 0.7834619210477292,
+          "rank_pooled": 31,
+          "rank_within": 19,
+          "rank_within_unweighted": 29
+        },
+        {
+          "method": "PredIDR2-Prof-Art",
+          "pooled": 0.7823263980668991,
+          "auc_within": 0.7213560066893768,
+          "auc_within_unweighted": 0.750517192199684,
+          "auc_between": 0.784136122934932,
+          "rank_pooled": 32,
+          "rank_within": 48,
+          "rank_within_unweighted": 27
+        },
+        {
+          "method": "rawMSA-disorder",
+          "pooled": 0.7822566467695307,
+          "auc_within": 0.8126448169829121,
+          "auc_within_unweighted": 0.7612919842759915,
+          "auc_between": 0.7813546642483975,
+          "rank_pooled": 33,
+          "rank_within": 4,
+          "rank_within_unweighted": 19
+        },
+        {
+          "method": "AUCpred-no-profile",
+          "pooled": 0.7802009178724557,
+          "auc_within": 0.713162046338803,
+          "auc_within_unweighted": 0.7104949630102425,
+          "auc_between": 0.7821907675387979,
+          "rank_pooled": 34,
+          "rank_within": 49,
+          "rank_within_unweighted": 46
+        },
+        {
+          "method": "NeProc2-beta-disorder",
+          "pooled": 0.7733500243370962,
+          "auc_within": 0.7096831493228387,
+          "auc_within_unweighted": 0.7112998631246846,
+          "auc_between": 0.7752397863081129,
+          "rank_pooled": 35,
+          "rank_within": 51,
+          "rank_within_unweighted": 43
+        },
+        {
+          "method": "AlphaFold-pLDDT",
+          "pooled": 0.7726328641790524,
+          "auc_within": 0.815721088247407,
+          "auc_within_unweighted": 0.8175213704242922,
+          "auc_between": 0.7713539183029624,
+          "rank_pooled": 36,
+          "rank_within": 3,
+          "rank_within_unweighted": 6
+        },
+        {
+          "method": "ESpritz-X",
+          "pooled": 0.772104722830381,
+          "auc_within": 0.738965620234444,
+          "auc_within_unweighted": 0.6990088876261888,
+          "auc_between": 0.7730883586036995,
+          "rank_pooled": 37,
+          "rank_within": 32,
+          "rank_within_unweighted": 51
+        },
+        {
+          "method": "Metapredict-v3",
+          "pooled": 0.7720258685904522,
+          "auc_within": 0.7727177632955312,
+          "auc_within_unweighted": 0.7306325856114188,
+          "auc_between": 0.7720053317523976,
+          "rank_pooled": 38,
+          "rank_within": 16,
+          "rank_within_unweighted": 36
+        },
+        {
+          "method": "SPOT-Disorder-Single",
+          "pooled": 0.7716480585452716,
+          "auc_within": 0.7227592758525864,
+          "auc_within_unweighted": 0.6991728089584878,
+          "auc_between": 0.7730991767652446,
+          "rank_pooled": 39,
+          "rank_within": 46,
+          "rank_within_unweighted": 50
+        },
+        {
+          "method": "rawMSA",
+          "pooled": 0.7716403400085591,
+          "auc_within": 0.7565443131744146,
+          "auc_within_unweighted": 0.7235122920619995,
+          "auc_between": 0.7720884207007279,
+          "rank_pooled": 40,
+          "rank_within": 22,
+          "rank_within_unweighted": 38
+        },
+        {
+          "method": "Metapredict-v2",
+          "pooled": 0.7709392427512415,
+          "auc_within": 0.7736526181857895,
+          "auc_within_unweighted": 0.7345926284751624,
+          "auc_between": 0.7708587042654409,
+          "rank_pooled": 41,
+          "rank_within": 15,
+          "rank_within_unweighted": 33
+        },
+        {
+          "method": "AIUPred-2-disorder",
+          "pooled": 0.7705175868660621,
+          "auc_within": 0.777115725956598,
+          "auc_within_unweighted": 0.6870118654061391,
+          "auc_between": 0.7703217407163966,
+          "rank_pooled": 42,
+          "rank_within": 14,
+          "rank_within_unweighted": 54
+        },
+        {
+          "method": "UdonPred-TriZOD",
+          "pooled": 0.7688889376907754,
+          "auc_within": 0.7546601299191722,
+          "auc_within_unweighted": 0.794813668005612,
+          "auc_between": 0.7693112775623908,
+          "rank_pooled": 43,
+          "rank_within": 25,
+          "rank_within_unweighted": 10
+        },
+        {
+          "method": "RONN",
+          "pooled": 0.7668326777887178,
+          "auc_within": 0.7539923764261307,
+          "auc_within_unweighted": 0.7423242199117519,
+          "auc_between": 0.7672138039741316,
+          "rank_pooled": 44,
+          "rank_within": 26,
+          "rank_within_unweighted": 30
+        },
+        {
+          "method": "Metapredict-v1",
+          "pooled": 0.7614064706219028,
+          "auc_within": 0.7278434127927096,
+          "auc_within_unweighted": 0.7154265383373724,
+          "auc_between": 0.7624026902463533,
+          "rank_pooled": 45,
+          "rank_within": 42,
+          "rank_within_unweighted": 42
+        },
+        {
+          "method": "ESpritz-N",
+          "pooled": 0.7606511349984967,
+          "auc_within": 0.7599666320619044,
+          "auc_within_unweighted": 0.7214188117859118,
+          "auc_between": 0.7606714524338715,
+          "rank_pooled": 46,
+          "rank_within": 21,
+          "rank_within_unweighted": 41
+        },
+        {
+          "method": "MobiDB-lite",
+          "pooled": 0.7606467731718533,
+          "auc_within": 0.7213639013119547,
+          "auc_within_unweighted": 0.7056840035709562,
+          "auc_between": 0.7618127684768927,
+          "rank_pooled": 47,
+          "rank_within": 47,
+          "rank_within_unweighted": 48
+        },
+        {
+          "method": "DRPBind-DNA",
+          "pooled": 0.7597014705158914,
+          "auc_within": 0.6989273839457587,
+          "auc_within_unweighted": 0.640336235577758,
+          "auc_between": 0.761505368659122,
+          "rank_pooled": 48,
+          "rank_within": 57,
+          "rank_within_unweighted": 63
+        },
+        {
+          "method": "VSL2",
+          "pooled": 0.7592861487615769,
+          "auc_within": 0.7115087807939622,
+          "auc_within_unweighted": 0.7214266282414186,
+          "auc_between": 0.7607042779384879,
+          "rank_pooled": 49,
+          "rank_within": 50,
+          "rank_within_unweighted": 40
+        },
+        {
+          "method": "pyHCA",
+          "pooled": 0.7585206102567178,
+          "auc_within": 0.7336966175489565,
+          "auc_within_unweighted": 0.6507866560675665,
+          "auc_between": 0.7592574367049677,
+          "rank_pooled": 50,
+          "rank_within": 39,
+          "rank_within_unweighted": 61
+        },
+        {
+          "method": "IsUnstruct",
+          "pooled": 0.7562878101623809,
+          "auc_within": 0.7095153885930598,
+          "auc_within_unweighted": 0.7109536810625774,
+          "auc_between": 0.7576761104920935,
+          "rank_pooled": 51,
+          "rank_within": 52,
+          "rank_within_unweighted": 44
+        },
+        {
+          "method": "DISOPRED3-diso",
+          "pooled": 0.7560563488833212,
+          "auc_within": 0.7363972363557896,
+          "auc_within_unweighted": 0.7395317204420429,
+          "auc_between": 0.7566398712131064,
+          "rank_pooled": 52,
+          "rank_within": 37,
+          "rank_within_unweighted": 32
+        },
+        {
+          "method": "DARUMA-beta",
+          "pooled": 0.7527867046669003,
+          "auc_within": 0.7231908485535078,
+          "auc_within_unweighted": 0.6856983124909466,
+          "auc_between": 0.753665169698681,
+          "rank_pooled": 53,
+          "rank_within": 45,
+          "rank_within_unweighted": 55
+        },
+        {
+          "method": "NeProc2-beta-binding",
+          "pooled": 0.750946544828332,
+          "auc_within": 0.6992872471582648,
+          "auc_within_unweighted": 0.6924246253071548,
+          "auc_between": 0.7524798975516196,
+          "rank_pooled": 54,
+          "rank_within": 56,
+          "rank_within_unweighted": 53
+        },
+        {
+          "method": "DeepDRPBind-RNA",
+          "pooled": 0.7507056202819022,
+          "auc_within": 0.6343270031617964,
+          "auc_within_unweighted": 0.5697877365832913,
+          "auc_between": 0.7541599736614869,
+          "rank_pooled": 55,
+          "rank_within": 71,
+          "rank_within_unweighted": 73
+        },
+        {
+          "method": "DisoPred",
+          "pooled": 0.7419648989776295,
+          "auc_within": 0.7388445693549173,
+          "auc_within_unweighted": 0.7067914675469971,
+          "auc_between": 0.7420575166890645,
+          "rank_pooled": 56,
+          "rank_within": 33,
+          "rank_within_unweighted": 47
+        },
+        {
+          "method": "DeepDISObind-nucleic",
+          "pooled": 0.7328904220772756,
+          "auc_within": 0.6890755528538403,
+          "auc_within_unweighted": 0.5366075948731781,
+          "auc_between": 0.7341909362552524,
+          "rank_pooled": 57,
+          "rank_within": 60,
+          "rank_within_unweighted": 78
+        },
+        {
+          "method": "DeepDISObind-all",
+          "pooled": 0.7247176674953758,
+          "auc_within": 0.6965254450264535,
+          "auc_within_unweighted": 0.5462646716962991,
+          "auc_between": 0.7255544698339275,
+          "rank_pooled": 58,
+          "rank_within": 58,
+          "rank_within_unweighted": 75
+        },
+        {
+          "method": "DeepDISObind-protein",
+          "pooled": 0.723839859365606,
+          "auc_within": 0.6763638947331025,
+          "auc_within_unweighted": 0.5430995731374874,
+          "auc_between": 0.7252490422802652,
+          "rank_pooled": 59,
+          "rank_within": 63,
+          "rank_within_unweighted": 76
+        },
+        {
+          "method": "IUPred3",
+          "pooled": 0.7236207249879301,
+          "auc_within": 0.6609259602821538,
+          "auc_within_unweighted": 0.6961730288948684,
+          "auc_between": 0.7254816327534876,
+          "rank_pooled": 60,
+          "rank_within": 66,
+          "rank_within_unweighted": 52
+        },
+        {
+          "method": "s2D-2",
+          "pooled": 0.7221177533133668,
+          "auc_within": 0.7259144933428595,
+          "auc_within_unweighted": 0.7417780706109676,
+          "auc_between": 0.7220050583692539,
+          "rank_pooled": 61,
+          "rank_within": 43,
+          "rank_within_unweighted": 31
+        },
+        {
+          "method": "ENSHROUD-protein",
+          "pooled": 0.7142013793157856,
+          "auc_within": 0.7019562874747866,
+          "auc_within_unweighted": 0.6665916830378582,
+          "auc_between": 0.7145648384754749,
+          "rank_pooled": 62,
+          "rank_within": 55,
+          "rank_within_unweighted": 60
+        },
+        {
+          "method": "DisoMine",
+          "pooled": 0.7120208263188523,
+          "auc_within": 0.6892044983559449,
+          "auc_within_unweighted": 0.6296060958275224,
+          "auc_between": 0.7126980612057993,
+          "rank_pooled": 63,
+          "rank_within": 59,
+          "rank_within_unweighted": 64
+        },
+        {
+          "method": "DisEMBL-dis465",
+          "pooled": 0.7078197045404833,
+          "auc_within": 0.684734168321248,
+          "auc_within_unweighted": 0.6761296104854598,
+          "auc_between": 0.7085049300744499,
+          "rank_pooled": 64,
+          "rank_within": 62,
+          "rank_within_unweighted": 58
+        },
+        {
+          "method": "AIUPred",
+          "pooled": 0.7068189877216856,
+          "auc_within": 0.6611904301385112,
+          "auc_within_unweighted": 0.6485305502291213,
+          "auc_between": 0.7081733358484583,
+          "rank_pooled": 65,
+          "rank_within": 65,
+          "rank_within_unweighted": 62
+        },
+        {
+          "method": "ENSHROUD-all",
+          "pooled": 0.702643031786603,
+          "auc_within": 0.6873762353439621,
+          "auc_within_unweighted": 0.6775938391289622,
+          "auc_between": 0.703096181267084,
+          "rank_pooled": 66,
+          "rank_within": 61,
+          "rank_within_unweighted": 57
+        },
+        {
+          "method": "DisPredict2",
+          "pooled": 0.7002650207939655,
+          "auc_within": 0.5554130137590114,
+          "auc_within_unweighted": 0.6000905535958547,
+          "auc_between": 0.7045645221321228,
+          "rank_pooled": 67,
+          "rank_within": 80,
+          "rank_within_unweighted": 70
+        },
+        {
+          "method": "OPAL",
+          "pooled": 0.6936598877432709,
+          "auc_within": 0.6280948565218135,
+          "auc_within_unweighted": 0.5224583875633901,
+          "auc_between": 0.6956059908401024,
+          "rank_pooled": 68,
+          "rank_within": 72,
+          "rank_within_unweighted": 80
+        },
+        {
+          "method": "DRPBind-RNA",
+          "pooled": 0.6872864435452002,
+          "auc_within": 0.6226534879100434,
+          "auc_within_unweighted": 0.6043056990943474,
+          "auc_between": 0.68920488074832,
+          "rank_pooled": 69,
+          "rank_within": 73,
+          "rank_within_unweighted": 69
+        },
+        {
+          "method": "DisEMBL-disHL",
+          "pooled": 0.687168105291916,
+          "auc_within": 0.6584009968276775,
+          "auc_within_unweighted": 0.6735180678172717,
+          "auc_between": 0.6880219714127151,
+          "rank_pooled": 70,
+          "rank_within": 67,
+          "rank_within_unweighted": 59
+        },
+        {
+          "method": "ESpritz-D",
+          "pooled": 0.6793287839102152,
+          "auc_within": 0.6628325116347,
+          "auc_within_unweighted": 0.5354142301357211,
+          "auc_between": 0.6798184267268733,
+          "rank_pooled": 71,
+          "rank_within": 64,
+          "rank_within_unweighted": 79
+        },
+        {
+          "method": "DRPBind-protein",
+          "pooled": 0.6778113233854102,
+          "auc_within": 0.6355638273656565,
+          "auc_within_unweighted": 0.6790355548340964,
+          "auc_between": 0.6790653147479662,
+          "rank_pooled": 72,
+          "rank_within": 70,
+          "rank_within_unweighted": 56
+        },
+        {
+          "method": "DeepDRPBind-protein",
+          "pooled": 0.6724271225056183,
+          "auc_within": 0.563597105831363,
+          "auc_within_unweighted": 0.5147734592346044,
+          "auc_between": 0.6756574181149139,
+          "rank_pooled": 73,
+          "rank_within": 79,
+          "rank_within_unweighted": 82
+        },
+        {
+          "method": "AIUPred-2-binding",
+          "pooled": 0.6704532821626589,
+          "auc_within": 0.6376210344323964,
+          "auc_within_unweighted": 0.553606627937098,
+          "auc_between": 0.6714278098612424,
+          "rank_pooled": 74,
+          "rank_within": 69,
+          "rank_within_unweighted": 74
+        },
+        {
+          "method": "ENSHROUD-nucleic",
+          "pooled": 0.6582199704070923,
+          "auc_within": 0.656142476885203,
+          "auc_within_unweighted": 0.6200031113790228,
+          "auc_between": 0.658281634628115,
+          "rank_pooled": 75,
+          "rank_within": 68,
+          "rank_within_unweighted": 65
+        },
+        {
+          "method": "DisoRDPbind-prot",
+          "pooled": 0.6529725222748056,
+          "auc_within": 0.6154720129050764,
+          "auc_within_unweighted": 0.5862010212012605,
+          "auc_between": 0.6540856134463889,
+          "rank_pooled": 76,
+          "rank_within": 76,
+          "rank_within_unweighted": 72
+        },
+        {
+          "method": "DisoRDPbind-dna",
+          "pooled": 0.6346422871659017,
+          "auc_within": 0.6223942811354046,
+          "auc_within_unweighted": 0.6084991976839202,
+          "auc_between": 0.6350058328246454,
+          "rank_pooled": 77,
+          "rank_within": 74,
+          "rank_within_unweighted": 68
+        },
+        {
+          "method": "DISOPRED3-bind",
+          "pooled": 0.6292442042987053,
+          "auc_within": 0.6198061607003057,
+          "auc_within_unweighted": 0.6147747787613167,
+          "auc_between": 0.6295243445736765,
+          "rank_pooled": 78,
+          "rank_within": 75,
+          "rank_within_unweighted": 67
+        },
+        {
+          "method": "MoRFchibi-light",
+          "pooled": 0.5934745518327429,
+          "auc_within": 0.5699180669753464,
+          "auc_within_unweighted": 0.49012328765262325,
+          "auc_between": 0.594173756077405,
+          "rank_pooled": 79,
+          "rank_within": 78,
+          "rank_within_unweighted": 83
+        },
+        {
+          "method": "ANCHOR2",
+          "pooled": 0.5866125071927469,
+          "auc_within": 0.5412697974108269,
+          "auc_within_unweighted": 0.517432619490781,
+          "auc_between": 0.5879583707770603,
+          "rank_pooled": 80,
+          "rank_within": 81,
+          "rank_within_unweighted": 81
+        },
+        {
+          "method": "DeepDRPBind-DNA",
+          "pooled": 0.571295365035772,
+          "auc_within": 0.4667689020290496,
+          "auc_within_unweighted": 0.4688064100452625,
+          "auc_between": 0.5743979224443264,
+          "rank_pooled": 81,
+          "rank_within": 86,
+          "rank_within_unweighted": 85
+        },
+        {
+          "method": "ProBiPred-nucleic",
+          "pooled": 0.5644352168421429,
+          "auc_within": 0.5916934097006491,
+          "auc_within_unweighted": 0.6000105293967998,
+          "auc_between": 0.5636261383967016,
+          "rank_pooled": 82,
+          "rank_within": 77,
+          "rank_within_unweighted": 71
+        },
+        {
+          "method": "MoRFchibi-web",
+          "pooled": 0.516494835350716,
+          "auc_within": 0.49655860244128047,
+          "auc_within_unweighted": 0.4426541337066878,
+          "auc_between": 0.5170865831754545,
+          "rank_pooled": 83,
+          "rank_within": 82,
+          "rank_within_unweighted": 86
+        },
+        {
+          "method": "MoRFchibi",
+          "pooled": 0.4748204264417572,
+          "auc_within": 0.4919547217079753,
+          "auc_within_unweighted": 0.470570167940201,
+          "auc_between": 0.4743118458087825,
+          "rank_pooled": 84,
+          "rank_within": 84,
+          "rank_within_unweighted": 84
+        },
+        {
+          "method": "DFLpred",
+          "pooled": 0.47316257199242284,
+          "auc_within": 0.48424825430158247,
+          "auc_within_unweighted": 0.6158405167502013,
+          "auc_between": 0.472833526458997,
+          "rank_pooled": 85,
+          "rank_within": 85,
+          "rank_within_unweighted": 66
+        },
+        {
+          "method": "LIPNet",
+          "pooled": 0.4728562959041955,
+          "auc_within": 0.49547243395161383,
+          "auc_within_unweighted": 0.5419925033624529,
+          "auc_between": 0.47218500305993844,
+          "rank_pooled": 86,
+          "rank_within": 83,
+          "rank_within_unweighted": 77
+        },
+        {
+          "method": "DisoRDPbind-rna",
+          "pooled": 0.4356432770729761,
+          "auc_within": 0.46016110293140494,
+          "auc_within_unweighted": 0.4271658152328651,
+          "auc_between": 0.4349155382777409,
+          "rank_pooled": 87,
+          "rank_within": 87,
+          "rank_within_unweighted": 87
+        },
+        {
+          "method": "bindEmbed21IDR-idrNuc",
+          "pooled": 0.36007887851444226,
+          "auc_within": 0.4132295453618434,
+          "auc_within_unweighted": 0.39088933297062695,
+          "auc_between": 0.3585012589293769,
+          "rank_pooled": 88,
+          "rank_within": 88,
+          "rank_within_unweighted": 88
+        },
+        {
+          "method": "bindEmbed21IDR-rawNuc",
+          "pooled": 0.35889029971855596,
+          "auc_within": 0.4122578488995554,
+          "auc_within_unweighted": 0.3865225782922317,
+          "auc_between": 0.3573062426259778,
+          "rank_pooled": 89,
+          "rank_within": 89,
+          "rank_within_unweighted": 89
+        },
+        {
+          "method": "ProBiPred-protein",
+          "pooled": 0.28634530927835244,
+          "auc_within": 0.3215545564472093,
+          "auc_within_unweighted": 0.3752506995085596,
+          "auc_between": 0.28530022741572086,
+          "rank_pooled": 90,
+          "rank_within": 90,
+          "rank_within_unweighted": 90
+        },
+        {
+          "method": "bindEmbed21IDR-idrGeneral",
+          "pooled": 0.25031212662526875,
+          "auc_within": 0.29198656335237255,
+          "auc_within_unweighted": 0.36205323422572405,
+          "auc_between": 0.24907514482472037,
+          "rank_pooled": 91,
+          "rank_within": 91,
+          "rank_within_unweighted": 91
+        },
+        {
+          "method": "bindEmbed21IDR-rawGeneral",
+          "pooled": 0.24326529225129842,
+          "auc_within": 0.2854919205116768,
+          "auc_within_unweighted": 0.3390674576420099,
+          "auc_between": 0.24201192028616184,
+          "rank_pooled": 92,
+          "rank_within": 92,
+          "rank_within_unweighted": 92
+        }
+      ]
+    }
+  }
+}

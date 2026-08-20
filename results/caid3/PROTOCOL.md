@@ -40,10 +40,27 @@ the same rank.
 estimated from repeat determinations of the same protein. Methods beyond that
 are reported as an unresolved group, never as a rank.
 
-Step 3 is what makes the protocol **calibration-invariant**: it is unchanged by
-any per-protein strictly monotone recalibration of a method's scores
-(`auc_within_strictMono_invariant`). Step 6 is what keeps it honest: a rank the
-labels cannot support is not printed.
+Step 3 is what makes the protocol **calibration-invariant**: each per-target AUC
+is unchanged by any strictly monotone recalibration of that target's scores, so
+any function of them is too.
+
+**A citation correction.** `auc_within_strictMono_invariant` states this for
+`AUC_within`, which is the **pair-weighted** mean of per-target AUCs — the form
+the decomposition identity requires. The protocol uses the **unweighted** mean
+(step 3), and the theorem as stated does not cover it. The invariance is
+immediate for both, since it holds target by target before any averaging, but
+the statement to cite should be the per-target one:
+
+```lean
+theorem auc_target_strictMono_invariant (f : ℝ → ℝ) (hf : StrictMono f) :
+    aucOn t (f ∘ s) = aucOn t s
+```
+
+from which both the weighted and unweighted means follow. Worth adding, because
+the protocol's central property should rest on a theorem about the statistic it
+actually uses.
+
+Step 6 is what keeps it honest: a rank the labels cannot support is not printed.
 
 ## CAID3 Disorder-PDB, re-scored — 120 entered, 60 eligible, 233 targets
 
