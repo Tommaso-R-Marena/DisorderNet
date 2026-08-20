@@ -9,30 +9,50 @@ Conceived the project and directed it throughout. Every question the work
 answers was posed here, and every decision about what to pursue, what to
 abandon, and what counted as an answer was made here.
 
-**The entire Lean 4 development is his work.** That is the spine of the paper:
-the capacity theorem in three score models with attainment instances, the
-constructive converse (`unresolvable_pair`), the AUC decomposition and its
-invariance, the discordance identity and the exact comparable-pair count, the
-imbalance-corrected bound, NP-hardness of the recalibration optimum proved from
-a verifier definition of NP through a verified Tseitin transformation, the
-arbitrary-dependence Benjamini–Yekutieli theorem with its matching sharpness
-instance, conformal p-value validity and its composition with that screen, and
-the counting converse. Roughly forty files, `sorry`-free, on `propext`,
-`Classical.choice` and `Quot.sound`.
+He specified every theorem in the formal development and directed its
+construction: which statement was worth proving, what its hypotheses should be,
+which of them were load-bearing, and when a proved statement did not say what
+the paper needed it to say.
 
-Several of the paper's corrections originate there rather than in any analysis:
-formalising `card_comparablePairs` is what exposed a wrong denominator that had
-produced a published capacity of 72 (the correct figure is 51), and formalising
-the hypotheses of `nuPair_le_two_eps_sq` is what showed the bound this project
-had called tight does not apply to its own data.
+## The formal development
+
+The Lean 4 proofs were produced with **Aristotle** (Harmonic) under that
+direction. They are the spine of the paper: the capacity theorem in three score
+models with attainment instances, the constructive converse
+(`unresolvable_pair`), the AUC decomposition and its invariance, the discordance
+identity and the exact comparable-pair count, the imbalance-corrected bound,
+NP-hardness of the recalibration optimum proved from a verifier definition of NP
+through a verified Tseitin transformation, the arbitrary-dependence
+Benjamini–Yekutieli theorem with its matching sharpness instance, conformal
+p-value validity and its composition with that screen, and the counting
+converse. Roughly forty files, `sorry`-free, on `propext`, `Classical.choice`
+and `Quot.sound`.
+
+**Provenance does not bear on whether these are true.** A `sorry`-free Lean
+proof on the standard axioms is checked by the kernel, so it is correct
+independently of who or what wrote it — which is the reason to state the tooling
+plainly rather than to hedge about it. What provenance does bear on is whether
+the right things were proved, and that is the part directed here: several of the
+paper's corrections originate in the formalisation rather than in any analysis.
+Formalising `card_comparablePairs` exposed a wrong denominator that had produced
+a published capacity of 72 (the correct figure is 51), and formalising the
+hypotheses of `nuPair_le_two_eps_sq` showed the bound this project had called
+tight does not apply to its own data. Neither would have surfaced without
+someone deciding those were the statements to formalise.
+
+**The development is not in this repository.** It is deposited separately and
+cited in the manuscript's Code Availability statement; no commit here touches a
+`.lean` file.
 
 ## Assistants
 
 Parts of the analysis code, the evaluation pipeline, the figures and the
 manuscript drafting were produced with AI coding assistants — Claude (Anthropic)
 and Cursor — under direction. Their contributions are visible in the history:
-commits carry `Co-Authored-By` trailers where applicable, and some are authored
-directly by an agent identity (`Cursor Agent`, `cursor[bot]`, `Claude`).
+commits from 2026-07-30 onward carry `Co-Authored-By` trailers, and some are
+authored directly by an agent identity (`Cursor Agent`, `cursor[bot]`,
+`Claude`). Those trailers cover analysis and manuscript work only; none of them
+sits on a proof, because the proofs are not kept here.
 
 Nothing has been removed from that record. It is left intact because the paper's
 central claim is that a result should be checkable against its source, and a
@@ -42,8 +62,10 @@ a Code Availability statement is part of that disclosure.
 
 ## What that division means for the paper
 
-The theorems are the contribution, and they are not assistant output. The
-assistants did what assistants are good at: fetching and verifying public data,
+The theorems are the contribution. They were machine-produced and are
+machine-checked, which makes their correctness independent of their authorship;
+what was human was the choice of what to prove. The coding assistants did what
+coding assistants are good at: fetching and verifying public data,
 running jobs on a cluster, computing statistics, drawing figures, and drafting
 prose against a specification. Each of those is checkable, and much of it was
 checked and found wrong at least once — the errors and the measurements that
@@ -51,7 +73,8 @@ caught them are catalogued in Supplementary Note S5 rather than quietly fixed.
 
 ## Reproducing the claims
 
-- Lean: `RequestProject/`. `lake build`, then `#print axioms` on any cited name.
+- Lean: deposited separately (see Code Availability). `lake build`, then
+  `#print axioms` on any cited name.
 - Analysis: `results/caid3/*.py`, each writing the JSON that a figure reads.
 - Figures and tables: `paper/make_figures.py`, `paper/make_supplementary.py`.
 - Manuscript: `paper/latex/`, `pdflatex` on a stock TeX Live.
