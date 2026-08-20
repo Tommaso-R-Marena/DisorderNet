@@ -40,9 +40,10 @@ hypotheses of `nuPair_le_two_eps_sq` showed the bound this project had called
 tight does not apply to its own data. Neither would have surfaced without
 someone deciding those were the statements to formalise.
 
-**The development is not in this repository.** It is deposited separately and
-cited in the manuscript's Code Availability statement; no commit here touches a
-`.lean` file.
+The development is in `lean/` — 403 files, with the toolchain and mathlib
+revision pinned so the axiom claim can be checked rather than taken on trust.
+Commits before 2026-08-20 do not touch it, which is why no `Co-Authored-By`
+trailer sits on a proof.
 
 ## Assistants
 
@@ -73,8 +74,8 @@ caught them are catalogued in Supplementary Note S5 rather than quietly fixed.
 
 ## Reproducing the claims
 
-- Lean: deposited separately (see Code Availability). `lake build`, then
-  `#print axioms` on any cited name.
+- Lean: `lean/`. `lake update && lake build`, then `#print axioms` on any cited
+  name. `lean/README.md` maps every claim in the paper to its file.
 - Analysis: `results/caid3/*.py`, each writing the JSON that a figure reads.
 - Figures and tables: `paper/make_figures.py`, `paper/make_supplementary.py`.
 - Manuscript: `paper/latex/`, `pdflatex` on a stock TeX Live.
