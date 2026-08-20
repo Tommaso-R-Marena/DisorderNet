@@ -179,12 +179,20 @@ def s7_noise():
     rows = [[r["acc"], r["n_structures"], r["n_structure_pairs"],
              r["label_residues"], r["label_disagree"], f"{r['eps_label']:.6f}",
              r["pair_total"], r["pair_discordant"],
-             f"{r['eps_pairwise']:.6f}"]
+             f"{r['eps_pairwise']:.6f}", f"{r['eps_pairwise_superseded']:.6f}",
+             r["agree_disordered"], r["agree_ordered"],
+             r["flip_down"], r["flip_up"],
+             r["sp_checked"], r["sp_balanced"], r["sp_hypotheses_ok"],
+             r["sp_bound_ok"], r["sp_bound_ok_under_hypotheses"]]
             for r in sorted(rel["proteins"], key=lambda r: -r["pair_total"])]
     write("S7_per_protein_noise.csv",
           ["accession", "n_structures", "n_structure_pairs",
            "residues_compared", "label_disagreements", "eps_label",
-           "pairs_compared", "discordant_pairs", "eps_pairwise"], rows)
+           "comparable_pairs", "discordant_pairs", "eps_pairwise",
+           "eps_pairwise_superseded", "agree_disordered", "agree_ordered",
+           "flip_down_d", "flip_up_u", "structure_pairs_checked",
+           "balanced_within_10pct", "both_hypotheses", "bound_holds",
+           "bound_holds_under_hypotheses"], rows)
 
 
 def s8_reproducibility():
@@ -230,9 +238,24 @@ def s14_registered_endpoints():
            "p_holm_adjusted"], rows)
 
 
+def s15_region_screen():
+    """What the unit of testing costs, per reference."""
+    rs = load("region_screen")
+    rows = [[v["round"], NICE.get(v["task"], v["task"]), v["n_residues"],
+             v["n_regions"], v["n_disordered_regions"],
+             f"{v['mean_region_length']:.2f}", f"{v['H_residues']:.4f}",
+             f"{v['H_regions']:.4f}", f"{v['saving']:.4f}",
+             f"{v['log_b_minus_1']:.4f}", f"{v['threshold_ratio']:.4f}"]
+            for v in rs.values()]
+    write("S15_region_screen.csv",
+          ["round", "benchmark", "n_residues", "n_regions",
+           "n_disordered_regions", "mean_region_length", "H_residues",
+           "H_regions", "saving", "log_b_minus_1", "threshold_ratio"], rows)
+
+
 for f in (s1_decomposition, s2_inversions, s3_pairwise, s4_operating_cost,
           s5_paired_tests, s6_capacity, s7_noise, s8_reproducibility,
-          s14_registered_endpoints):
+          s14_registered_endpoints, s15_region_screen):
     try:
         f()
     except Exception as exc:

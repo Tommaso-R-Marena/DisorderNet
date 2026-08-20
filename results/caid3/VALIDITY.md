@@ -2,7 +2,7 @@
 
 ## The objection
 
-The pairwise protocol certifies 72 orderings where the residue-level protocol
+The pairwise protocol certifies 51 orderings where the residue-level protocol
 certifies 8. A referee's first move is: *more resolution is not automatically
 more signal. A protocol could resolve more pairs and resolve them wrongly.*
 
@@ -37,7 +37,7 @@ significant, and on Disorder-NOX it is nominally negative.
 
 **It answers the objection.** The extra resolution is not noise: a ranking that
 reproduces itself at ρ = 0.997 across two independent rounds and 24 methods is
-measuring something stable. The pairwise protocol certifies nine times as many
+measuring something stable. The pairwise protocol certifies six times as many
 orderings **at no cost in reproducibility.**
 
 **It does not establish that the pairwise ordering is *more* valid**, and this
@@ -50,7 +50,7 @@ The two claims are independent and both are needed:
 
 | | source | status |
 |---|---|---|
-| the pairwise protocol certifies 72 orderings, the residue one 8 | `card_le_benchCapacity` + measured `ε_pair` | **proved and measured** |
+| the pairwise protocol certifies 51 orderings, the residue one 8 | `pairwise_capacity_bound` + measured `ε_pair` | **proved and measured** |
 | the extra orderings are reproducible on a held-out round | this analysis, 57 shared entrants | **measured** |
 | the extra orderings are *more* valid than the pooled ones | — | **not shown** |
 
@@ -65,11 +65,13 @@ The argument does not need a validity advantage. It is:
 1. At the measured annotation error rate, the residue-level protocol can order
    **8** of 117 entrants, and `unresolvable_pair` makes the rest a hard
    impossibility rather than a limitation of any analysis.
-2. The pairwise protocol can order **72**, because discordance is a second-order
-   event — `discordant = 2·d·u` exactly, so `ε_pair ≤ 2·ε_label²`.
+2. The pairwise protocol can order **51**, because discordance is a second-order
+   event — `discordant = 2·d·u` exactly (`discordant_eq_flip_product`) — and the
+   pairs it can score are counted exactly too (`card_comparablePairs`), so the
+   rate is measured rather than derived from the label rate.
 3. Its rankings reproduce across rounds **as well as** the ones the challenge
    reports.
 
-A protocol that resolves nine times as much of the field, with the same
+A protocol that resolves six times as much of the field, with the same
 cross-round stability, from the same data, is worth adopting whether or not it
 also happens to be more accurate.

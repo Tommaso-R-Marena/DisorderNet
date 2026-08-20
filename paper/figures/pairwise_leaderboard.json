@@ -1,8 +1,8 @@
 {
   "eps_label": 0.06513233547774792,
-  "eps_pairwise": 0.00699048037358746,
+  "eps_pairwise": 0.009956213285375581,
   "capacity_label": 8,
-  "capacity_pairwise": 72,
+  "capacity_pairwise": 51,
   "tasks": {
     "disorder_pdb": {
       "n_entered": 120,

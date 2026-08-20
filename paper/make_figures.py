@@ -164,21 +164,31 @@ def figure2():
     ax.text(1.45, 120, "117 entered", fontsize=7, color=MUT, ha="right")
     ax.set_ylabel("methods the benchmark can order")
     ax.set_ylim(0, 135)
-    ax.set_title("Pairwise scoring squares the noise\n"
-                 f"ε 0.065 → 0.007, capacity 8 → 72")
+    ax.set_title("Pair noise is second-order:\n"
+                 f"ε {rel['eps_label_pooled']:.3f} → "
+                 f"{rel['eps_pairwise_pooled']:.4f}")
     panel_label(ax, "b")
 
     ax = axes[2]
-    e = np.linspace(0.01, 0.20, 300)
-    ax.plot(e * 100, e * 100, color=WARN, lw=1.5, label="label noise  ε")
-    ax.plot(e * 100, 2 * e * e * 100, color=ACC, lw=1.5,
-            label="pair noise bound  2ε²")
-    ax.plot([rel["eps_label_pooled"] * 100], [rel["eps_pairwise_pooled"] * 100],
-            "o", color=INK, ms=6, zorder=5, label="measured")
-    ax.set_xlabel("label-flip rate ε (%)")
-    ax.set_ylabel("noise rate (%)")
-    ax.legend(frameon=False, fontsize=7)
-    ax.set_title("discordant = 2·d·u  ⟹  ε$_{pair}$ ≤ 2ε²")
+    sp = rel["structure_pairs"]
+    rows = [("both hypotheses\n(bound holds on all "
+             f"{sp['bound_holds_under_hypotheses']})", sp["both_hypotheses"]),
+            ("balanced agreement\nclasses (within 10%)", sp["balanced_within_10pct"]),
+            ("noise rate ε ≤ 1/4", sp["eps_le_quarter"])]
+    y = np.arange(len(rows))
+    ax.barh(y, [sp["checked"]] * len(rows), color=MUT, height=0.6)
+    ax.barh(y, [r[1] for r in rows], color=[WARN, WARN, ACC], height=0.6)
+    for i, r in enumerate(rows):
+        ax.text(sp["checked"] * 1.03, i, f"{r[1]:,} / {sp['checked']:,}",
+                va="center", fontsize=6.6)
+    ax.set_yticks(y)
+    ax.set_yticklabels([r[0] for r in rows], fontsize=6.6)
+    ax.set_xlim(0, sp["checked"] * 1.55)
+    ax.set_xlabel("structure pairs")
+    ax.invert_yaxis()
+    ax.set_title("The closed form needs balance,\n"
+                 f"and only {sp['both_hypotheses']} of {sp['checked']:,} "
+                 f"pairs have it")
     panel_label(ax, "c")
     _ = cap, an
 
@@ -484,7 +494,7 @@ def figure6():
     ax.set_ylim(0.7, 1.06)
     ax.legend(frameon=False, fontsize=6.4, loc="lower right", ncol=2,
               columnspacing=0.8, handletextpad=0.4)
-    ax.set_title("Nine times the resolution,\nat no cost in reproducibility")
+    ax.set_title("Six times the resolution,\nat no cost in reproducibility")
     panel_label(ax, "a")
 
     ax = axes[1]
@@ -541,7 +551,97 @@ def figure6():
     plt.close(fig)
 
 
-for f in (figure1, figure2, figure3, figure4, figure5, figure6):
+# ── Figure 7 — the price of a screen ────────────────────────────────────────
+def figure7():
+    rs = load("region_screen")
+    fig, axes = plt.subplots(1, 3, figsize=(10.2, 3.0))
+
+    # (a) logarithmic against linear
+    ax = axes[0]
+    m = np.unique(np.logspace(0, 5.2, 400).astype(int))
+    H = np.cumsum(1.0 / np.arange(1, m.max() + 1))[m - 1]
+    ax.plot(m, H, color=ACC, lw=1.8, label="harmonic  $H_m$  (this work)")
+    ax.plot(m, m, color=WARN, lw=1.5, ls="--", label="Bonferroni  $m$")
+    pdb = rs["CAID3 disorder_pdb"]
+    for n, lab, col in ((pdb["n_regions"], "one hypothesis\nper region", ACC),
+                        (pdb["n_residues"], "one hypothesis\nper residue", INK)):
+        h = float(np.cumsum(1.0 / np.arange(1, n + 1))[-1])
+        ax.plot([n], [h], "o", color=col, ms=6, zorder=5, mec="white", mew=0.7)
+        ax.annotate(f"{lab}\n{n:,} → $H$ = {h:.1f}", (n, h),
+                    textcoords="offset points",
+                    xytext=(8, 26 if col is ACC else -30), fontsize=6.4,
+                    ha="left", color=col,
+                    arrowprops=dict(arrowstyle="->", color=col, lw=0.7))
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("hypotheses the screen states, $m$")
+    ax.set_ylabel("deflation factor")
+    ax.set_ylim(1, 3e4)
+    ax.legend(frameon=False, fontsize=6.4, loc="upper left")
+    ax.set_title("Arbitrary dependence costs a\nlogarithm, not a factor of $m$")
+    panel_label(ax, "a")
+
+    # (b) what the design choice is worth, per reference
+    ax = axes[1]
+    keys = [k for k in rs if k.startswith("CAID3")] + \
+           [k for k in rs if k.startswith("CAID2")]
+    y = np.arange(len(keys))
+    ax.barh(y, [rs[k]["saving"] for k in keys], color=ACC, height=0.6,
+            label="measured  $H_n - H_M$")
+    ax.barh(y, [rs[k]["log_b_minus_1"] for k in keys], color=INK, height=0.22,
+            label="proved floor  $\\log b - 1$")
+    for i, k in enumerate(keys):
+        ax.text(rs[k]["saving"] + 0.12, i,
+                f"×{rs[k]['threshold_ratio']:.2f}", va="center", fontsize=6.6,
+                color=ACC, fontweight="bold")
+    ax.set_yticks(y)
+    ax.set_yticklabels([k.replace("CAID3 ", "3 · ").replace("CAID2 ", "2 · ")
+                        .replace("disorder_pdb", "Disorder-PDB")
+                        .replace("disorder_nox", "Disorder-NOX")
+                        .replace("binding_idr", "Binding-IDR")
+                        .replace("binding", "Binding")
+                        .replace("linker", "Linker") for k in keys],
+                       fontsize=6.6)
+    ax.set_xlabel("nats of correction bought back")
+    ax.set_xlim(0, 8.6)
+    ax.invert_yaxis()
+    ax.legend(frameon=False, fontsize=6.2, loc="upper center",
+              bbox_to_anchor=(0.5, -0.20), ncol=2, columnspacing=1.2,
+              handletextpad=0.5)
+    ax.set_title("Testing regions, not residues\n(label = threshold gained)")
+    panel_label(ax, "b")
+
+    # (c) the factor is attained, so the correction is necessary
+    ax = axes[2]
+    mm = np.arange(1, 61)
+    Hm = np.cumsum(1.0 / mm)
+    q = 0.05
+    ax.plot(mm, q * Hm, color=WARN, lw=1.8,
+            label="uncorrected BH, realised")
+    ax.axhline(q, color=INK, lw=1.4, ls="--", label="nominal level  q")
+    ax.plot(mm, np.full_like(mm, q, dtype=float) * 0 + q, color=ACC, lw=1.8,
+            label="BH at  q/$H_m$, realised")
+    ax.axvline(2, color=MUT, lw=1, ls=":")
+    ax.annotate("exceeds its level\nfrom m = 2", (2, q * Hm[1]),
+                textcoords="offset points", xytext=(16, -4), fontsize=6.6,
+                color=WARN,
+                arrowprops=dict(arrowstyle="->", color=WARN, lw=0.7))
+    ax.set_xlabel("candidates, $m$")
+    ax.set_ylabel("E[FDP] on the constructed law")
+    ax.set_ylim(-0.048, q * Hm[-1] * 1.08)
+    ax.set_yticks([0.0, 0.05, 0.10, 0.15, 0.20, 0.25])
+    ax.legend(frameon=False, fontsize=6.2, loc="lower right")
+    ax.set_title("The harmonic factor is attained,\nso it cannot be lowered")
+    panel_label(ax, "c")
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(D, "figure7_screen.png"))
+    fig.savefig(os.path.join(D, "figure7_screen.pdf"))
+    plt.close(fig)
+
+
+for f in (figure1, figure2, figure3, figure4, figure5, figure6,
+          figure7):
     try:
         f()
         print(f"  {f.__name__} ok")

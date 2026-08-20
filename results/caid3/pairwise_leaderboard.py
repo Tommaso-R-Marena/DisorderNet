@@ -2,7 +2,7 @@
 """CAID3 re-scored under the pairwise protocol, for every entrant.
 
 The residue-level protocol CAID uses has capacity 8 at the measured annotation
-error rate; it has 117 entrants. The pairwise protocol has capacity 72, because
+error rate; it has 117 entrants. The pairwise protocol has capacity 51, because
 a pair is reversed only when **both** its residues flip in opposite directions —
 a second-order event. The noise is squared, so the resolution is not.
 
@@ -99,8 +99,11 @@ def main() -> int:
     cap_lab = math.ceil(1 / (2 * eps_label)) if eps_label else None
     print(f"annotation noise: label {eps_label:.4f} -> capacity {cap_lab};  "
           f"pairwise {eps_pair:.4f} -> capacity {cap_pair}")
-    print(f"bound eps_pair <= 2*eps_label^2 = {2*eps_label**2:.5f} "
-          f"(measured {eps_pair:.5f})")
+    # The closed form needs balanced agreement classes; CAID3's stand at
+    # 0.433, so this line reports a comparison and not a guarantee.
+    print(f"closed form 2*eps_label^2 = {2*eps_label**2:.5f} "
+          f"(measured {eps_pair:.5f}; the balance hypothesis it needs does not "
+          f"hold on this reference, so the measurement governs)")
 
     report = {"eps_label": eps_label, "eps_pairwise": eps_pair,
               "capacity_label": cap_lab, "capacity_pairwise": cap_pair,

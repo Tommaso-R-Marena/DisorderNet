@@ -144,7 +144,10 @@ def rates(rec) -> dict | None:
     """Label-flip and pairwise-discordance rates over structure pairs."""
     sids = sorted(rec["per"])
     lab_dis = lab_tot = 0
-    pair_dis = pair_tot = 0
+    pair_dis = pair_tot = pair_tot_old = 0
+    agree_dis = agree_ord = flip_d = flip_u = 0
+    sp_checked = sp_bound_ok = sp_balanced = sp_eps_small = 0
+    sp_hyp_ok = sp_bound_ok_under_hyp = 0
     used = 0
     for i in range(len(sids)):
         for j in range(i + 1, len(sids)):
@@ -171,11 +174,49 @@ def rates(rec) -> dict | None:
             n00 = int(((ya == 0) & (yb == 0)).sum())
             # a orders (p,q) as p>q iff ya[p]=1, ya[q]=0. b orders it the other
             # way iff yb[p]=0, yb[q]=1. So discordant pairs are those with
-            # p in {ya=1, yb=0} and q in {ya=0, yb=1}, in either direction.
+            # p in {ya=1, yb=0} and q in {ya=0, yb=1}, in either direction:
+            #
+            #   discordant = 2 * d * u          `discordant_eq_flip_product`
+            #
+            # and the pairs *both* labellings order — the only ones a pairwise
+            # protocol scores — are the ones separated by both:
+            #
+            #   comparable = 2 * (a * e + d * u)   `card_comparablePairs`
+            #
+            # with a = |T n L| (both call disordered), e = |(T u L)^c| (both
+            # call ordered), d = |T \ L|, u = |L \ T|.
+            #
+            # An earlier version of this denominator counted
+            #   2du + (a+d)(e+u) + (a+u)(e+d) = 2ae + 4du + (a+e)(d+u),
+            # which is the pairs ordered by *either* labelling with the
+            # discordant ones counted twice — larger than the comparable set,
+            # and mixing ordered with unordered counts. It understated the rate
+            # by a factor of 1.17 at this composition. Both are recorded so the
+            # correction is visible rather than silent.
             pair_dis += 2 * n10 * n01
-            # total pairs ordered by *both* labellings, either direction
-            pair_tot += 2 * (n10 * n01 + n01 * n10) // 2 + \
+            pair_tot += 2 * (n11 * n00 + n10 * n01)
+            pair_tot_old += 2 * (n10 * n01) + \
                 (n11 + n10) * (n00 + n01) + (n11 + n01) * (n00 + n10)
+            agree_dis += n11
+            agree_ord += n00
+            flip_d += n10
+            flip_u += n01
+            # The theorem's unit is one (truth, annotation) pair, not one
+            # protein, so the bound is checked here rather than on a protein's
+            # pooled ratios -- a sum of ratios satisfies no bound its terms do.
+            cmp_ij = 2 * (n11 * n00 + n10 * n01)
+            if cmp_ij:
+                eps_ij = (n10 + n01) / n
+                nu_ij = (2 * n10 * n01) / cmp_ij
+                sp_checked += 1
+                sp_bound_ok += int(nu_ij <= 2 * eps_ij ** 2)
+                sp_balanced += int(min(n11, n00) >= 0.9 * max(n11, n00, 1))
+                sp_eps_small += int(4 * (n10 + n01) <= n)
+                sp_hyp_ok += int(min(n11, n00) >= 0.9 * max(n11, n00, 1)
+                                 and 4 * (n10 + n01) <= n)
+                if (min(n11, n00) >= 0.9 * max(n11, n00, 1)
+                        and 4 * (n10 + n01) <= n):
+                    sp_bound_ok_under_hyp += int(nu_ij <= 2 * eps_ij ** 2)
             used += 1
         if used >= MAX_STRUCT_PAIRS:
             break
@@ -185,8 +226,20 @@ def rates(rec) -> dict | None:
             "n_structure_pairs": used,
             "eps_label": lab_dis / lab_tot,
             "eps_pairwise": pair_dis / pair_tot,
+            "eps_pairwise_superseded": pair_dis / pair_tot_old,
             "label_residues": lab_tot, "label_disagree": lab_dis,
-            "pair_total": pair_tot, "pair_discordant": pair_dis}
+            "pair_total": pair_tot, "pair_total_superseded": pair_tot_old,
+            "pair_discordant": pair_dis,
+            # The balance hypothesis of `nuPair_le_two_eps_sq` is
+            # |T n L| = |(T u L)^c|. It is recorded, not assumed: on a reference
+            # that is 31.6% disordered it does not hold, and the 2*eps^2 bound
+            # is then an observation rather than a guarantee.
+            "agree_disordered": agree_dis, "agree_ordered": agree_ord,
+            "flip_down": flip_d, "flip_up": flip_u,
+            "sp_checked": sp_checked, "sp_bound_ok": sp_bound_ok,
+            "sp_balanced": sp_balanced, "sp_eps_small": sp_eps_small,
+            "sp_hypotheses_ok": sp_hyp_ok,
+            "sp_bound_ok_under_hypotheses": sp_bound_ok_under_hyp}
 
 
 def main() -> int:
@@ -232,10 +285,54 @@ def main() -> int:
     print(f"  from pairwise noise "
           f"{max(1, math.ceil(1/(2*prs))) if prs else '-':>6}")
 
+    prs_old = sum(r["pair_discordant"] for r in rows) / sum(
+        r["pair_total_superseded"] for r in rows)
+    a_tot = sum(r["agree_disordered"] for r in rows)
+    e_tot = sum(r["agree_ordered"] for r in rows)
+    print(f"\nsuperseded denominator gave eps_pair = {prs_old:.4f} "
+          f"(capacity {max(1, math.ceil(1 / (2 * prs_old)))}); "
+          f"the comparable-pairs denominator gives {prs:.4f}")
+    print(f"balance hypothesis |T n L| = |(T u L)^c|: "
+          f"{a_tot:,} vs {e_tot:,}  ratio {a_tot / e_tot:.3f}"
+          f"  -> {'holds' if abs(a_tot - e_tot) <= 0.02 * (a_tot + e_tot) else 'FAILS'}")
+    print(f"bound 2*eps_label^2 = {2 * lab ** 2:.5f}   measured {prs:.5f}   "
+          f"{'satisfied' if prs <= 2 * lab ** 2 else 'VIOLATED'}")
+    spc = sum(r["sp_checked"] for r in rows)
+    spb = sum(r["sp_bound_ok"] for r in rows)
+    spbal = sum(r["sp_balanced"] for r in rows)
+    speps = sum(r["sp_eps_small"] for r in rows)
+    sphyp = sum(r["sp_hypotheses_ok"] for r in rows)
+    spok = sum(r["sp_bound_ok_under_hypotheses"] for r in rows)
+    print(f"\nper structure pair, the theorem's own unit ({spc:,} pairs):")
+    print(f"  balanced agreement classes within 10%   {spbal:6,d}"
+          f"  ({spbal / spc:6.1%})")
+    print(f"  noise rate eps <= 1/4                   {speps:6,d}"
+          f"  ({speps / spc:6.1%})")
+    print(f"  both hypotheses of nuPair_le_two_eps_sq {sphyp:6,d}"
+          f"  ({sphyp / spc:6.1%})")
+    print(f"  bound nu_pair <= 2 eps^2 holds          {spb:6,d}"
+          f"  ({spb / spc:6.1%})")
+    print(f"  ... among those satisfying both         {spok:6,d}"
+          f"  ({spok / sphyp:6.1%})" if sphyp else "  ... none satisfy both")
+
     report = {"n_proteins": len(rows), "eps_label_pooled": lab,
               "eps_pairwise_pooled": prs,
+              "eps_pairwise_pooled_superseded": prs_old,
+              "bound_two_eps_sq": 2 * lab ** 2,
+              "bound_satisfied": bool(prs <= 2 * lab ** 2),
+              "agree_disordered_total": a_tot, "agree_ordered_total": e_tot,
+              "balance_ratio": a_tot / e_tot if e_tot else None,
               "capacity_label": max(1, math.ceil(1 / (2 * lab))) if lab else None,
               "capacity_pairwise": max(1, math.ceil(1 / (2 * prs))) if prs else None,
+              "capacity_pairwise_superseded": (
+                  max(1, math.ceil(1 / (2 * prs_old))) if prs_old else None),
+              "capacity_from_bound": (
+                  max(1, math.ceil(1 / (4 * lab ** 2))) if lab else None),
+              "structure_pairs": {
+                  "checked": spc, "bound_holds": spb,
+                  "balanced_within_10pct": spbal, "eps_le_quarter": speps,
+                  "both_hypotheses": sphyp,
+                  "bound_holds_under_hypotheses": spok},
               "proteins": rows}
     if OUT:
         with open(OUT + ".part", "w") as fh:

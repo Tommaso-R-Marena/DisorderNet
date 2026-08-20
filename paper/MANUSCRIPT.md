@@ -23,13 +23,14 @@ Disorder-PDB are ordered in one deposited structure and disordered in another,
 The resolution is not absent from the data; the protocol discards it. AUC is a
 function of ordered pairs, not of labels, and a pair is reversed only when both
 its residues flip in opposite directions. That is an exact identity —
-discordant = 2·d·u — and it gives ε_pair ≤ 2·ε_label². Measured on repeat
-determinations of the same protein, ε_pair = 0.0070 against a bound of 0.00848:
-the noise is squared and the capacity becomes quadratic, **72 of 117**. We
-specify a six-step pairwise protocol that realises it, re-score all of CAID3
-under it, and show the resulting ranking reproduces itself on a held-out round
-(CAID2, 57 shared entrants) as well as the reported one does — nine times the
-resolution at no cost in reproducibility. Under it, AlphaFold's pLDDT, a
+discordant = 2·d·u, machine-checked and unconditional — and the pairs a pairwise
+protocol can score are counted exactly too. Measured on 2,746 pairs of deposited
+structures of the same protein, the pairwise rate is 0.0100 against a label rate
+of 0.0651, and the capacity rises from 8 to **51 of 117**. We specify a six-step
+pairwise protocol that realises it, re-score all of CAID3 under it, and show the
+resulting ranking reproduces itself on a held-out round (CAID2, 57 shared
+entrants) as well as the reported one does — six times the resolution at no cost
+in reproducibility. Under it, AlphaFold's pLDDT, a
 confidence score never trained on disorder, moves from 39th to 6th on
 Disorder-NOX, and the declared winners of three of five CAID3 benchmarks are
 21st to 25th at the residue-level question the metric is read as asking.
@@ -231,7 +232,7 @@ own registration named, against a regime-matched control, with not one of
 fifteen paired comparisons surviving Holm (Supplementary Note S4). We were
 trying to resolve a pair the benchmark cannot resolve.
 
-### Pairwise scoring squares the noise, and the capacity becomes quadratic
+### Pairwise scoring makes the noise second-order, and the capacity rises sixfold
 
 The bound is a statement about **labels**. AUC is not a function of labels one
 at a time; it is a function of **ordered pairs**. The noise a ranking statistic
@@ -246,13 +247,22 @@ d = |T \ L| and u = |L \ T|,
     discordant(T, L) = 2·d·u        exactly,
     noise(T, L)      = d + u,
 
-and by AM–GM, d·u ≤ ((d+u)/2)², so discordant ≤ noise²/2. As rates over n
-residues with balanced classes,
+and by AM–GM, d·u ≤ ((d+u)/2)², so discordant ≤ noise²/2. Both are identities
+about counting and hold with no hypotheses at all
+(`discordant_eq_flip_product`, `discordant_le_noise_sq`).
 
-    ε_pair ≤ 2·ε_label²,
+The pairs a pairwise protocol can actually score are the ones **both** labellings
+order, and `card_comparablePairs` counts those exactly as well:
 
-and the capacity improves from ⌈1/(2ε)⌉ to ⌈1/(4ε²)⌉ — quadratic in the label
-quality rather than linear.
+    |comparable(T, L)| = 2·(|T ∩ L|·|(T ∪ L)ᶜ| + d·u),
+
+so the noise rate a pairwise protocol suffers is exactly
+
+    ε_pair = d·u / (|T ∩ L|·|(T ∪ L)ᶜ| + d·u).
+
+`noise_orderKey` closes the loop: on comparable pairs, that quantity *is* the
+label noise of the answer key the annotation induces, so the capacity theorem
+applies at the pair level verbatim (`pairwise_capacity_bound`).
 
 Measured, from MobiDB's per-structure calls over all pairs of structures of the
 same protein, on the 159 CAID3 Disorder-PDB targets with at least two deposited
@@ -261,28 +271,52 @@ structures (**Fig. 2b,c**):
 | | pooled | median protein |
 |---|---:|---:|
 | label-flip rate ε_label | **0.0651** | 0.0342 |
-| pairwise discordance ε_pair | **0.0070** | 0.0006 |
+| pairwise discordance ε_pair | **0.0100** | 0.0006 |
 
-Ratio 9.32; the bound predicts 2ε² = 0.00848 and is tight to 20%. The
-consequence is the central result of this paper:
+Ratio 6.54. The consequence is the central result of this paper:
 
 | scoring protocol | ε | capacity ⌈1/2ε⌉ |
 |---|---:|---:|
 | residue labels, as CAID scores now | 0.0651 | **8** |
-| **within-protein pairwise** | **0.0070** | **72** |
+| **within-protein pairwise** | **0.0100** | **51** |
 
-**A benchmark scored on within-protein pairwise comparisons can order 72 methods
+**A benchmark scored on within-protein pairwise comparisons can order 51 methods
 where the residue-level protocol orders 8.** CAID3 has 117 entrants.
 
-An earlier version of this argument attributed the gap to spatial correlation —
-disorder flips in blocks, so only pairs crossing a block boundary reverse, and
-the reduction should scale as 1/L. The block statistics are real (mass-weighted
-mean block length 73.8 residues; 67.4% of context-dependent residues in blocks
-of ten or more), but 1/L predicts a ratio of 0.0136 against a measured 0.1075,
-over-predicting the reduction eightfold. The correct mechanism needs no
-correlation assumption at all: it is the second-order identity above. We record
-the wrong mechanism because it was tested and refuted by the same measurement
-that confirmed the right one.
+**The closed form does not apply here, and the theorem is what says so.**
+`nuPair_le_two_eps_sq` gives ε_pair ≤ 2·ε_label², and with it a capacity
+quadratic in label quality rather than linear — but it carries two hypotheses,
+and one is that the *agreement* classes balance, |T ∩ L| = |(T ∪ L)ᶜ|. It is
+load-bearing: the denominator |T ∩ L|·|(T ∪ L)ᶜ| collapses when the classes are
+lopsided, and the gain collapses with it. On a reference that is 31.6%
+disordered it fails comprehensively — pooled, the agreement classes stand at
+240,506 disordered against 555,402 ordered — and it holds on **32 of 2,746**
+structure pairs. On all 32 of those, the bound holds. Pooled, the measured rate
+exceeds it, 0.00996 against 0.00848.
+
+So the sixfold gain is a **measurement**, not a prediction from the label-noise
+rate, and step 6 of the protocol below says *estimate* ε_pair rather than derive
+it. The two results the argument rests on — the identity and the exact
+denominator — carry no hypotheses; the closed form that would have let a
+benchmark skip the measurement is exactly the part CAID3 cannot use.
+
+**Two things this paper got wrong here, both caught by formalising them.** The
+first was the mechanism: an earlier version attributed the gap to spatial
+correlation — disorder flips in blocks, so only pairs crossing a block boundary
+reverse, and the reduction should scale as 1/L. The block statistics are real
+(mass-weighted mean block length 73.8 residues; 67.4% of context-dependent
+residues in blocks of ten or more), but 1/L predicts a ratio of 0.0136 against a
+measured 0.1075, over-predicting the reduction eightfold. The identity above
+needs no correlation assumption and is exact.
+
+The second was the number. An earlier measurement put ε_pair at 0.0070 and the
+capacity at 72, on a denominator that counted the pairs ordered by *either*
+labelling with the discordant ones counted twice — 2ae + 4du + (a+e)(d+u) —
+which is larger than the comparable set and mixes ordered with unordered counts.
+`card_comparablePairs` counts it exactly, the two expressions are not equal, and
+on the correct denominator the rate is 1.42× larger and the capacity is 51. We
+record both because a corrected headline number should be visible as a
+correction, not as a different number.
 
 ### A protocol, and the field re-scored under it
 
@@ -382,7 +416,7 @@ reproducible. It is *not* shown to be more valid, and this paper does not claim
 it is: three of four benchmarks show no significant difference and one favours
 the pooled protocol. The case for the protocol rests on capacity — what the
 labels can support — not on a validity advantage the data do not show. A
-protocol that resolves nine times as much of the field with the same cross-round
+protocol that resolves six times as much of the field with the same cross-round
 stability, from the same data, is worth adopting whether or not it is also more
 accurate.
 
@@ -442,6 +476,73 @@ not close as instruments.*
 
 To our knowledge no disorder predictor has been published with a
 distribution-free operating guarantee.
+
+### Reporting a screen: the unit of testing is a design choice too
+
+The capacity result says the unit of *scoring* is a choice, and that scoring
+pairs rather than labels changes what a benchmark can resolve. The same
+structure appears one step downstream, when a predictor is run over a proteome
+and asked which regions are disordered.
+
+A screen that reports a list must control its false discovery rate, and the
+candidates in a disorder screen are not independent: they share a calibration
+run, a model, a training set. Under arbitrary dependence the Benjamini–Hochberg
+procedure needs the harmonic correction. We prove it here from scratch, in a
+finite, measure-theory-free setting, assuming only that the p-value of a true
+null is valid:
+
+- `selfConsistent_fdr_le_harmonic` — **any** self-consistent step-up rule at
+  level q has E[FDP] ≤ q·H_m·|H₀|/m under an **arbitrary** joint law. No
+  independence, no positive-dependence condition, nothing assumed about the
+  non-nulls.
+- `benjamini_yekutieli_level` — BH run at the deflated level α/H_m controls the
+  rate at α, whatever the dependence.
+
+The mechanism is isolated as `wgt_decomp`, and it is why the joint law never
+enters: the weight 1/|R| of a discovery telescopes into a combination of the
+**nested** events {i ∈ R, |R| ≤ j}, and self-consistency contains each of those
+in the single-candidate event {p_i ≤ j·q/m}, whose probability validity alone
+bounds. The price is logarithmic — log(m+1) ≤ H_m ≤ 1 + log m — against
+Bonferroni's factor of m (**Fig. 7a**), and the corrected list still contains
+the Bonferroni list (`by_dominates_bonferroni`).
+
+**The correction is necessary, not conservative.** For every screen size and
+level we construct an explicit joint law — outcome (j, s) gives the cyclic
+window of length j+1 starting at s the p-value (j+1)q/m and everyone else 1,
+with probability q/((j+1)m) — in which all m hypotheses are null, every p-value
+is valid, BH rejects exactly the window, and therefore E[FDP] = q·H_m **exactly**
+(`bh_fdr_eq_harmonic`). So the harmonic factor is attained and cannot be lowered
+(`harmonic_factor_sharp`); uncorrected BH strictly exceeds its nominal level from
+two candidates on (`uncorrected_bh_exceeds_level`, **Fig. 7c**); and the
+corrected procedure sits exactly at its own bound (`by_level_is_attained`).
+
+That makes the factor a **design parameter**, because it depends on one thing
+only: how many hypotheses the screen states. And disorder is a property of a
+region, not of a residue. `fdp_lift` shows that a region-level report and its
+residue-level reading have the **same** false discovery proportion — both
+numerator and denominator scale by the region length, and it cancels — so
+`region_screen_fdr_le` gives residue-level control at α from a region-level
+procedure run at α/H_M, and `harmonic_gain_log` bounds the saving below by
+log b − 1.
+
+Instantiated on this paper's own references, taking the candidate regions to be
+the maximal same-label runs — the unit the annotation is actually constant on,
+with a run broken by any unevaluated residue, which states more hypotheses
+rather than fewer (**Fig. 7b**):
+
+| reference | residues n | regions M | H_n | H_M | saving | threshold |
+|---|---:|---:|---:|---:|---:|---:|
+| CAID3 Disorder-PDB | 99,239 | 1,015 | 12.08 | 7.50 | 4.58 | **×1.61** |
+| CAID3 Disorder-NOX | 99,977 | 576 | 12.09 | 6.93 | 5.16 | ×1.74 |
+| CAID3 Binding | 28,263 | 165 | 10.83 | 5.69 | 5.14 | ×1.90 |
+| CAID3 Linker | 20,498 | 105 | 10.51 | 5.24 | 5.27 | **×2.01** |
+| CAID2 Linker | 37,150 | 124 | 11.10 | 5.40 | 5.70 | **×2.05** |
+
+A region-level screen may test at a threshold 1.6× to 2.05× larger than a
+residue-level one **for the same residue-level false discovery rate**, and by
+`fdp_lift` it gives up nothing to do so. No screen is run here; what is measured
+is the price of the design decision on real references, so the theorem is
+instantiated rather than only cited.
 
 ### DisorderNet
 
@@ -570,12 +671,25 @@ The obvious objection — *then nothing can be ranked* — is answered by the se
 result. The bound is stated for label noise, and a ranking statistic does not
 consume labels one at a time. Because a pair reverses only when both its
 residues flip in opposite directions, the noise a pairwise protocol suffers is
-the square of the noise a label protocol suffers, and the capacity is quadratic
-rather than linear. This is a general mechanism, not a fact about proteins: it
-holds for any benchmark whose statistic is a function of ordered pairs within
-groups. Where the labels are noisy and the statistic is a ranking, **scoring
+second-order where a label protocol's is first-order. This is a general
+mechanism, not a fact about proteins: it holds for any benchmark whose statistic
+is a function of ordered pairs within groups. How much it buys is a different
+question, and one that has to be measured — the closed form ε_pair ≤ 2ε², which
+would let a benchmark predict its own gain, needs the agreement classes to
+balance, and a disorder reference at 31.6% prevalence is not close. Where the labels are noisy and the statistic is a ranking, **scoring
 pairs rather than items is not a refinement, it is a different order of
 resolution.**
+
+The same shape appears once more, one step downstream. A screen's deflation
+factor under arbitrary dependence is the harmonic number of the number of
+hypotheses it states, that factor is attained and so cannot be argued away, and
+a region-level report has the *same* false discovery proportion as its
+residue-level reading. So the unit of testing is a design choice exactly as the
+unit of scoring is, and choosing it well is worth a factor of two in threshold
+on these references at no cost in what is reported. Two independent instances of
+one principle: **where the labels are noisy or the tests are many, what a study
+can resolve depends on the unit it chose, and the unit is usually chosen by
+convention rather than by argument.**
 
 For CAID specifically we recommend two changes. Report the within-protein
 component alongside the pooled AUC — not because the decomposition is elegant,
@@ -593,8 +707,13 @@ entirely — on the temporal holdout, AlphaFold-rsa achieves a certified 10% mis
 rate by flagging 96% of the protein. AUC scores it 0.82 against our 0.89 and
 reads that as a modest gap. The two are not comparable instruments.
 
-**What we do not claim.** DisorderNet is not state of the art on the metric CAID
-reports: +0.0043 over PUNCH2 at p = 0.20, and no framing makes that a win. The
+**What we do not claim.** The closed form ε_pair ≤ 2ε² is proved but does not
+apply to CAID3: its balance hypothesis holds on 32 of 2,746 structure pairs, and
+the pooled rate exceeds it. The sixfold gain is measured, not predicted, and a
+benchmark adopting the protocol must measure its own. No proteome screen is run
+here; the screening section prices a design decision and proves the procedure,
+it does not report discoveries. DisorderNet is not state of the art on the
+metric CAID reports: +0.0043 over PUNCH2 at p = 0.20, and no framing makes that a win. The
 decomposition does not overturn the leaderboard (ρ ≥ +0.849 on every reference).
 The pairwise ordering is reproducible but not shown to be *more* valid than the
 pooled one. The temporal and conformal analyses are exploratory, built after the
@@ -611,7 +730,10 @@ silently; a homology filter that removed nothing for weeks because a membership
 test compared a string against a set of tuples while the log printed a plausible
 count; a block-correlation mechanism that predicted the right sign and the wrong
 magnitude by a factor of eight; a certified error ranking invalidated by our own
-Lean development. Each is documented with the measurement that caught it. A
+Lean development; and — while this manuscript was being written — a headline
+capacity of 72 that formalising the denominator turned into 51, together with a
+bound we had called tight whose hypothesis turns out to fail on the very data we
+had checked it against. Each is documented with the measurement that caught it. A
 benchmark culture that reports only the number cannot catch any of them.
 
 ---
@@ -661,8 +783,12 @@ evidenced residues, ε = 0.0801.
 (`derived-missing_residues-mobi-{PDBID}_{CHAIN}`), restricted to residues both
 structures cover, gives a direct disagreement rate. Over 159 targets with ≥2
 structures: ε_label = 0.0651 pooled, 0.0342 median protein. The same
-enumeration gives the pairwise discordance ε_pair = 0.0070 pooled, 0.0006
-median. Per-structure *coverage* is approximated by the span of its annotated
+enumeration gives the pairwise discordance ε_pair = 0.0100 pooled, 0.0006
+median, on the denominator `card_comparablePairs` defines — the pairs both
+structures order, 2·(|T ∩ L|·|(T ∪ L)ᶜ| + d·u), and no larger set. The same run
+records the balance hypothesis rather than assuming it: 32 of 2,746 structure
+pairs satisfy both hypotheses of `nuPair_le_two_eps_sq`, and the bound holds on
+all 32. Per-structure *coverage* is approximated by the span of its annotated
 region, because MobiDB publishes per-structure missing regions and not
 per-structure coverage; residues outside a structure's span are treated as
 undetermined rather than observed, which is the conservative direction.
@@ -689,15 +815,28 @@ development supplies a worked example the analysis code reproduces it exactly �
 5/6 — which is the strongest available check that the Python computes the
 statistic the theorems describe.
 
-Three statements are used in the text ahead of their formalisation and are
-flagged as such: `discordant_eq_flip_product` (= 2·d·u),
-`discordant_le_noise_sq`, and `pairwise_capacity_quadratic`
-(k ≤ ⌈1/(4ε²)⌉). The first is a counting identity, the second AM–GM applied to
-it, the third a substitution into `benchCapacity_noise_only`; all three are in
-progress. `auc_target_strictMono_invariant` — the per-target form of the
-invariance, which is what the protocol's step 3 actually needs, the published
-theorem being stated for the pair-weighted mean — is likewise pending, and the
-distinction is recorded rather than elided.
+The pairwise development (`DiscordantPairs.lean`) is the part that most changed
+this paper, so its status is given in full:
+
+| statement | hypotheses | used here |
+|---|---|---|
+| `discordant_eq_flip_product` : `= 2·d·u` | none | yes, exact |
+| `discordant_le_noise_sq` : `≤ ν²/2` | none | yes |
+| `discordant_eq_of_balanced` : `2·discordant = ν²` | `d = u` | equality case |
+| `card_comparablePairs` : `= 2(ae + du)` | none | yes, exact — and it corrected our denominator |
+| `noise_orderKey` : pair noise **is** the discordant count | none | yes |
+| `pairwise_capacity_bound` : `k ≤ max 1 ⌈1/(2ν_pair)⌉` | none | yes |
+| `nuPair_le_two_eps_sq` : `ν_pair ≤ 2ε²` | balance, `ε ≤ 1/4` | **not applicable to CAID3** |
+| `pairwise_capacity_quadratic` : `⌈1/(4ε²)⌉ ≤ k` | balance, `ε ≤ 1/4`, `d,u>0` | **not applicable to CAID3** |
+
+`sharp_instance` exhibits the equality case on four residues and
+`capacity_example` a sixteen-residue instance where every hypothesis holds, so
+neither the bound nor its hypotheses are vacuous.
+
+One statement is still used ahead of its formalisation and is flagged as such:
+`auc_target_strictMono_invariant`, the per-target form of the invariance, which
+is what the protocol's step 3 needs — the published theorem is stated for the
+pair-weighted mean. The distinction is recorded rather than elided.
 
 ### Model
 
@@ -795,6 +934,17 @@ to report a guarantee at α < 1/(n+1), which is arithmetic about n rather than a
 fact about any method — an earlier run at an unachievable α produced "100% for
 all Linker methods" and it is now an explicit refusal.
 
+### Screening analysis
+
+`results/caid3/region_screen.py` (job 30101613) counts, for each CAID3 and CAID2
+reference, the evaluated residues and the maximal same-label runs, and reports
+both harmonic numbers, their difference, the proved floor log b − 1, and the
+ratio of the two testing thresholds. A run is broken by any unevaluated residue,
+so a region interrupted by missing evidence counts as two candidates — the
+conservative direction, since it states more hypotheses rather than fewer.
+Harmonic numbers are summed from the small end. No screen is run and no
+discoveries are reported.
+
 ### Reproduction
 
 Figures are regenerated from the analysis outputs by `paper/make_figures.py`;
@@ -848,6 +998,11 @@ timestamps predating the runs they govern.
     (Cambridge Univ. Press, 1997).
 11. de Moura, L. & Ullrich, S. The Lean 4 theorem prover and programming
     language. *CADE* (2021).
+12. Benjamini, Y. & Hochberg, Y. Controlling the false discovery rate: a
+    practical and powerful approach to multiple testing. *J. R. Stat. Soc. B*
+    **57**, 289–300 (1995).
+13. Benjamini, Y. & Yekutieli, D. The control of the false discovery rate in
+    multiple testing under dependency. *Ann. Stat.* **29**, 1165–1188 (2001).
 
 ---
 
@@ -863,8 +1018,8 @@ requires, log scale.
 **Figure 2 — Capacity, and the way past it.**
 (**a**) Methods orderable, ⌈1/2ε⌉, against annotation error rate, with the
 measured ε marked and the 117-entrant line for scale. (**b**) Capacity under the
-residue-level and pairwise protocols. (**c**) The label-noise rate against the
-pairwise bound 2ε², with the measured point.
+residue-level and pairwise protocols. (**c**) The balance hypothesis
+`nuPair_le_two_eps_sq` requires, measured on 2,746 structure pairs.
 
 **Figure 3 — CAID3 re-scored.**
 (**a**) Pooled rank against pairwise rank, all 357 method–benchmark pairs, with
@@ -882,6 +1037,15 @@ rounds under each benchmark's own reported metric.
 full-coverage Disorder-PDB methods, at α = 0.10. (**b**) The same guarantee
 bought two ways: one global threshold versus a per-protein quantile; the number
 is the calibration credit. (**c**) The comparison AUC cannot make.
+
+**Figure 7 — The price of a screen, and where to pay it.**
+(**a**) The deflation factor against the number of hypotheses stated: harmonic
+under arbitrary dependence, against Bonferroni's linear factor, with the
+residue-level and region-level counts for CAID3 Disorder-PDB marked.
+(**b**) The saving from stating one hypothesis per region rather than per
+residue, per reference, against the log b − 1 floor `harmonic_gain_log` proves.
+(**c**) Sharpness: on the constructed joint law, uncorrected BH realises
+E[FDP] = q·H_m exactly, so it exceeds its nominal level from two candidates on.
 
 **Figure 6 — Reproducibility and generalisation.**
 (**a**) Cross-round rank correlation, CAID3 → held-out CAID2, 57 shared

@@ -36,8 +36,8 @@ RAIL = {
         ("inversion_requires_between_gap", "each inversion is a certificate", "proved"),
     "A benchmark can order at most ⌈1/2ε⌉ methods, and CAID3 admits seventeen times that":
         ("card_le_benchCapacity", "+ benchCapacity_attained, unresolvable_pair", "proved"),
-    "Pairwise scoring squares the noise, and the capacity becomes quadratic":
-        ("discordant_eq_flip_product", "counting identity, formalisation in progress", "pending"),
+    "Pairwise scoring makes the noise second-order, and the capacity rises sixfold":
+        ("discordant_eq_flip_product", "+ card_comparablePairs, both exact", "proved"),
     "A protocol, and the field re-scored under it":
         ("auc_target_strictMono_invariant", "per-target form, formalisation in progress", "pending"),
     "The extra resolution is not noise":
@@ -48,6 +48,8 @@ RAIL = {
         ("PREREGISTRATION.md", "primary family fixed before the run", "measured"),
     "The recalibration decomposition is NP-hard to compute":
         ("Complexity/biasThreshold_hard", "NP → circuit SAT → Tseitin → IS → LOP", "proved"),
+    "Reporting a screen: the unit of testing is a design choice too":
+        ("selfConsistent_fdr_le_harmonic", "+ bh_fdr_eq_harmonic, fdp_lift", "proved"),
 }
 
 FIGURE_FOR = {
@@ -57,6 +59,7 @@ FIGURE_FOR = {
     "Figure 4": "figure4_model.png",
     "Figure 5": "figure5_operating.png",
     "Figure 6": "figure6_generalisation.png",
+    "Figure 7": "figure7_screen.png",
 }
 
 

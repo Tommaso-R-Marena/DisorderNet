@@ -4,12 +4,15 @@
 
 At the annotation error rate measured from MobiDB's per-structure disagreements,
 CAID3's residue-level protocol can place **8** of its 117 entrants in a certified
-order (`card_le_benchCapacity`). The pairwise protocol can place **72**, because
+order (`card_le_benchCapacity`). The pairwise protocol can place **51**, because
 a pair is reversed only when **both** its residues flip, in opposite
-directions — a second-order event. The noise is squared; the resolution is not.
+directions — a second-order event.
 
-Measured: `ε_label = 0.0651`, `ε_pair = 0.0070`. Predicted by the identity
-below: `ε_pair ≤ 2·ε_label² = 0.00848`. The bound holds and is tight to 20%.
+Measured: `ε_label = 0.0651`, `ε_pair = 0.0100`, on the denominator
+`card_comparablePairs` defines. The closed-form bound `ε_pair ≤ 2·ε_label²`
+requires balanced agreement classes, which CAID3 does not have (240,506
+disordered against 555,402 ordered); the pooled rate exceeds it, and the gain is
+therefore **measured rather than predicted**. See `ESCAPE.md`.
 
 ## The protocol
 
@@ -36,8 +39,11 @@ Holm-corrected within the benchmark. Otherwise they are reported as **tied**, at
 the same rank.
 
 **6. Capacity.** The number of methods the reference can order is
-`⌈1/(2·ε_pair)⌉`, with `ε_pair` the pairwise discordance rate of the annotation,
-estimated from repeat determinations of the same protein. Methods beyond that
+`⌈1/(2·ε_pair)⌉` (`pairwise_capacity_bound`), with `ε_pair` the pairwise
+discordance rate of the annotation — `discordant / comparable`, both counted as
+`DiscordantPairs.lean` defines them — estimated from repeat determinations of
+the same protein. It is **estimated, not predicted from the label-noise rate**:
+the closed form needs a balance hypothesis this data does not satisfy. Methods beyond that
 are reported as an unresolved group, never as a rank.
 
 Step 3 is what makes the protocol **calibration-invariant**: each per-target AUC
@@ -79,8 +85,8 @@ Step 6 is what keeps it honest: a rank the labels cannot support is not printed.
 | 23 | AlphaFold-binding | 0.8738 | 0.9342 | 12 | **−11** | yes |
 
 **DisorderNet-pbias is separated from 55 of 59 eligible methods** — Wilcoxon,
-Holm-corrected within the benchmark. The residue-level protocol could certify
-seven orderings in total.
+Holm-corrected within the benchmark, and inside the capacity of 51. The
+residue-level protocol could certify seven orderings in total.
 
 Largest movers: flDPlr2 **+14**, flDPnn3a **+11**, AlphaFold-binding **−11**,
 AIUPred-2-disorder −10, ESpritz-D −10.
@@ -107,15 +113,28 @@ Let `T` be the truth and `L` the annotation on one protein. A pair `(p, q)` is
 `T(p)=1, L(p)=0` and `T(q)=0, L(q)=1` — **both residues flip, in opposite
 directions.** So with `d = |T \ L|` (down-flips) and `u = |L \ T|` (up-flips):
 
-    discordant(T, L) = 2·d·u        exactly
+    discordant(T, L) = 2·d·u        exactly     `discordant_eq_flip_product`
     noise(T, L)      = d + u
 
 and by AM–GM, `d·u ≤ ((d+u)/2)²`, so
 
-    discordant ≤ noise² / 2
+    discordant ≤ noise² / 2                     `discordant_le_noise_sq`
 
-As rates over `n` residues with balanced classes, `ε_pair ≤ 2·ε_label²`. The
-capacity therefore improves from `⌈1/(2ε)⌉` to `⌈1/(4ε²)⌉` — **quadratic**.
+Both are unconditional. The pairs a pairwise protocol can score are the ones
+**both** labellings order, and they too are counted exactly:
+
+    |comparable(T, L)| = 2·(|T ∩ L|·|(T ∪ L)ᶜ| + d·u)   `card_comparablePairs`
+
+so the pair-level noise rate is exactly `d·u / (|T ∩ L|·|(T ∪ L)ᶜ| + d·u)`, and
+`noise_orderKey` shows it is literally the label noise of the answer key the
+annotation induces on those pairs — which is why the existing capacity machinery
+applies at the pair level verbatim (`pairwise_capacity_bound`).
+
+The closed form `ε_pair ≤ 2·ε_label²`, and with it the quadratic capacity
+`⌈1/(4ε²)⌉`, hold **when the agreement classes balance** and `ε ≤ 1/4`
+(`nuPair_le_two_eps_sq`, `pairwise_capacity_quadratic`). On CAID3 they do not:
+balance holds on 32 of 2,746 structure pairs, and on all 32 of those the bound
+holds. Step 6 therefore says *estimate* `ε_pair`, not *predict it from* `ε`.
 
 ## Timing
 
