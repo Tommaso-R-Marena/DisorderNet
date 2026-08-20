@@ -109,19 +109,17 @@ can distinguish}
 % ---------------------------------------------------------------------
 \begin{abstract}
 \noindent
-Community benchmarks rank methods on imperfect labels, and the resulting order
-is treated as data. We prove that a benchmark with annotation error rate
-$\eps$ can place at most $\lceil 1/2\eps \rceil$ methods in a certifiable
-order --- however many enter, and however analysed --- and that beyond this
-the ordering is not a function of the observations. Measured from
-repeat determinations of the same protein, $\eps$ gives the Critical Assessment
-of Intrinsic Disorder (CAID) a capacity of seven; it admits 117. The resolution
-is discarded rather than absent: a ranking statistic is corrupted only when two
-labels flip in opposite directions, an exactly second-order event, so scoring
-within-protein pairs raises the capacity to 51. We specify that protocol,
-re-score CAID3 under it, and show the ranking reproduces on a held-out round as
-well as the published one. The same argument governs how a screen should be
-reported. All theorems are machine-checked in Lean~4.
+Benchmark rankings decide which methods a field adopts, and are treated as data.
+We prove they usually are not. A benchmark whose annotations are wrong
+at rate $\eps$ can place at most $\lceil 1/2\eps \rceil$ methods in a certifiable
+order --- however many enter, however analysed --- and beyond that the ordering is not a
+function of the data. At published label-error rates ImageNet's capacity is nine and
+QuickDraw's five; their leaderboards rank hundreds. Escape depends on the statistic: an average of per-item losses admits none, but
+a ranking statistic over within-group pairs is corrupted only when two labels
+flip in opposite directions --- an exactly second-order event. On the Critical Assessment of Intrinsic Disorder, where
+$\eps$ is measurable from repeat determinations of one protein, that raises
+capacity from 8 to 51 of 117 entrants. We specify the protocol, re-score the field, and show the ranking reproduces on
+a held-out round. Every theorem is machine-checked in Lean~4.
 \end{abstract}
 
 \vspace{1em}
@@ -130,37 +128,59 @@ reported. All theorems are machine-checked in Lean~4.
 \section*{Introduction}
 % =====================================================================
 
-Intrinsically disordered regions are not folded, and the experiment that
-reports them --- a deposited structure with residues absent from the
-coordinates --- reports a property of one crystal, one construct, one
-condition. The Critical Assessment of Intrinsic Disorder (CAID)\cite{caid1,
-caid2} turns those annotations into a leaderboard: every residue of every
-target is pooled into one area under the ROC curve, and 117 submissions are
-placed in order.
+A benchmark is the field's instrument for deciding what works. It is also a
+measurement, and every measurement has a resolution --- but no benchmark
+publishes one. Leaderboards rank hundreds of methods to four decimal places on
+labels that are known to be wrong at rates of one to ten percent.
 
-\textbf{That number is mostly not the question it is read as.} A pooled AUC is the
-probability that a random disordered residue outranks a random ordered one,
-and every such pair is either within one protein or between two. The statistic
-therefore decomposes exactly,
+We prove that the resolution exists and compute it. A benchmark whose score is
+an average over $n$ items, with annotations wrong on at most a fraction $\eps$
+of them, can place at most $\lceil 1/2\eps \rceil$ methods in a certifiable
+order, \emph{however many are entered}. The bound does not improve with more
+items, and it is attained. The converse is what makes it an impossibility rather
+than a power calculation: past that count, for two close methods we construct
+two ground truths, each consistent with every observation the benchmark
+recorded, one favouring each. No bootstrap, permutation test, cross-validation
+or Monte Carlo recovers an ordering that is not a function of the data.
+
+Label error rates have been measured for the benchmarks the field actually uses.
+Northcutt \emph{et al.}\cite{northcutt} ran confident learning over ten test
+sets and had every flagged item checked by human annotators, finding validated
+error rates from 0.15\% (MNIST) to 10.12\% (QuickDraw). Their rates are lower
+bounds, and substituting them gives capacities of \textbf{nine} for ImageNet,
+nine for CIFAR-100, five for QuickDraw and thirteen for Amazon Reviews
+(Fig.~\ref{fig:capacity}d). Northcutt \emph{et al.} showed empirically that
+correcting the labels reorders these leaderboards; the bound explains why that
+is not a curable defect of any particular analysis.
+
+Whether a benchmark can do better depends on the statistic it chose, and this is
+the paper's second result. For an average of per-item losses --- top-1 accuracy
+--- there is no escape: an adversarial placement of the same error budget moves
+the score by the full $\eps$. But a \emph{ranking} statistic over pairs within
+a group is corrupted only when \emph{both} members of a pair are mis-annotated,
+in opposite directions. That is a structural constraint, not a distributional
+assumption, and it makes the noise exactly second-order.
+
+We work this out on the Critical Assessment of Intrinsic Disorder
+(CAID)\cite{caid1, caid2}, where the annotation --- residues present in a
+protein's sequence but absent from its solved structure --- can be measured
+against itself, because many proteins have been solved more than once. That
+gives $\eps$ directly rather than by inference, and it gives the pairwise rate
+directly too. CAID scores 117 entrants by pooling every residue of every protein
+into one area under the ROC curve. Its capacity on that statistic is seven. On
+within-protein pairs it is 51.
+
+The disorder problem also exposes what the pooled statistic is measuring. Every
+positive--negative pair in it is either within one protein or between two, so it
+decomposes exactly,
 \[
   \mathrm{AUC}_{\text{pooled}}
     = w_{\text{within}}\,\mathrm{AUC}_{\text{within}}
     + w_{\text{between}}\,\mathrm{AUC}_{\text{between}},
 \]
-and on CAID3 the within-protein weight is 0.51\%--2.9\%. That much is
-arithmetic --- for $n$ proteins of comparable size about $1/n$ of pairs fall
-inside one --- and licenses only an empirical question: does the metric's 1:200
-weighting change who wins? On three of five CAID3 benchmarks it does.
-
-\textbf{And it is being asked to resolve more than it can.} Every benchmark
-orders methods using annotations, and annotations are wrong at some rate. How
-many methods that rate permits to be ordered \emph{at all} is a question the
-field does not ask. We prove the answer is $\lceil 1/2\eps \rceil$, prove it is
-attained, and prove the converse: past that count, two close methods admit two
-ground truths consistent with every observation, one favouring each. The only
-remedies are better labels --- or a different statistic. This paper supplies the
-second: the bound constrains \emph{labels}, AUC is a function of ordered
-\emph{pairs}, and the two rates are not the same quantity.
+and on CAID3 the within-protein weight is 0.51\%--2.9\%. The reported number is
+97\%--99.5\% a question about whole chains, not about residues --- and on three
+of five benchmarks that changes who wins.
 
 % =====================================================================
 \section*{Results}
@@ -168,36 +188,31 @@ second: the bound constrains \emph{labels}, AUC is a function of ordered
 
 \subsection*{CAID's statistic is 97--99.5\% a between-protein question}
 
-The decomposition above is exact, and its first term has a property that makes
-it more than bookkeeping. \code{auc\_within\_strictMono\_invariant} (Lean~4,
+The decomposition is exact, and its first term has a property that makes it more
+than bookkeeping. \code{auc\_within\_strictMono\_invariant} (Lean~4,
 \code{sorry}-free): $\mathrm{AUC}_{\text{within}}$ is invariant under any
-per-protein strictly monotone recalibration. Rescore every chain by its own
-exponential, cube or logistic squash and the quantity does not move.
-\code{auc\_pooled\_shift\_diff} completes it: the entire effect of such a
-recalibration on the reported number falls in the between-protein term. The
-split is therefore a partition of CAID's statistic into the part no
-chain-by-chain rescoring can touch and the part that is nothing else
-(Fig.~\ref{fig:decomp}a; Supplementary Table~S1).
+per-protein strictly monotone recalibration, and
+\code{auc\_pooled\_shift\_diff} shows the entire effect of such a recalibration
+falls in the other term. The split is therefore a partition of CAID's statistic
+into the part no chain-by-chain rescoring can touch and the part that is nothing
+else (Fig.~\ref{fig:decomp}a; Supplementary Table~S1).
 
 On three of five CAID3 benchmarks the method the challenge declares best is
 21st to 25th at telling which residues of a chain are disordered
-(Fig.~\ref{fig:decomp}b): fl\-DPnn3a is 25th of 57 on Disorder-NOX,
-UdonPred-combined 21st of 69 on Binding, LINKER-Pred2 25th of 90 on Linker. The
-three Linker specialists sweep the pooled table at \#1, \#2 and \#3 and sit at
-\#25, \#26 and \#29 within protein: excellent at ranking whole chains by linker
-content, unremarkable at locating linkers inside one.
+(Fig.~\ref{fig:decomp}b). The three Linker specialists sweep the pooled table at
+\#1, \#2 and \#3 and sit at \#25, \#26 and \#29 within protein: excellent at
+ranking whole chains by linker content, unremarkable at locating linkers inside
+one.
 
 Each disagreement is a certificate rather than an observation.
 \code{inversion\_requires\_between\_gap} states that the pooled order reverses
 the within-protein order only when $w_{\text{within}}\times$(within gap)
 $< w_{\text{between}}\times$(between gap), so an inversion \emph{forces} a
-between-protein gap of at least $(w_{\text{within}}/w_{\text{between}})$ times
-the within-protein gap. On Disorder-NOX every certificate holds and each is
-over-determined by 562--2305$\times$ (Fig.~\ref{fig:decomp}c): a within-protein
-deficit of 0.0218 requires a between-protein advantage of 0.000148 to be
-overturned, and the one present is 562 times larger. Calibration differences of
-ordinary size do not merely outweigh discrimination differences of ordinary
-size; they swamp them by three orders of magnitude.
+between-protein gap at least $(w_{\text{within}}/w_{\text{between}})$ times the
+within-protein one. On Disorder-NOX every certificate holds and each is
+over-determined by 562--2305$\times$ (Fig.~\ref{fig:decomp}c). Calibration
+differences of ordinary size do not merely outweigh discrimination differences
+of ordinary size; they swamp them by three orders of magnitude.
 
 The counterweight belongs here and not in a footnote: Spearman(pooled, within)
 is $+0.964$ on Disorder-PDB and never below $+0.849$, so the decomposition does
@@ -258,6 +273,61 @@ separate from PUNCH2 on pooled AUC, and each of the five also failed the
 endpoint its own registration named against a regime-matched control, with none
 of fifteen paired comparisons surviving Holm correction (Supplementary
 Note~S4). We were trying to resolve a pair the benchmark cannot resolve.
+
+\subsection*{The bound applies to the benchmarks the field uses}
+
+Nothing in \code{card\_le\_benchCapacity} is about proteins. Top-1 accuracy on
+a test set is an average over $n$ items on the grid $1/n$: flipping one label
+moves it by $1/n$, so a wrong fraction $\eps$ moves it by at most $\eps$, and
+two models must differ by more than $2\eps$ before the observation certifies
+their order. The theorem applies verbatim.
+
+Substituting the validated error rates of Northcutt \emph{et
+al.}\cite{northcutt} (Fig.~\ref{fig:capacity}d; Supplementary Table~S17):
+
+\begin{center}\small
+\begin{tabular}{lrrr}
+\toprule
+benchmark & test set & $\eps$ & capacity \\
+\midrule
+QuickDraw & 50,426,266 & 10.12\% & \textbf{5} \\
+CAID3 (residue labels) & 99,239 & 8.01\% & \textbf{7} \\
+CIFAR-100 & 10,000 & 5.85\% & \textbf{9} \\
+ImageNet & 50,000 & 5.83\% & \textbf{9} \\
+Amazon Reviews & 9,996,437 & 3.90\% & 13 \\
+IMDB & 25,000 & 2.90\% & 18 \\
+Caltech-256 & 29,780 & 1.54\% & 33 \\
+AudioSet & 20,371 & 1.35\% & 38 \\
+20news & 7,532 & 1.09\% & 46 \\
+CIFAR-10 & 10,000 & 0.54\% & 93 \\
+MNIST & 10,000 & 0.15\% & 334 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+\textbf{ImageNet can place nine models in a certified order.} Its leaderboard
+ranks on the order of a thousand. The published rates are lower bounds, so these
+capacities are upper bounds; and the theorem allows the full score range
+$[0,1]$, whereas published models occupy a far narrower band, so the realisable
+figure is smaller again --- of the order of four for ImageNet over the range
+modern models actually span.
+
+Two things this does not say. It does not say any published ranking is wrong: it
+says the data cannot establish it, and if label errors happened to shift every
+model equally the ordering would survive. That is an assumption about the errors,
+and Northcutt \emph{et al.} measured the opposite --- correcting the labels
+reorders these leaderboards, and systematically, with higher-capacity models
+faring worse once corrected. Nor does it say benchmarking is futile: it says a
+benchmark should publish its capacity alongside its ranking, and stop printing
+places it cannot support.
+
+Sampling error in $\eps$ propagates to the capacity, and we carry it rather than
+dropping it. Bootstrapping our own estimate over the 159 proteins gives
+$\eps = 0.0649$, 95\% CI $[0.0497, 0.0814]$, and a capacity of 8, 95\% CI
+$[7, 11]$; the pairwise rate gives 52, 95\% CI $[37, 119]$. Even at the
+pessimistic end of both intervals the pairwise protocol resolves five times more
+of the field than the residue-level one.
 
 \subsection*{Pairwise scoring makes the noise second-order}
 
@@ -381,15 +451,13 @@ the unit the split respects (Methods).
 Applied to all 70 full-coverage CAID3 Disorder-PDB methods
 (Fig.~\ref{fig:operating}a): validity is free and identical for everyone --- the
 threshold is chosen to make it so --- and the entire content is the price, which
-runs from 32.0\% of the protein flagged (DisorderNet) to 97.3\%. A second rule
-buys the identical guarantee by flagging a fixed \emph{quantile of each
-protein's own scores}, which depends only on the ordering inside a chain and is
-therefore invariant under per-protein recalibration. The two costs price the two
-abilities the decomposition separates --- a global threshold prices
-discrimination \emph{and} calibration, a per-protein quantile prices
-discrimination alone --- and their difference is what protein-level calibration
-is worth operationally (Fig.~\ref{fig:operating}b). The leaders lean on it twice
-as hard as we do, which yields the sharpest comparison in the paper
+runs from 32.0\% of the protein flagged to 97.3\%. A second rule buys the
+identical guarantee by flagging a fixed \emph{quantile of each protein's own
+scores}, which depends only on the ordering inside a chain and is therefore
+calibration-invariant. The two costs price the two abilities the decomposition
+separates, and their difference is what protein-level calibration is worth
+operationally (Fig.~\ref{fig:operating}b). The leaders lean on it twice as hard
+as we do, which yields the sharpest comparison in the paper
 (Fig.~\ref{fig:operating}c): on Disorder-PDB, pooled AUC separates DisorderNet
 from PUNCH2 by $+0.0043$ at $p = 0.20$ --- a difference we have never been able
 to call real. The calibration-invariant operating cost separates them by 5.3
@@ -397,110 +465,85 @@ points (55.1\% against 60.4\% of the protein flagged), and by 10.2 points on
 Disorder-NOX. \emph{The two methods are statistically inseparable on the
 benchmark's own metric and are not close as instruments.}
 
-\subsection*{Reporting a screen: the unit of testing is a design choice too}
+\subsection*{The unit of testing is a design choice too}
 
-The capacity result says the unit of \emph{scoring} is a choice. The same
-structure appears one step downstream, when a predictor is run over a proteome.
+The same structure appears one step downstream, when a predictor is run over a
+proteome and asked which regions are disordered. A screen's candidates share a
+calibration run, a model and a training set, so under arbitrary dependence
+Benjamini--Hochberg\cite{bh} needs the harmonic correction\cite{by}. We prove
+that from scratch in a finite setting, assuming only that a true null's p-value
+is valid (\code{selfConsistent\_fdr\_le\_harmonic}), and prove it cannot be
+lowered: an explicit joint law attains $\mathbb{E}[\mathrm{FDP}] = qH_m$ exactly
+(\code{bh\_fdr\_eq\_harmonic}), so uncorrected BH exceeds its nominal level from
+two candidates on (Fig.~\ref{fig:screen}a,c).
 
-A screen's candidates are not independent: they share a calibration run, a model
-and a training set. Under arbitrary dependence the Benjamini--Hochberg
-procedure\cite{bh} needs the harmonic correction\cite{by}. We prove it from
-scratch in a finite, measure-theory-free setting, assuming only that the p-value
-of a true null is valid: \code{selfConsistent\_fdr\_le\_harmonic} bounds
-$\mathbb{E}[\mathrm{FDP}]$ by $q H_m |H_0|/m$ for \emph{any} self-consistent
-step-up rule under an \emph{arbitrary} joint law. The mechanism, isolated as
-\code{wgt\_decomp}, is why the joint law never enters: the weight $1/|R|$ of a
-discovery telescopes into \emph{nested} events $\{i \in R, |R| \le j\}$, each
-of which self-consistency contains in the single-candidate event
-$\{p_i \le jq/m\}$, which validity alone bounds. The price is logarithmic,
-$\log(m{+}1) \le H_m \le 1 + \log m$, against Bonferroni's $m$
-(Fig.~\ref{fig:screen}a).
-
-\textbf{The correction is necessary, not conservative.} For every screen size
-and level we construct an explicit joint law in which all $m$ hypotheses are
-null, every p-value is valid, BH rejects exactly a cyclic window, and therefore
-$\mathbb{E}[\mathrm{FDP}] = qH_m$ \emph{exactly}
-(\code{bh\_fdr\_eq\_harmonic}). The factor is attained and cannot be lowered;
-uncorrected BH strictly exceeds its nominal level from two candidates on
-(Fig.~\ref{fig:screen}c).
-
-The factor therefore depends on one thing only: how many hypotheses the screen
-states. And disorder is a property of a region. \code{fdp\_lift} shows that a
-region-level report and its residue-level reading have the \emph{same} false
-discovery proportion --- both numerator and denominator scale by the region
-length --- so \code{region\_screen\_fdr\_le} gives residue-level control at
-$\alpha$ from a region-level procedure at $\alpha/H_M$, and
-\code{harmonic\_gain\_log} bounds the saving below by $\log b - 1$. On the CAID
-references a region-level screen may test at a threshold 1.61--2.05$\times$
-larger for the same residue-level rate (Fig.~\ref{fig:screen}b).
-
-We ran the screen. Conformal p-values calibrated on the ordered blocks of 80\%
-of chains, Benjamini--Yekutieli at $\alpha/H_M$ on the rest, 50 splits: at
-$\alpha = 0.10$ with 100-residue blocks the region-level screen reports 2{,}942
-residues at a realised false discovery proportion of 0.024 and power 0.568,
-against 203 residues and power 0.036 for the residue-level screen at the same
-guaranteed rate --- \textbf{14.5$\times$ the discoveries}. A third constraint,
-not visible in the theory, dominates both: a conformal p-value cannot fall below
-$1/(n_{\text{cal}}{+}1)$, and a step-up rule at level $\alpha/H_m$ over $m$
-hypotheses applies thresholds as small as $\alpha/(mH_m)$, so a screen is
-arithmetically incapable of a discovery unless
-$n_{\text{cal}} + 1 \ge m H_m / \alpha$. That requirement is \emph{linear} in
-the number of hypotheses. Stating one per region rather than one per residue
-reduces it by 13--178$\times$ on these references, which is a far larger effect
-than the harmonic factor itself, and it is the constraint that binds first.
+The factor therefore depends on one thing: how many hypotheses the screen states.
+And disorder is a property of a region. \code{fdp\_lift} shows a region-level
+report and its residue-level reading have the \emph{same} false discovery
+proportion, so \code{region\_screen\_fdr\_le} gives residue-level control at
+$\alpha$ from a region-level procedure at $\alpha/H_M$, with the saving bounded
+below by $\log b - 1$ (\code{harmonic\_gain\_log}; Fig.~\ref{fig:screen}b).
+Running it --- conformal p-values, 50 splits, CAID3 Disorder-PDB --- the
+region-level screen reports 2{,}942 residues at a realised false discovery
+proportion of 0.024 and power 0.568, against 203 residues and power 0.036 for
+the residue-level screen at the same guaranteed rate: \textbf{14.5$\times$ the
+discoveries}. A third constraint dominates both and is absent from the theory: a
+conformal p-value cannot fall below $1/(n_{\text{cal}}{+}1)$, so no discovery is
+possible unless $n_{\text{cal}} + 1 \ge m H_m/\alpha$ --- \emph{linear} in the
+number of hypotheses where the correction is only logarithmic. Details,
+including the full comparison against Bonferroni and uncorrected BH, are in
+Supplementary Note~S7.
 
 \subsection*{DisorderNet}
 
 DisorderNet is a frozen-backbone, low-capacity multitask head over
-ESM-2 650M\cite{esm2}, with an explicit AlphaFold\cite{af2} structure channel
-block and one linear read-out per task ($\sim$2M trainable parameters; Methods).
-The pre-registered model of record ranks first of 115 entrants on three of five
-CAID3 references and first among full-coverage entrants on all four CAID2
-references, at coverage 1.00 throughout (Fig.~\ref{fig:model}b). The registered
-primary family was fixed before the run: P1, beat AlphaFold-rsa --- confirmed
-($+0.0097$, Holm-adjusted $p = 0.0252$); P2, beat PUNCH2 --- not significant
-($+0.0043$, $p = 0.2022$). Superiority over PUNCH2 on pooled AUC is not
+ESM-2 650M\cite{esm2} with an AlphaFold\cite{af2} structure channel block
+($\sim$2M trainable parameters; Methods). The pre-registered model of record
+ranks first of 115 entrants on three of five CAID3 references and first among
+full-coverage entrants on all four CAID2 references, at coverage 1.00 throughout
+(Fig.~\ref{fig:model}b). Of the registered primary family, P1 (beat
+AlphaFold-rsa) is confirmed at Holm-adjusted $p = 0.0252$ and P2 (beat PUNCH2)
+is not significant ($+0.0043$, $p = 0.2022$); superiority on pooled AUC is not
 claimed.
 
-On the calibration-invariant axis DisorderNet beats the CAID3 Disorder-PDB
-winner on \emph{all five} benchmarks, per-target paired Wilcoxon, Holm-corrected
-across the full family of thirty comparisons (Fig.~\ref{fig:model}a): Linker
-$+0.1364$ ($p = 3.1\times10^{-5}$, 29 of 31 targets), Disorder-PDB $+0.0185$
-($p = 1.4\times10^{-4}$), Binding $+0.1435$ ($p = 0.019$), Disorder-NOX
-$+0.0496$ ($p = 0.041$), Binding-IDR $+0.2253$ ($p = 0.050$).
+On the calibration-invariant axis it beats the CAID3 Disorder-PDB winner on
+\emph{all five} benchmarks, per-target paired Wilcoxon, Holm-corrected across
+the full family of thirty comparisons (Fig.~\ref{fig:model}a): Linker
+$+0.1364$ ($p = 3.1\times10^{-5}$, 29 of 31 targets) through Binding-IDR
+$+0.2253$ ($p = 0.050$).
 
 A temporal holdout tests generalisation without relying on any filter being
 correct. Of 1{,}916 protein polymer entities released after the training caches
 were built, 186 survive removal of exact training sequences and BLAST homologues
 at $\ge 40\%$ identity --- 71\% of the ``new'' chains were already represented
-(Fig.~\ref{fig:model}c), so a temporal cutoff alone is not a leak control. The
-model of record reaches 0.8933 pooled and 0.8502 within-protein over all 186;
-on the 61 chains where the training-free structural baselines can also be
-computed it reaches 0.9095 and 0.8023 against AlphaFold-pLDDT's 0.8737 and
-0.7816 (Fig.~\ref{fig:model}d, matched chain sets).
+(Fig.~\ref{fig:model}c), so a temporal cutoff alone is not a leak control. On
+the 61 chains where the training-free structural baselines can also be computed,
+the model reaches 0.9095 pooled and 0.8023 within-protein against
+AlphaFold-pLDDT's 0.8737 and 0.7816 (Fig.~\ref{fig:model}d, matched sets).
 
-The holdout also settles a question CAID3 cannot. Five pre-registered
-architectural variants were inseparable from their control on the benchmark, and
-the capacity result says the benchmark could not have separated them whatever
-they did --- so the natural objection is that real improvements are being
-hidden. New data is not bounded by CAID3's capacity, and on these 186 unseen
-chains \emph{none} of the four scorable variants beats its regime-matched
-control, on pooled AUC ($-0.0033$ to $-0.0086$), pair-weighted within-protein
-AUC ($-0.0047$ to $-0.0301$) or the unweighted form ($-0.0075$ to $-0.0137$).
-There was nothing to resolve. And the unflattering result the set exists to
-produce: the protein-bias variant is our best CAID3 model on Disorder-PDB and
-the worst of three here, the only one failing to separate from a training-free
-baseline. It buys CAID3 points and generalises worse.
+The holdout also settles a question CAID3 cannot. Five pre-registered variants
+were inseparable from their control on the benchmark, and the capacity result
+says it could not have separated them whatever they did --- so the natural
+objection is that real improvements are being hidden. New data is not bounded by
+CAID3's capacity, and on these 186 unseen chains \emph{none} of the four
+scorable variants beats its regime-matched control, on pooled AUC ($-0.0033$ to
+$-0.0086$), pair-weighted within-protein AUC ($-0.0047$ to $-0.0301$) or the
+unweighted form ($-0.0075$ to $-0.0137$). There was nothing to resolve. And the
+unflattering result the set exists to produce: the protein-bias variant is our
+best CAID3 model and the worst of three here, the only one failing to separate
+from a training-free baseline.
 
 % =====================================================================
 \section*{Discussion}
 % =====================================================================
 
-The result we would most like to see used is the capacity bound, because it is
-not about disorder. Any benchmark that ranks methods on annotations of finite
-accuracy has a capacity, that capacity is $\lceil 1/2\eps \rceil$ regardless of
-how many items it scores, and past it the ordering is not a function of the
-observations. The converse is what separates this from a power calculation:
+The capacity bound is the result we would most like to see used, because it is
+not about disorder and not about any one benchmark. Any benchmark that ranks
+methods on annotations of finite accuracy has a capacity, that capacity is
+$\lceil 1/2\eps \rceil$ regardless of how many items it scores, and past it the
+ordering is not a function of the observations. On the ten benchmarks whose
+label-error rates have been measured, every one is over its capacity and most
+are over it by two orders of magnitude. The converse is what separates this from a power calculation:
 \code{unresolvable\_pair} constructs, for any two close methods, two ground
 truths consistent with everything recorded, one favouring each. That is not a
 limitation of a particular analysis; it is a statement that no analysis exists.
@@ -513,20 +556,18 @@ proteins: it holds for any benchmark whose statistic is a function of ordered
 pairs within groups. How much it buys must be measured, since the closed form
 that would let a benchmark predict its own gain needs balanced classes.
 
-The same shape appears once more, one step downstream. A screen's deflation
-factor under arbitrary dependence is the harmonic number of the hypotheses it
-states, that factor is attained and so cannot be argued away, and a region-level
-report has the same false discovery proportion as its residue-level reading. The
-unit of testing is a design choice exactly as the unit of scoring is, and
-choosing it well is worth an order of magnitude in discoveries at no cost in
-what is reported. Two independent instances of one principle: \textbf{where the
-labels are noisy or the tests are many, what a study can resolve depends on a
-unit that is usually chosen by convention rather than by argument.}
+The screening result is the same principle one step downstream: a deflation
+factor set by how many hypotheses are stated, attained and so not arguable away,
+and a report whose false discovery proportion does not change with the unit it
+is read at. Two independent instances of one claim --- \textbf{where labels are
+noisy or tests are many, what a study can resolve depends on a unit that is
+usually chosen by convention rather than by argument.}
 
-For CAID specifically we recommend reporting the within-protein component
-alongside the pooled AUC, and printing a capacity --- the number of entrants the
-reference can order, with everything below it an unresolved group rather than a
-rank. CAID4's references are unpublished, so both are adoptable now.
+Our recommendation to any benchmark is to publish its capacity beside its
+ranking and stop printing places it cannot support; and, where its statistic
+admits the pairing structure, to score pairs. For CAID specifically, report the
+within-protein component alongside the pooled AUC. CAID4's references are
+unpublished, so both are adoptable now.
 
 \textbf{What we do not claim.} The closed form $\eps_{\text{pair}} \le 2\eps^2$
 is proved but does not apply to CAID3, so the sixfold gain is measured and a
@@ -607,10 +648,14 @@ certificate holds.}
 \textbf{a}, Methods orderable, $\lceil 1/2\eps \rceil$, against annotation error
 rate, with the measured $\eps$ marked and the 117-entrant line for scale.
 \textbf{b}, Capacity under the residue-level and pairwise protocols, from rates
-measured on 2{,}746 structure pairs. \textbf{c}, The hypotheses of
+measured on 2{,}746 structure pairs; bars are point estimates, whiskers 95\%
+bootstrap intervals over the 159 proteins. \textbf{c}, The hypotheses of
 \code{nuPair\_le\_two\_eps\_sq}, checked on those pairs rather than assumed: the
 balance condition holds on 54, both conditions on 32, and the bound holds on all
-32 of those.}
+32 of those. \textbf{d}, The bound instantiated on ten machine-learning
+benchmarks using the validated label-error rates of Northcutt \emph{et
+al.}\cite{northcutt} (in parentheses), on the same axis as our own measurement.
+Rates are lower bounds, so capacities are upper bounds.}
 \label{fig:capacity}
 \end{figure}
 

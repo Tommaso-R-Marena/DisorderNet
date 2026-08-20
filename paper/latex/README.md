@@ -34,8 +34,8 @@ Supplementary Data (Tables S1–S8, S14–S16) are comma-separated files in
 
 | requirement | status |
 |---|---|
-| Article format | main text 3,350 words (guideline ~3,000 — see note below) |
-| Abstract ≤ 150 words | **149** |
+| Article format | main text 3,506 words (guideline ~3,000 — see note below) |
+| Abstract ≤ 150 words | **151** by a strict count that treats `Lean~4` as two tokens; 150 by the usual convention |
 | Display items ≤ 6 | **6** figures, no tables in the main text |
 | Figure width | authored at 180 mm (double column) at final size; minimum type ~5.8 pt |
 | Figures as vector PDF | yes; PNG copies in `../figures/` |
@@ -51,11 +51,19 @@ Supplementary Data (Tables S1–S8, S14–S16) are comma-separated files in
 | Statistics reporting | exact *n*, test named, two-sided, correction and family size given at every *p* |
 | Reporting Summary | **to be completed by the author** — see below |
 
-**Main text length.** 3,350 words against a ~3,000 guideline. Nature Methods
+**Main text length.** 3,506 words against a ~3,000 guideline. Nature Methods
 treats this as a target rather than a hard cap at initial submission. If the
-editor asks for a cut, the cheapest 350 words are the second half of the
-operating-guarantee subsection and the last paragraph of the Discussion, neither
-of which carries a result that is not also in the Supplementary Information.
+editor asks for a cut, the cheapest 500 words are the operating-guarantee
+subsection (fully covered by Supplementary Note and Fig. 5) and the last two
+paragraphs of the Discussion.
+
+**Venue.** This package is prepared for *Nature Methods*, but the manuscript as
+it now stands makes a claim about benchmarking in general — with ImageNet,
+CIFAR-100 and eight other benchmarks instantiated alongside CAID — and is
+plausibly above that bar. The recommended sequence is a presubmission enquiry to
+*Nature* first (free, typically under a week, abstract plus a paragraph), then
+*Nature Methods* or *Nature Machine Intelligence*. The enquiry should lead with
+the capacity table, not with the disorder predictor.
 
 **Reporting Summary.** Nature Portfolio requires the *Reporting Summary* PDF
 (editorial policy checklist) with every submission. Download the current form

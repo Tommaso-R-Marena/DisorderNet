@@ -1,0 +1,28 @@
+{
+ "label": {
+  "eps": 0.06492995005043314,
+  "eps_ci": [
+   0.049737806565829656,
+   0.08143721414875466
+  ],
+  "capacity_point": 8,
+  "capacity_ci": [
+   7,
+   11
+  ],
+  "capacity_conservative": 7
+ },
+ "pairwise": {
+  "eps": 0.009621043207537457,
+  "eps_ci": [
+   0.004214557379121742,
+   0.01386098784995755
+  ],
+  "capacity_point": 52,
+  "capacity_ci": [
+   37,
+   119
+  ],
+  "capacity_conservative": 37
+ }
+}

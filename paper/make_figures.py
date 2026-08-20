@@ -136,7 +136,10 @@ def figure1():
 def figure2():
     cap, rel = load("benchmark_capacity"), load("relative_noise")
     an = load("annotation_noise")
-    fig, axes = plt.subplots(1, 3, figsize=(FULL, 2.35))
+    ci = load("capacity_interval")
+    field = load("benchmark_capacity_field")
+    fig, axes = plt.subplots(2, 2, figsize=(FULL, 5.2))
+    axes = axes.ravel()
 
     ax = axes[0]
     eps = np.linspace(0.005, 0.25, 400)
@@ -162,13 +165,16 @@ def figure2():
     labels = ["residue\nlabels", "within-protein\npairs"]
     vals = [rel["capacity_label"], rel["capacity_pairwise"]]
     b = ax.bar(labels, vals, color=[WARN, ACC], width=0.55)
-    for r, v in zip(b, vals):
-        ax.text(r.get_x() + r.get_width() / 2, v + 2, str(v), ha="center",
-                fontsize=10, fontweight="bold")
+    for i, (r, v, key) in enumerate(zip(b, vals, ("label", "pairwise"))):
+        lo, hi = ci[key]["capacity_ci"]
+        ax.errorbar(r.get_x() + r.get_width() / 2, v,
+                    yerr=[[v - lo], [hi - v]], color=INK, capsize=3, lw=1.1)
+        ax.text(r.get_x() + r.get_width() / 2, hi + 5, str(v), ha="center",
+                fontsize=9.5, fontweight="bold")
     ax.axhline(117, color=MUT, ls=":", lw=1)
-    ax.text(1.45, 120, "117 entered", fontsize=7, color=MUT, ha="right")
+    ax.text(-0.45, 121, "117 entered", fontsize=6.4, color=MUT, ha="left")
     ax.set_ylabel("methods the benchmark can order")
-    ax.set_ylim(0, 135)
+    ax.set_ylim(0, 150)
     ax.set_title("Pair noise is second-order:\n"
                  f"ε {rel['eps_label_pooled']:.3f} → "
                  f"{rel['eps_pairwise_pooled']:.4f}")
@@ -196,6 +202,28 @@ def figure2():
                  f"pairs have it")
     panel_label(ax, "c")
     _ = cap, an
+
+    ax = axes[3]
+    rows = [r for r in field["rows"] if "within-protein" not in r["benchmark"]]
+    rows.sort(key=lambda r: r["capacity"])
+    y = np.arange(len(rows))
+    col = [ACC if "CAID3" in r["benchmark"] else MUT for r in rows]
+    ax.hlines(y, 1, [r["capacity"] for r in rows], color=col, lw=1.4)
+    ax.plot([r["capacity"] for r in rows], y, "o", ms=4.5,
+            color="none", mec="none")
+    for i, r in enumerate(rows):
+        ax.plot([r["capacity"]], [i], "o", ms=4.5, color=col[i])
+        ax.text(r["capacity"] * 1.18, i, f"{r['capacity']}", va="center",
+                fontsize=6.2, color=col[i], fontweight="bold")
+    ax.set_yticks(y)
+    ax.set_yticklabels([f"{r['benchmark']}  ({r['eps_percent']:.2f}%)"
+                        for r in rows], fontsize=5.8)
+    ax.set_xscale("log")
+    ax.set_xlim(1, 1200)
+    ax.set_xlabel("methods the benchmark can place in a certified order")
+    ax.invert_yaxis()
+    ax.set_title("Every benchmark has a capacity.\nMost are far over it.")
+    panel_label(ax, "d")
 
     fig.tight_layout()
     fig.savefig(os.path.join(D, "figure2_capacity.png"))

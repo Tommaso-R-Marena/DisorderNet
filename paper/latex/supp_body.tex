@@ -41,6 +41,7 @@ Tommaso R. Marena
 \textbf{Table S14} & Registered endpoints closed for this paper (CSV) \\
 \textbf{Table S15} & The region-screen instantiation, both rounds (CSV) \\
 \textbf{Table S16} & The screen as run: discoveries, FDP, power, calibration budget (CSV) \\
+\textbf{Table S17} & The capacity bound instantiated on ten machine-learning benchmarks \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -272,6 +273,82 @@ Formalising \code{card\_comparablePairs} is what exposed it: the two expressions
 not equal. On the correct denominator the rate is \textbf{1.42$\times$ larger} and the
 capacity is \textbf{51}. Both numbers are kept in \code{relative\_noise.json}
 (\code{eps\_pairwise} and \code{eps\_pairwise\_superseded}) so the correction is auditable.
+
+
+\section*{Table S17 --- The capacity bound outside disorder}
+
+\code{card\_le\_benchCapacity} is stated for a benchmark whose score is an average over
+\code{n} items on the grid \code{1/n}, with the annotation wrong on at most a fraction \code{ε}.
+\textbf{Top-1 accuracy on a test set is exactly that}: flipping one label moves
+accuracy by \code{1/n}, so a wrong fraction \code{ε} moves it by at most \code{ε}, and two
+models must differ by more than \code{2ε} before the observation certifies their
+order. No adaptation is needed.
+
+Northcutt, Athalye and Mueller (NeurIPS 2021, arXiv:2103.14749, Table 1)
+measured \code{ε} for ten benchmarks by running confident learning over each test set
+and having every flagged item checked by human annotators. Substituting their
+rates (\code{results/caid3/benchmark\_capacity\_field.py}):
+
+\begin{center}\footnotesize
+\begin{tabular}{llrrrr}
+\toprule
+\textbf{benchmark} & \textbf{modality} & \textbf{test set} & \textbf{$\varepsilon$} & \textbf{\textbf{capacity}} & \textbf{over the range published models occupy} \\
+\midrule
+QuickDraw & image & 50,426,266 & 10.12\% & \textbf{5} & --- \\
+CAID3 (residue labels) & protein & 99,239 & 8.01\% & \textbf{7} & --- \\
+CIFAR-100 & image & 10,000 & 5.85\% & \textbf{9} & 3 \\
+ImageNet & image & 50,000 & 5.83\% & \textbf{9} & 4 \\
+Amazon Reviews & text & 9,996,437 & 3.90\% & 13 & --- \\
+IMDB & text & 25,000 & 2.90\% & 18 & --- \\
+Caltech-256 & image & 29,780 & 1.54\% & 33 & --- \\
+AudioSet & audio & 20,371 & 1.35\% & 38 & --- \\
+20news & text & 7,532 & 1.09\% & 46 & --- \\
+CIFAR-10 & image & 10,000 & 0.54\% & 93 & 9 \\
+MNIST & image & 10,000 & 0.15\% & 334 & 5 \\
+\textbf{CAID3 (within-protein pairs)} & protein & 99,239 & \textbf{1.00\%} & \textbf{50} & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Three things to read carefully.
+
+\textbf{The rates are lower bounds}, since only algorithmically flagged items were
+checked, so the capacities are \textbf{upper} bounds. The true capacities are
+smaller.
+
+\textbf{The last column is illustrative, not sourced.} Capacity in the theorem is
+computed over the full score range \code{[0,1]}; published models occupy a far
+narrower band, and a certified family of \code{k} members needs \code{k−1} gaps of more
+than \code{2ε}, so the realisable count over a band of width \code{w} is
+\code{⌊w/(2ε)⌋ + 1}. The bands assumed are ImageNet [0.55, 0.92], CIFAR-100
+[0.65, 0.96], CIFAR-10 [0.90, 0.996], MNIST [0.985, 0.9987]; they are our
+estimates of where published top-1 accuracies lie, stated so a reader can
+substitute their own. The point does not depend on the exact band: any plausible
+one gives a single-digit answer.
+
+\textbf{The bound does not say a published ranking is wrong.} It says the data cannot
+establish it. If label errors shifted every model equally the ordering would
+survive --- but that is an assumption about the errors, and Northcutt \emph{et al.}
+measured the opposite: correcting the labels reorders these leaderboards, and
+systematically, with higher-capacity models faring worse once corrected. This
+paper's contribution is not the observation that rankings are unstable, which is
+theirs; it is that the instability has a computable bound, that the bound is an
+impossibility rather than a limitation of any analysis, and that whether a
+benchmark can escape it is decided by the statistic it chose.
+
+\textbf{Which statistics admit the escape.} The second-order identity needs a
+\emph{pairing structure}: a pair is reversed only when both its members are
+mis-annotated, in opposite directions. An average of per-item losses has no such
+structure --- an adversary may place the whole error budget on the items that
+matter --- so accuracy-scored benchmarks have no escape and their capacity is
+\code{⌈1/2ε⌉} full stop. A ranking statistic over within-group pairs does, and the
+gain is what \code{ESCAPE.md} measures. The prescription for a benchmark designer is
+therefore concrete: **if you want to resolve more than \code{⌈1/2ε⌉} methods, score
+pairs within groups rather than items.**
+
+
+\vspace{0.5em}\hrule\vspace{0.8em}
+
 
 
 \section*{Note S3 --- The protocol, worked}
@@ -933,6 +1010,8 @@ region screen instantiation & \code{results/caid3/region\_screen.py} & 30101613 
 pairwise leaderboard, re-run at $\varepsilon$\_pair = 0.0100 & \code{results/caid3/pairwise\_leaderboard.py} & 30101721 & < 5 min \\
 registered variants on the temporal holdout & \code{rockfish/eval\_temporal.py} & 30102022 & 14 min \\
 the screen, run end to end & \code{results/caid3/conformal\_screen.py} & 30102082 & < 5 min \\
+capacity outside disorder & \code{results/caid3/benchmark\_capacity\_field.py} & local & seconds \\
+bootstrap interval on $\varepsilon$ and capacity & inline, \code{paper/figures/capacity\_interval.json} & local & seconds \\
 chirality A/B, treatment & \code{rockfish/train\_multitask.py --chiral} & 30022469 & 11 h 08 m \\
 chirality A/B, control & \code{rockfish/train\_multitask.py} & 30022470 & 11 h 20 m \\
 private trunk & \code{rockfish/train\_multitask.py --private-attached} & 29922832 & 18 h 24 m \\
