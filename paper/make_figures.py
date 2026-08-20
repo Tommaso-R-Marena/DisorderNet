@@ -204,25 +204,53 @@ def figure2():
     _ = cap, an
 
     ax = axes[3]
+    esc = load("imagenet_escape")
+    # the escape is computed with indeterminate corrections dropped
+    esc_by = {r["benchmark"]: r for r in esc["rows"]
+              if r["indeterminate_dropped"]}
     rows = [r for r in field["rows"] if "within-protein" not in r["benchmark"]]
     rows.sort(key=lambda r: r["capacity"])
     y = np.arange(len(rows))
-    col = [ACC if "CAID3" in r["benchmark"] else MUT for r in rows]
-    ax.hlines(y, 1, [r["capacity"] for r in rows], color=col, lw=1.4)
-    ax.plot([r["capacity"] for r in rows], y, "o", ms=4.5,
-            color="none", mec="none")
     for i, r in enumerate(rows):
-        ax.plot([r["capacity"]], [i], "o", ms=4.5, color=col[i])
-        ax.text(r["capacity"] * 1.18, i, f"{r['capacity']}", va="center",
-                fontsize=6.2, color=col[i], fontweight="bold")
+        name = r["benchmark"].replace("CAID3 (residue labels)", "CAID3")
+        col = ACC if "CAID3" in r["benchmark"] else MUT
+        ax.plot([1, r["capacity"]], [i, i], color=col, lw=1.2, zorder=2)
+        ax.plot([r["capacity"]], [i], "o", ms=4.2, color=col, zorder=3)
+        # the same benchmark under a statistic with the pairing structure
+        e = esc_by.get(name) or (esc_by.get("ImageNet")
+                                 if name == "ImageNet" else None)
+        if name == "CAID3":
+            hi = rel["capacity_pairwise"]
+        elif e:
+            hi = e["capacity_per_class_auc"]
+        else:
+            hi = None
+        if hi:
+            ax.plot([r["capacity"], hi], [i, i], color=WARN, lw=1.2, ls=":",
+                    zorder=2)
+            ax.plot([hi], [i], "D", ms=4.0, color=WARN, zorder=4)
+            ax.text(hi * 1.35, i, f"{hi:,}", va="center", fontsize=5.4,
+                    color=WARN, fontweight="bold")
+        else:
+            ax.text(r["capacity"] * 1.35, i, f"{r['capacity']}", va="center",
+                    fontsize=5.6, color=col, fontweight="bold")
     ax.set_yticks(y)
-    ax.set_yticklabels([f"{r['benchmark']}  ({r['eps_percent']:.2f}%)"
-                        for r in rows], fontsize=5.8)
+    ax.set_yticklabels([r["benchmark"].replace("CAID3 (residue labels)",
+                                               "CAID3")
+                        + f"  ({r['eps_percent']:.2f}%)" for r in rows],
+                       fontsize=5.6)
     ax.set_xscale("log")
-    ax.set_xlim(1, 1200)
+    ax.set_xlim(1, 4e8)
     ax.set_xlabel("methods the benchmark can place in a certified order")
     ax.invert_yaxis()
-    ax.set_title("Every benchmark has a capacity.\nMost are far over it.")
+    ax.legend(handles=[plt.Line2D([], [], marker="o", ls="", color=MUT, ms=4.2,
+                                  label="as scored (per-item average)"),
+                       plt.Line2D([], [], marker="D", ls="", color=WARN, ms=4,
+                                  label="scored on within-group pairs")],
+              frameon=False, fontsize=5.4, loc="upper right",
+              labelspacing=0.3, borderpad=0.2)
+    ax.set_title("Every benchmark has a capacity, and\n"
+                 "the statistic decides it")
     panel_label(ax, "d")
 
     fig.tight_layout()

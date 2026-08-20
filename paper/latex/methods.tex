@@ -94,19 +94,22 @@ covers:
 \code{crossed\_bound\_loose\_unbounded}).
 \end{itemize}
 
-A full inventory is Supplementary Note~S6.
+A full inventory is Supplementary Note~S6. Five further files close the
+statements this work used before they were proved: \code{DiscordantImbalance}
+(the closed form without a balance hypothesis), \code{ConformalPValueBH} (the
+composition of split conformal with the dependent screen), \code{SeparationVsChain}
+(what the capacity bounds, and what it does not), \code{CapacityConfidence}
+(capacity from an estimated rate) and \code{UnresolvableCount} (how many
+comparisons are undecidable). \textbf{Nothing in this paper now rests on a
+citation or on an unproved statement.}
 
 Where the development supplies a worked example the analysis code reproduces it
 exactly --- \code{Example.inversion} returns within 1 / pooled 2/3 against within
 2/3 / pooled 5/6 --- which is the strongest available check that the Python
-computes the statistic the theorems describe.
-
-Two statements are used ahead of their formalisation and flagged as such:
-\code{auc\_target\_strictMono\_invariant}, the per-target form of the AUC
-invariance, which is what the protocol's step 3 needs (the published theorem is
-stated for the pair-weighted mean, and the invariance holds target by target
-before any averaging); and the validity of conformal risk control, cited rather
-than formalised.
+computes the statistic the theorems describe. \code{weighted\_ne\_unweighted\_instance}
+plays the same role for the protocol's statistic: a five-residue instance where
+the pair-weighted and unweighted means differ (1/2 against 1/3), so the two
+invariance theorems are separately necessary rather than one implying the other.
 
 \subsection*{The pairwise protocol}
 

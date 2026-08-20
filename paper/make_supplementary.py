@@ -253,6 +253,24 @@ def s15_region_screen():
            "H_regions", "saving", "log_b_minus_1", "threshold_ratio"], rows)
 
 
+def s18_imagenet_escape():
+    """The escape measured on the image benchmarks' own adjudicated labels."""
+    ie = load("imagenet_escape")
+    rows = [[r["benchmark"], r["n_items"], r["n_classes"], r["n_flagged"],
+             r["n_validated_errors"], r["n_indeterminate"],
+             f"{r['eps_label']:.6f}", f"{r['eps_pair']:.3e}",
+             r["capacity_accuracy"], r["capacity_per_class_auc"],
+             f"{r['ratio']:.0f}", r["discordant_pairs"],
+             r["comparable_pairs"], r["indeterminate_dropped"]]
+            for r in ie["rows"]]
+    write("S18_imagenet_escape.csv",
+          ["benchmark", "n_items", "n_classes", "n_flagged",
+           "n_validated_errors", "n_indeterminate", "eps_label", "eps_pair",
+           "capacity_top1_accuracy", "capacity_per_class_auc", "ratio",
+           "discordant_pairs", "comparable_pairs", "indeterminate_dropped"],
+          rows)
+
+
 def s16_screen():
     """The screen as run: discoveries, realised FDP, power, calibration."""
     cs = load("conformal_screen")
@@ -280,7 +298,8 @@ def s16_screen():
 
 for f in (s1_decomposition, s2_inversions, s3_pairwise, s4_operating_cost,
           s5_paired_tests, s6_capacity, s7_noise, s8_reproducibility,
-          s14_registered_endpoints, s15_region_screen, s16_screen):
+          s14_registered_endpoints, s15_region_screen, s16_screen,
+          s18_imagenet_escape):
     try:
         f()
     except Exception as exc:
