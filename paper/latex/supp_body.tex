@@ -690,8 +690,13 @@ before it was proved:
 \item \code{SeparationVsChain} --- \code{pairSeparated\_card\_le\_capacity} and
   \code{many\_separations\_short\_chain} (a two-cluster instance certifying \code{2k²}
   ordered comparisons with no separated subfamily above two).
-\item \code{CapacityConfidence} --- \code{tail\_le\_of\_rate\_le}, \code{capacity\_or\_rare\_event},
-  \code{capacity\_at\_95\_confidence}.
+\item \code{CapacityConfidence} --- \code{tail\_le\_of\_rate\_le} (a tail bound uniform over the
+  null region, sharper than sub-Gaussian in the small-rate regime),
+  \code{capacity\_or\_rare\_event}, and \code{capacity\_at\_95\_confidence}: with 2,746 measured
+  pairs, at least 160 disagreements has probability at most 1/20 under any true
+  rate below 4\%, and at 4\% or above a benchmark certifiably orders at most 13
+  methods. The test is one-sided by construction --- a measurement can only
+  lower-bound the noise rate, which is the direction that shrinks capacity.
 \item \code{UnresolvableCount} --- \code{card\_closePairs\_lower}, \code{benchmark\_unresolvable\_count},
   \code{unresolvable\_count\_117} (at least 798 of 6,786 comparisons undecidable).
 \end{itemize}

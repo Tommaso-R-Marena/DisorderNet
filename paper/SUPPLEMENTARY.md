@@ -582,8 +582,13 @@ before it was proved:
 - `SeparationVsChain` — `pairSeparated_card_le_capacity` and
   `many_separations_short_chain` (a two-cluster instance certifying `2k²`
   ordered comparisons with no separated subfamily above two).
-- `CapacityConfidence` — `tail_le_of_rate_le`, `capacity_or_rare_event`,
-  `capacity_at_95_confidence`.
+- `CapacityConfidence` — `tail_le_of_rate_le` (a tail bound uniform over the
+  null region, sharper than sub-Gaussian in the small-rate regime),
+  `capacity_or_rare_event`, and `capacity_at_95_confidence`: with 2,746 measured
+  pairs, at least 160 disagreements has probability at most 1/20 under any true
+  rate below 4%, and at 4% or above a benchmark certifiably orders at most 13
+  methods. The test is one-sided by construction — a measurement can only
+  lower-bound the noise rate, which is the direction that shrinks capacity.
 - `UnresolvableCount` — `card_closePairs_lower`, `benchmark_unresolvable_count`,
   `unresolvable_count_117` (at least 798 of 6,786 comparisons undecidable).
 
