@@ -375,6 +375,15 @@ Disorder-NOX, 56 of 71 on Binding, 50 of 71 on Binding-IDR and 87 of 92 on
 Linker (**Fig. 3c**) — against seven orderings in total for the residue-level
 protocol.
 
+Those counts exceed the capacity of 51, and they are allowed to. The capacity
+bounds a certified **totally ordered family**; 87 separations against one leader
+are 87 statements about the pairs {leader, X}, which need not compose into a
+chain of 88. Step 6 governs the ranking the protocol prints, not the number of
+pairs a test rejects. We flag the distinction because the two numbers appear side
+by side and invite the wrong reading, and because the theorem that would make it
+precise — the longest certified chain is at most the capacity, while the number
+of certified pairs may exceed it — is not yet stated.
+
 A single-class target sharpens the point. On Binding-IDR, ten of 52 targets
 carry one class among evaluated residues, so every pair they enter is
 between-protein and they ask no residue-level question at all. Restricting to

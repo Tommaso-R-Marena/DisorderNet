@@ -85,8 +85,19 @@ Step 6 is what keeps it honest: a rank the labels cannot support is not printed.
 | 23 | AlphaFold-binding | 0.8738 | 0.9342 | 12 | **−11** | yes |
 
 **DisorderNet-pbias is separated from 55 of 59 eligible methods** — Wilcoxon,
-Holm-corrected within the benchmark, and inside the capacity of 51. The
-residue-level protocol could certify seven orderings in total.
+Holm-corrected within the benchmark. The residue-level protocol could certify
+seven orderings in total.
+
+**A separation count is not a chain, and the capacity bounds the chain.** 55
+exceeds the capacity of 51, and on Linker 87 separations exceed it by more. That
+is not a contradiction: `pairwise_capacity_bound` limits the size of a
+*certified totally ordered family*, and 55 separations against one leader are 55
+pairwise statements about {leader, X} that need not compose into a chain of 56.
+The protocol's step 6 is therefore about the ranking it prints, not about how
+many pairs a test rejects, and the two numbers answer different questions. The
+theorem that would close the gap — bounding the longest certified chain by the
+capacity while allowing many more pairwise separations, with an instance
+exhibiting both — is not yet stated; see `LEAN_REQUESTS.md`.
 
 Largest movers: flDPlr2 **+14**, flDPnn3a **+11**, AlphaFold-binding **−11**,
 AIUPred-2-disorder −10, ESpritz-D −10.
