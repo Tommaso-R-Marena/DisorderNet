@@ -405,7 +405,7 @@ the difference between a critique and a contribution.
 A protocol could resolve more pairs and resolve them wrongly. That is testable:
 **57 methods entered both CAID2 and CAID3.** Rank them on CAID3 under each
 protocol and ask which CAID3 ranking reproduces their CAID2 ranking — a
-different round, different targets, one protein shared (**Fig. 6a**).
+different round, different targets, one protein shared (**Fig. 3d**).
 
 | benchmark | methods | pairwise → pairwise | pooled → pooled |
 |---|---:|---:|---:|
@@ -512,7 +512,7 @@ enters: the weight 1/|R| of a discovery telescopes into a combination of the
 **nested** events {i ∈ R, |R| ≤ j}, and self-consistency contains each of those
 in the single-candidate event {p_i ≤ j·q/m}, whose probability validity alone
 bounds. The price is logarithmic — log(m+1) ≤ H_m ≤ 1 + log m — against
-Bonferroni's factor of m (**Fig. 7a**), and the corrected list still contains
+Bonferroni's factor of m (**Fig. 6a**), and the corrected list still contains
 the Bonferroni list (`by_dominates_bonferroni`).
 
 **The correction is necessary, not conservative.** For every screen size and
@@ -522,7 +522,7 @@ with probability q/((j+1)m) — in which all m hypotheses are null, every p-valu
 is valid, BH rejects exactly the window, and therefore E[FDP] = q·H_m **exactly**
 (`bh_fdr_eq_harmonic`). So the harmonic factor is attained and cannot be lowered
 (`harmonic_factor_sharp`); uncorrected BH strictly exceeds its nominal level from
-two candidates on (`uncorrected_bh_exceeds_level`, **Fig. 7c**); and the
+two candidates on (`uncorrected_bh_exceeds_level`, **Fig. 6c**); and the
 corrected procedure sits exactly at its own bound (`by_level_is_attained`).
 
 That makes the factor a **design parameter**, because it depends on one thing
@@ -537,7 +537,7 @@ log b − 1.
 Instantiated on this paper's own references, taking the candidate regions to be
 the maximal same-label runs — the unit the annotation is actually constant on,
 with a run broken by any unevaluated residue, which states more hypotheses
-rather than fewer (**Fig. 7b**):
+rather than fewer (**Fig. 6b**):
 
 | reference | residues n | regions M | H_n | H_M | saving | threshold |
 |---|---:|---:|---:|---:|---:|---:|
@@ -549,9 +549,30 @@ rather than fewer (**Fig. 7b**):
 
 A region-level screen may test at a threshold 1.6× to 2.05× larger than a
 residue-level one **for the same residue-level false discovery rate**, and by
-`fdp_lift` it gives up nothing to do so. No screen is run here; what is measured
-is the price of the design decision on real references, so the theorem is
-instantiated rather than only cited.
+`fdp_lift` it gives up nothing to do so.
+
+**We ran the screen.** Conformal p-values calibrated on the ordered blocks of
+80% of chains, Benjamini–Yekutieli at α/H_M on the rest, 50 splits, on CAID3
+Disorder-PDB (304 usable chains, 98,938 evaluated residues). At α = 0.10 with
+100-residue blocks the region-level screen reports **2,942 residues** at a
+realised false discovery proportion of 0.024 and power 0.568, against **203
+residues** and power 0.036 for the residue-level screen at the same guaranteed
+rate — **14.5× the discoveries**. Region-level Bonferroni reports nothing at any
+setting.
+
+A third constraint, absent from the theory, dominates both. A conformal p-value
+cannot fall below 1/(n_cal+1), and a step-up rule at level α/H_m over m
+hypotheses applies thresholds as small as α/(m·H_m), so a screen is
+*arithmetically* incapable of a discovery unless **n_cal + 1 ≥ m·H_m/α**,
+whatever the predictor does. That requirement is **linear** in the number of
+hypotheses where the harmonic factor is logarithmic: stating one hypothesis per
+region rather than per residue reduces it by 13–178× on these references. It is
+the constraint that binds first, and a screen should be designed against it
+before the harmonic factor.
+
+The screen is a demonstration on a public benchmark whose labels are already
+known; no biological discovery is claimed, and the realised false discovery
+proportion sits far below nominal, as arbitrary-dependence control should.
 
 ### DisorderNet
 
@@ -609,7 +630,7 @@ five benchmarks × two opponents):
 Against AlphaFold-rsa the same system separates on four of five (Disorder-NOX
 adj. p = 0.072). On Linker we win 29 of 31 targets.
 
-**A temporal holdout** (**Fig. 6b,c**). The training caches are dated
+**A temporal holdout** (**Fig. 4c,d**). The training caches are dated
 2026-08-08 and 2026-08-10; a structure first released on 2026-08-11 or later was
 not in them, whatever any filter does. Of 1,916 protein polymer entities
 released after the cutoff, 645 are usable and **186 survive after removing exact
@@ -617,17 +638,41 @@ training sequences and BLAST homologues at ≥40% identity — 71% of the "new"
 chains were already represented.** A temporal cutoff alone is not a leak
 control; the calendar and the homology filter are both necessary.
 
-| model | pooled | within-protein |
-|---|---:|---:|
-| **`mt_windowed`** | **0.8933** | **0.8502** |
-| `mt_pbias` | 0.8859 | 0.8171 |
-| AlphaFold-pLDDT | 0.8737 | 0.7816 |
-| AlphaFold-rsa | 0.8229 | 0.7383 |
+Over all 186 chains `mt_windowed` reaches 0.8933 pooled and 0.8502
+within-protein. The training-free structural baselines can only be computed on
+the 61 chains with a matching AlphaFold model, so the comparison is made there
+and nowhere else — reporting our 186-chain score beside their 61-chain score
+would compare two different benchmarks:
 
-On the 61 chains with a matching AlphaFold model, `mt_windowed` beats
-AlphaFold-pLDDT by +0.0358 (95% CI [+0.0020, +0.0738], p = 0.037), which does
-not survive Holm across the three comparisons (adj. 0.074). Sixty-one chains is
-a small sample and the analysis was not pre-registered.
+| model | pooled | within-protein | chains |
+|---|---:|---:|---:|
+| **`mt_windowed`** | **0.9095** | **0.8023** | 61 |
+| `mt_pbias` | 0.9024 | 0.7890 | 61 |
+| AlphaFold-pLDDT | 0.8737 | 0.7816 | 61 |
+| AlphaFold-rsa | 0.8229 | 0.7383 | 61 |
+
+`mt_windowed` beats AlphaFold-pLDDT by +0.0358 (95% CI [+0.0020, +0.0738],
+p = 0.037), which does not survive Holm across the three comparisons (adj.
+0.074). Sixty-one chains is a small sample and the analysis was not
+pre-registered.
+
+**The holdout also settles a question CAID3 cannot.** Five pre-registered
+variants were inseparable from their control on the benchmark, and the capacity
+result says the benchmark could not have separated them whatever they did — so
+the natural objection is that real improvements are being hidden. New data is
+not bounded by CAID3's capacity, and on these 186 unseen chains **none** of the
+four scorable variants beats its regime-matched control:
+
+| variant vs `mt_control`, 186 unseen chains | pooled | within (pair-wtd) | within (unwtd) |
+|---|---:|---:|---:|
+| `mt_motif` | −0.0033 | −0.0048 | −0.0075 |
+| `mt_rank` | −0.0035 | −0.0047 | −0.0137 |
+| `mt_wass` | −0.0046 | −0.0098 | −0.0084 |
+| `mt_chiral` | −0.0086 | −0.0301 | −0.0135 |
+
+There was nothing to resolve. This is the outcome the capacity theorem should be
+read as licensing: it says when to stop looking, and when we checked with
+independent data, stopping was correct.
 
 **The unflattering result the temporal set exists to produce:** `mt_pbias` is
 our best CAID3 model on Disorder-PDB (0.9635) and the worst of the three here,
@@ -1032,14 +1077,17 @@ residue-level and pairwise protocols. (**c**) The balance hypothesis
 
 **Figure 3 — CAID3 re-scored.**
 (**a**) Pooled rank against pairwise rank, all 357 method–benchmark pairs, with
-the identity line. (**b**) The 14 largest rank changes; dot = pooled,
+the identity line. (**b**) The 12 largest rank changes; dot = pooled,
 arrowhead = pairwise. (**c**) Entrants the leader is separated from at the
-certified margin, per benchmark.
+certified margin, per benchmark. (**d**) Cross-round reproducibility, CAID3 →
+held-out CAID2, 57 shared entrants.
 
 **Figure 4 — DisorderNet.**
 (**a**) Per-target within-protein margins against PUNCH2 and AlphaFold-rsa,
 95% CI, p Holm-adjusted over all 30 comparisons. (**b**) Placement on both
-rounds under each benchmark's own reported metric.
+rounds under each benchmark's own reported metric. (**c**) Construction of the
+temporal holdout. (**d**) Performance on structures released after the training
+caches were built, restricted to the 61 chains every method can score.
 
 **Figure 5 — The price of a guarantee.**
 (**a**) Realised miss rate against fraction of protein flagged, all 70
@@ -1047,16 +1095,10 @@ full-coverage Disorder-PDB methods, at α = 0.10. (**b**) The same guarantee
 bought two ways: one global threshold versus a per-protein quantile; the number
 is the calibration credit. (**c**) The comparison AUC cannot make.
 
-**Figure 7 — The price of a screen, and where to pay it.**
-(**a**) The deflation factor against the number of hypotheses stated: harmonic
-under arbitrary dependence, against Bonferroni's linear factor, with the
-residue-level and region-level counts for CAID3 Disorder-PDB marked.
-(**b**) The saving from stating one hypothesis per region rather than per
-residue, per reference, against the log b − 1 floor `harmonic_gain_log` proves.
-(**c**) Sharpness: on the constructed joint law, uncorrected BH realises
-E[FDP] = q·H_m exactly, so it exceeds its nominal level from two candidates on.
-
-**Figure 6 — Reproducibility and generalisation.**
-(**a**) Cross-round rank correlation, CAID3 → held-out CAID2, 57 shared
-entrants. (**b**) Construction of the temporal holdout. (**c**) Performance on
-186 chains released after the training caches were built.
+**Figure 6 — The price of a screen, and where to pay it.**
+(**a**) The deflation factor required under arbitrary dependence against the
+number of hypotheses stated, with Bonferroni's linear factor for comparison.
+(**b**) The correction bought back by stating one hypothesis per region rather
+than per residue, per reference, against the floor `log b − 1` that
+`harmonic_gain_log` proves. (**c**) Sharpness: on the constructed joint law,
+uncorrected Benjamini–Hochberg realises E[FDP] = q·H_m exactly.

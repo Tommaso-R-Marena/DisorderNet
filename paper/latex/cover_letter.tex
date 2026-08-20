@@ -1,0 +1,74 @@
+\documentclass[11pt,a4paper]{letter}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[margin=1.1in]{geometry}
+\usepackage[hidelinks]{hyperref}
+
+\signature{Tommaso R. Marena}
+\address{Tommaso R. Marena\\ \texttt{marenatommaso@gmail.com}}
+\begin{document}
+
+\begin{letter}{The Editors\\ \emph{Nature Methods}}
+
+\opening{Dear Editors,}
+
+I am submitting ``A benchmark cannot order more methods than its labels can
+distinguish'' for consideration as an Article.
+
+Community benchmarks are the field's instrument for deciding which methods
+work, and the ordering they publish is treated as data. This manuscript proves
+that it usually is not. A benchmark whose annotations are wrong at rate
+$\varepsilon$ can place at most $\lceil 1/2\varepsilon \rceil$ methods in a
+certifiable order --- however many enter, and however the data are analysed ---
+and past that count the ordering is \emph{not a function of the observations}:
+for two close methods we construct two ground truths, each consistent with
+everything the benchmark recorded, one favouring each. This is an impossibility
+result, not a power calculation, and no amount of resampling touches it.
+
+Measuring the annotation error rate directly, from repeat determinations of the
+same protein in MobiDB, gives the Critical Assessment of Intrinsic Disorder a
+capacity of seven. It admits 117 entrants.
+
+The paper does not stop at the critique. The bound constrains \emph{labels},
+while a ranking statistic is a function of ordered \emph{pairs}, and a pair is
+reversed only when both its residues are mis-annotated in opposite directions
+--- an exactly second-order event. We give the identity, measure both rates,
+specify a pairwise protocol that raises the capacity from 8 to 51, re-score the
+whole CAID3 field under it, and show the resulting ranking reproduces itself on
+a held-out round as well as the published one does. CAID4's references are not
+yet public, so this is adoptable rather than retrospective.
+
+Three features may interest \emph{Nature Methods} specifically. First, every
+theorem is machine-checked in Lean~4, \texttt{sorry}-free and on standard
+axioms; formalising the central identity refuted two numbers we had been
+publishing, including our own headline capacity, and both corrections are
+documented in the manuscript rather than quietly absorbed. Second, we give
+disorder prediction what we believe is its first distribution-free operating
+guarantee: fix a tolerated miss rate and conformal risk control returns a
+threshold that achieves it on an unseen protein, at a price that ranges from
+32\% to 97\% of the protein flagged across the CAID3 field --- a difference AUC
+cannot see. Third, the same design argument governs reporting: because the
+dependence correction a screen must pay is set by how many hypotheses it states,
+testing regions rather than residues yields 14.5$\times$ the discoveries at the
+same guaranteed false discovery rate, which we prove and then demonstrate.
+
+The accompanying predictor, DisorderNet, ranks first of 115 entrants on three of
+five CAID3 references and first among full-coverage entrants on all four CAID2
+references. We are careful not to over-claim it: its margin over the CAID3
+Disorder-PDB winner on the reported metric is $+0.0043$ at $p = 0.20$, and the
+manuscript says so. What it does separate on is the calibration-invariant axis,
+on all five benchmarks after Holm correction over thirty comparisons --- a
+separation the benchmark's own metric provably cannot make.
+
+The work has not been published elsewhere and is not under consideration by
+another journal. All data are public, all code and the Lean development are
+available, and the pre-registrations are committed with timestamps predating the
+runs they govern. I have no competing interests.
+
+Thank you for your consideration.
+
+\closing{Yours sincerely,}
+
+\end{letter}
+\end{document}

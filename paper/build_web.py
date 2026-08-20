@@ -58,8 +58,7 @@ FIGURE_FOR = {
     "Figure 3": "figure3_rescored.png",
     "Figure 4": "figure4_model.png",
     "Figure 5": "figure5_operating.png",
-    "Figure 6": "figure6_generalisation.png",
-    "Figure 7": "figure7_screen.png",
+    "Figure 6": "figure6_screen.png",
 }
 
 

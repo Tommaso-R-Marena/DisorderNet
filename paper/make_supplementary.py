@@ -253,9 +253,34 @@ def s15_region_screen():
            "H_regions", "saving", "log_b_minus_1", "threshold_ratio"], rows)
 
 
+def s16_screen():
+    """The screen as run: discoveries, realised FDP, power, calibration."""
+    cs = load("conformal_screen")
+    rows = []
+    for key, v in cs["results"].items():
+        b, a = key.replace("b", "").split("_alpha")
+        c = v["calibration"]
+        for proc in ("region_BY", "residue_BY", "region_BH", "region_Bonf"):
+            r = v[proc]
+            rows.append([int(b), float(a), proc, r["residues_reported"],
+                         f"{r['realised_residue_fdp']:.5f}",
+                         f"{r['power']:.4f}",
+                         f"{v['region_over_residue']:.3f}",
+                         f"{v['fdp_lift_max_gap']:.2e}",
+                         c["region_have"], c["region_need"],
+                         c["residue_have"], c["residue_need"],
+                         f"{c['budget_ratio']:.1f}"])
+    write("S16_screen_as_run.csv",
+          ["block_length", "alpha", "procedure", "residues_reported",
+           "realised_residue_fdp", "power", "region_over_residue_ratio",
+           "fdp_lift_max_gap", "cal_units_region_have",
+           "cal_units_region_need", "cal_units_residue_have",
+           "cal_units_residue_need", "calibration_budget_ratio"], rows)
+
+
 for f in (s1_decomposition, s2_inversions, s3_pairwise, s4_operating_cost,
           s5_paired_tests, s6_capacity, s7_noise, s8_reproducibility,
-          s14_registered_endpoints, s15_region_screen):
+          s14_registered_endpoints, s15_region_screen, s16_screen):
     try:
         f()
     except Exception as exc:

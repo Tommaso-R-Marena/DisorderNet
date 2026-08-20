@@ -20,8 +20,13 @@ from matplotlib.patches import Patch
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 D = os.path.join(ROOT, "paper", "figures")
 CAID3 = os.path.join(ROOT, "results", "caid3")
+# Nature Methods: 180 mm double-column, 88 mm single-column, minimum ~5 pt type
+# at final size. Figures are authored at final size so nothing is rescaled.
+FULL, HALF = 7.087, 3.465
+
 plt.rcParams.update({
-    "font.size": 8, "axes.titlesize": 9, "axes.labelsize": 8,
+    "font.size": 7, "axes.titlesize": 7.5, "axes.labelsize": 7,
+    "xtick.labelsize": 6.5, "ytick.labelsize": 6.5,
     "axes.spines.top": False, "axes.spines.right": False,
     "figure.dpi": 200, "savefig.dpi": 300, "savefig.bbox": "tight",
 })
@@ -63,7 +68,7 @@ def panel_label(ax, s):
 # ── Figure 1 — the metric is a calibration contest ──────────────────────────
 def figure1():
     cert = load("certified_caid3")
-    fig, axes = plt.subplots(1, 3, figsize=(9.5, 2.9))
+    fig, axes = plt.subplots(1, 3, figsize=(FULL, 2.35))
     names = {"disorder_pdb": "Disorder-PDB", "disorder_nox": "Disorder-NOX",
              "binding": "Binding", "binding_idr": "Binding-IDR",
              "linker": "Linker"}
@@ -131,7 +136,7 @@ def figure1():
 def figure2():
     cap, rel = load("benchmark_capacity"), load("relative_noise")
     an = load("annotation_noise")
-    fig, axes = plt.subplots(1, 3, figsize=(9.5, 2.9))
+    fig, axes = plt.subplots(1, 3, figsize=(FULL, 2.35))
 
     ax = axes[0]
     eps = np.linspace(0.005, 0.25, 400)
@@ -210,11 +215,13 @@ def figure3():
     from scipy.stats import spearmanr
 
     pl = load("pairwise_leaderboard")
-    fig = plt.figure(figsize=(10.2, 3.4))
-    gs = fig.add_gridspec(1, 3, width_ratios=[1.0, 1.5, 0.8], wspace=0.80)
+    pv = load("predictive_validity")
+    fig = plt.figure(figsize=(FULL, 5.5))
+    gs = fig.add_gridspec(2, 2, height_ratios=[1, 1], width_ratios=[1, 1],
+                          wspace=0.62, hspace=0.52)
 
     # (a) the two orderings agree — and where they do not
-    ax = fig.add_subplot(gs[0])
+    ax = fig.add_subplot(gs[0, 0])
     allmoves, xs, ys = [], [], []
     for t, v in pl["tasks"].items():
         for r in v["ranking"]:
@@ -242,8 +249,8 @@ def figure3():
     panel_label(ax, "a")
 
     # (b) …and the disagreement is concentrated, and large
-    ax = fig.add_subplot(gs[1])
-    top = sorted(allmoves, reverse=True)[:14][::-1]
+    ax = fig.add_subplot(gs[0, 1])
+    top = sorted(allmoves, reverse=True)[:12][::-1]
     y = np.arange(len(top))
     for i, (_d, t, m, a, b) in enumerate(top):
         ax.annotate("", xy=(b, i), xytext=(a, i),
@@ -259,7 +266,7 @@ def figure3():
     panel_label(ax, "b")
 
     # (c) how much of the field the leader is actually separated from
-    ax = fig.add_subplot(gs[2])
+    ax = fig.add_subplot(gs[1, 0])
     ts = list(pl["tasks"])
     sep = [pl["tasks"][t]["n_separated"] for t in ts]
     tot = [pl["tasks"][t]["n_eligible"] - 1 for t in ts]
@@ -276,6 +283,26 @@ def figure3():
     ax.set_title("Separation at the\ncertified margin")
     panel_label(ax, "c")
 
+    # (d) the extra resolution reproduces on a held-out round
+    ax = fig.add_subplot(gs[1, 1])
+    vt = list(pv["tasks"])
+    x = np.arange(len(vt))
+    pw = [pv["tasks"][t]["r_pairwise_to_pairwise"] for t in vt]
+    pd_ = [pv["tasks"][t]["r_pooled_to_pooled"] for t in vt]
+    ax.bar(x - 0.19, pw, 0.36, color=ACC, label="pairwise → pairwise")
+    ax.bar(x + 0.19, pd_, 0.36, color=MUT, label="pooled → pooled")
+    for i, (a_, b_) in enumerate(zip(pw, pd_)):
+        ax.text(i - 0.19, a_ + 0.008, f"{a_:.3f}", ha="center", fontsize=5.6)
+        ax.text(i + 0.19, b_ + 0.008, f"{b_:.3f}", ha="center", fontsize=5.6)
+    ax.set_xticks(x)
+    ax.set_xticklabels([NICE.get(t, t) for t in vt], fontsize=6, rotation=14)
+    ax.set_ylabel("Spearman, CAID3 → CAID2")
+    ax.set_ylim(0.7, 1.06)
+    ax.legend(frameon=False, fontsize=5.8, loc="lower right", ncol=2,
+              columnspacing=0.8, handletextpad=0.4)
+    ax.set_title("Six times the resolution,\nat no cost in reproducibility")
+    panel_label(ax, "d")
+
     fig.savefig(os.path.join(D, "figure3_rescored.png"))
     fig.savefig(os.path.join(D, "figure3_rescored.pdf"))
     plt.close(fig)
@@ -285,7 +312,9 @@ def figure3():
 def figure4():
     wt = load("within_protein_test_all")
     holm = wt["_holm"]
-    fig, axes = plt.subplots(1, 2, figsize=(9.8, 3.2))
+    tp = load("temporal_results")
+    fig, axes = plt.subplots(2, 2, figsize=(FULL, 5.6))
+    axes = axes.ravel()
 
     ax = axes[0]
     tasks = ["disorder_pdb", "disorder_nox", "binding", "binding_idr", "linker"]
@@ -314,7 +343,7 @@ def figure4():
     ax.set_ylim(-0.6, len(tasks) - 0.4)
     ax.legend(handles=[Patch(color=ACC, label="vs PUNCH2 (CAID3 Disorder-PDB winner)"),
                        Patch(color="#1D4ED8", label="vs AlphaFold-rsa")],
-              frameon=False, fontsize=6.4, loc="lower right")
+              frameon=False, fontsize=5.8, loc="upper right")
     ax.set_title("Paired per-target margins, 95% CI\n"
                  "p Holm-adjusted over all 30 comparisons")
     panel_label(ax, "a")
@@ -365,6 +394,71 @@ def figure4():
                  "CAID3: mt_windowed · CAID2: mt_pbias")
     panel_label(ax, "b")
 
+    # (c) the temporal holdout, and how little of it survives filtering
+    ax = axes[2]
+    stages = [("released after the\ntraining caches", 1916),
+              ("usable chains", 645),
+              ("minus exact\ntraining sequences", 645 - 175),
+              ("minus BLAST\nhomologues ≥40%", 186)]
+    y = np.arange(len(stages))
+    ax.barh(y, [st[1] for st in stages], color=[MUT, MUT, MUT, ACC],
+            height=0.6)
+    for i, st in enumerate(stages):
+        ax.text(st[1] + 30, i, f"{st[1]:,}", va="center", fontsize=6)
+    ax.set_yticks(y)
+    ax.set_yticklabels([st[0] for st in stages], fontsize=5.8)
+    ax.set_xlabel("chains")
+    ax.set_xlim(0, 2300)
+    ax.invert_yaxis()
+    ax.set_title("71% of 'new' PDB chains were\nalready in the training set")
+    panel_label(ax, "c")
+
+    # (d) performance on structures released after the caches were built.
+    #
+    # Matched on the 61 chains with an AlphaFold model. The baselines can only
+    # be computed there, and our models are scored on 186, so the two sets of
+    # numbers in `temporal_results.json` are NOT comparable: `pooled` is the
+    # 186-chain score for our checkpoints and the 61-chain score for the
+    # baselines, which have no `structured_subset`. Plotting them together
+    # would repeat exactly the unmatched-chain-set error this project already
+    # made once with conformal coverage, so the subset is used throughout and
+    # the 186-chain figures are quoted separately in the text.
+    ax = axes[3]
+    res = tp["results"]
+    order = ["multitask_windowed", "multitask_pbias", "AlphaFold-pLDDT",
+             "AlphaFold-rsa"]
+    nice = {"multitask_windowed": "DisorderNet-windowed",
+            "multitask_pbias": "DisorderNet-pbias",
+            "AlphaFold-pLDDT": "AlphaFold-pLDDT",
+            "AlphaFold-rsa": "AlphaFold-rsa"}
+
+    def matched(m, field):
+        v = res[m]
+        return v.get("structured_subset", v)[field]
+
+    y = np.arange(len(order))
+    w = 0.36
+    ax.barh(y - w / 2, [matched(m, "pooled") for m in order], w,
+            color=[ACC if "multitask" in m else MUT for m in order])
+    ax.barh(y + w / 2, [matched(m, "within") for m in order], w,
+            color=[ACC if "multitask" in m else MUT for m in order], alpha=0.55)
+    for i, m in enumerate(order):
+        ax.text(matched(m, "pooled") + 0.006, i - w / 2,
+                f"{matched(m, 'pooled'):.3f}", va="center", fontsize=5.8)
+        ax.text(matched(m, "within") + 0.006, i + w / 2,
+                f"{matched(m, 'within'):.3f}", va="center", fontsize=5.8)
+    ax.set_yticks(y)
+    ax.set_yticklabels([nice[m] for m in order], fontsize=5.8)
+    ax.set_xlim(0.6, 1.0)
+    ax.invert_yaxis()
+    ax.legend(handles=[Patch(color=INK, label="pooled"),
+                       Patch(color=INK, alpha=0.5, label="within-protein")],
+              frameon=False, fontsize=5.8, loc="lower right")
+    ax.set_xlabel("AUC, the 61 held-out chains all methods can score")
+    ax.set_title("Structures released after the training\n"
+                 "caches were built, matched chain sets")
+    panel_label(ax, "d")
+
     fig.tight_layout()
     fig.savefig(os.path.join(D, "figure4_model.png"))
     fig.savefig(os.path.join(D, "figure4_model.pdf"))
@@ -380,7 +474,7 @@ def figure5():
             "PUNCH2": WARN, "AlphaFold-rsa": "#1D4ED8",
             "AlphaFold-pLDDT": "#7C3AED"}
 
-    fig, axes = plt.subplots(1, 3, figsize=(10.2, 3.1))
+    fig, axes = plt.subplots(1, 3, figsize=(FULL, 2.45))
 
     # (a) validity is free; the price is not
     ax = axes[0]
@@ -473,10 +567,10 @@ def figure5():
     plt.close(fig)
 
 
-# ── Figure 6 — reproducibility and generalisation ───────────────────────────
-def figure6():
+# ── (retired) reproducibility and generalisation: now Fig. 3d and Fig. 4c,d ─
+def _figure6_retired():
     pv, tp = load("predictive_validity"), load("temporal_results")
-    fig, axes = plt.subplots(1, 3, figsize=(10.2, 3.0))
+    fig, axes = plt.subplots(1, 3, figsize=(FULL, 2.45))
 
     ax = axes[0]
     ts = list(pv["tasks"])
@@ -551,10 +645,10 @@ def figure6():
     plt.close(fig)
 
 
-# ── Figure 7 — the price of a screen ────────────────────────────────────────
-def figure7():
+# ── Figure 6 — the price of a screen ────────────────────────────────────────
+def figure6():
     rs = load("region_screen")
-    fig, axes = plt.subplots(1, 3, figsize=(10.2, 3.0))
+    fig, axes = plt.subplots(1, 3, figsize=(FULL, 2.45))
 
     # (a) logarithmic against linear
     ax = axes[0]
@@ -635,13 +729,12 @@ def figure7():
     panel_label(ax, "c")
 
     fig.tight_layout()
-    fig.savefig(os.path.join(D, "figure7_screen.png"))
-    fig.savefig(os.path.join(D, "figure7_screen.pdf"))
+    fig.savefig(os.path.join(D, "figure6_screen.png"))
+    fig.savefig(os.path.join(D, "figure6_screen.pdf"))
     plt.close(fig)
 
 
-for f in (figure1, figure2, figure3, figure4, figure5, figure6,
-          figure7):
+for f in (figure1, figure2, figure3, figure4, figure5, figure6):
     try:
         f()
         print(f"  {f.__name__} ok")

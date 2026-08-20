@@ -1,0 +1,108 @@
+% =====================================================================
+%  Supplementary Information
+%  Compile separately:  pdflatex supplementary
+%  The body is generated from paper/SUPPLEMENTARY.md by paper/md2tex.py,
+%  so the notes cannot drift from the version kept with the analyses.
+% =====================================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{caption}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+
+% ---- Unicode the sources use, declared so nothing silently fails --------
+\DeclareUnicodeCharacter{03B1}{\ensuremath{\alpha}}
+\DeclareUnicodeCharacter{03B2}{\ensuremath{\beta}}
+\DeclareUnicodeCharacter{03B3}{\ensuremath{\gamma}}
+\DeclareUnicodeCharacter{03B4}{\ensuremath{\delta}}
+\DeclareUnicodeCharacter{03B5}{\ensuremath{\varepsilon}}
+\DeclareUnicodeCharacter{03BA}{\ensuremath{\kappa}}
+\DeclareUnicodeCharacter{03BB}{\ensuremath{\lambda}}
+\DeclareUnicodeCharacter{03BC}{\ensuremath{\mu}}
+\DeclareUnicodeCharacter{03BD}{\ensuremath{\nu}}
+\DeclareUnicodeCharacter{03C1}{\ensuremath{\rho}}
+\DeclareUnicodeCharacter{03C3}{\ensuremath{\sigma}}
+\DeclareUnicodeCharacter{0394}{\ensuremath{\Delta}}
+\DeclareUnicodeCharacter{03A3}{\ensuremath{\Sigma}}
+\DeclareUnicodeCharacter{2264}{\ensuremath{\leq}}
+\DeclareUnicodeCharacter{2265}{\ensuremath{\geq}}
+\DeclareUnicodeCharacter{2260}{\ensuremath{\neq}}
+\DeclareUnicodeCharacter{2248}{\ensuremath{\approx}}
+\DeclareUnicodeCharacter{00D7}{\ensuremath{\times}}
+\DeclareUnicodeCharacter{00B7}{\ensuremath{\cdot}}
+\DeclareUnicodeCharacter{00B2}{\ensuremath{^2}}
+\DeclareUnicodeCharacter{2192}{\ensuremath{\rightarrow}}
+\DeclareUnicodeCharacter{21D2}{\ensuremath{\Rightarrow}}
+\DeclareUnicodeCharacter{2308}{\ensuremath{\lceil}}
+\DeclareUnicodeCharacter{2309}{\ensuremath{\rceil}}
+\DeclareUnicodeCharacter{230A}{\ensuremath{\lfloor}}
+\DeclareUnicodeCharacter{230B}{\ensuremath{\rfloor}}
+\DeclareUnicodeCharacter{2208}{\ensuremath{\in}}
+\DeclareUnicodeCharacter{2286}{\ensuremath{\subseteq}}
+\DeclareUnicodeCharacter{2229}{\ensuremath{\cap}}
+\DeclareUnicodeCharacter{222A}{\ensuremath{\cup}}
+\DeclareUnicodeCharacter{0394}{\ensuremath{\Delta}}
+\DeclareUnicodeCharacter{1D53C}{\ensuremath{\mathbb{E}}}
+\DeclareUnicodeCharacter{2026}{\dots}
+\DeclareUnicodeCharacter{2014}{---}
+\DeclareUnicodeCharacter{2013}{--}
+\DeclareUnicodeCharacter{2011}{-}
+\DeclareUnicodeCharacter{2019}{'}
+\DeclareUnicodeCharacter{201C}{``}
+\DeclareUnicodeCharacter{201D}{''}
+\DeclareUnicodeCharacter{2265}{\ensuremath{\geq}}
+\DeclareUnicodeCharacter{2205}{\ensuremath{\emptyset}}
+\DeclareUnicodeCharacter{221E}{\ensuremath{\infty}}
+\DeclareUnicodeCharacter{2211}{\ensuremath{\sum}}
+\DeclareUnicodeCharacter{03C0}{\ensuremath{\pi}}
+\DeclareUnicodeCharacter{00B0}{\ensuremath{^\circ}}
+\DeclareUnicodeCharacter{03A9}{\ensuremath{\Omega}}
+\DeclareUnicodeCharacter{03B9}{\ensuremath{\iota}}
+\DeclareUnicodeCharacter{03C9}{\ensuremath{\omega}}
+\DeclareUnicodeCharacter{1D9C}{\ensuremath{^{c}}}
+\DeclareUnicodeCharacter{2080}{\ensuremath{_0}}
+\DeclareUnicodeCharacter{2081}{\ensuremath{_1}}
+\DeclareUnicodeCharacter{211D}{\ensuremath{\mathbb{R}}}
+\DeclareUnicodeCharacter{2209}{\ensuremath{\notin}}
+\DeclareUnicodeCharacter{2212}{\ensuremath{-}}
+\DeclareUnicodeCharacter{2218}{\ensuremath{\circ}}
+\DeclareUnicodeCharacter{2227}{\ensuremath{\wedge}}
+
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\eps}{\varepsilon}
+\sloppy
+\emergencystretch=3em
+
+\renewcommand{\thepage}{S\arabic{page}}
+\renewcommand{\thesection}{Supplementary}
+\setcounter{secnumdepth}{0}
+
+\title{\bfseries Supplementary Information\\[0.4em]
+\large A benchmark cannot order more methods than its labels can distinguish}
+\author{Tommaso R. Marena}
+\date{}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+
+\noindent
+This document contains Supplementary Notes~S1--S7 and Supplementary
+Tables~S9--S15. Supplementary Tables~S1--S8, S14 and S15 are additionally
+provided as comma-separated Supplementary Data files, since several run to
+hundreds or thousands of rows; the file names are given in the Contents table
+below and every one is regenerated from the analysis outputs by
+\code{paper/make\_supplementary.py}.
+
+\vspace{1em}
+\input{supp_body}
+
+\end{document}

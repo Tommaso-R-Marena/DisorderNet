@@ -48,3 +48,9 @@ htmlcov/
 !paper/figures/*.png
 !paper/figures/*.pdf
 paper/manuscript_web.html
+paper/latex/pdf/
+paper/latex/*.aux
+paper/latex/*.log
+paper/latex/*.bbl
+paper/latex/*.blg
+paper/latex/*.out

@@ -1,0 +1,298 @@
+% =====================================================================
+%  Methods  --  Nature Methods places this after the references.
+% =====================================================================
+\section*{Methods}
+
+\subsection*{Data and provenance}
+
+All CAID3 numbers derive from the official reference FASTAs
+(\url{https://caid.idpcentral.org/assets/sections/challenge/static/references/3/})
+and the official prediction archive (\code{predictions.zip}, 76{,}480{,}806
+bytes, 117 \code{.caid} files, aggregate md5
+\code{cdef7ae6dc3dd6ec8055aacdb14a54a7}). Per-file checksums and per-target
+composition counts are in Supplementary Table~S12. Composition is cross-checked
+against CAID's dataset API, which serves those counts separately from the files
+themselves; the evaluator refuses any reference whose composition does not
+match. Of the 117 prediction files, 115 produce a score on any given reference,
+which is the denominator of every rank reported here; the capacity tables use
+117, since a method that entered is a method the benchmark was asked to place.
+
+The dataset used is ``CAID3 v3'', the challenge as scored. The API also serves
+an entry named plainly ``CAID3'' (185 proteins), a different and smaller set that
+does not reproduce the published leaderboard. Three prediction files
+(\code{FoldUnfold}, \code{NeProc-binding}, \code{NeProc-disorder}) leave the
+score field blank on declined residues; these parse to NaN, are counted, and are
+never silently dropped.
+
+The check that licenses every other number is that each challenge's published
+leader is recomputed through our own pipeline. All five reproduce to the
+published precision: PUNCH2 0.9552 against 0.955, ESMDisPred-2PDB 0.8855 against
+0.885, DisoFLAG-PB 0.7760 against 0.776, bindEmbed21IDR-rawGeneral 0.6407
+against 0.641, IPA-AF2-Linker 0.8985 against 0.897. If a leader stops
+reproducing, nothing computed afterwards is trusted until it is explained.
+
+\subsection*{Annotation error rate}
+
+$\eps$ is estimated two independent ways from MobiDB, neither of which uses
+CAID's own references (which are not independent annotations of each other and
+return exactly zero disagreements).
+
+\emph{Context-dependent residues.} MobiDB's
+\code{derived-missing\_residues\_context\_dependent-th\_90} annotation marks
+residues missing in some deposited structures of a protein and observed in
+others. Pooled over the 160 CAID3 Disorder-PDB targets with a usable record:
+4{,}886 of 61{,}013 evidenced residues, $\eps = 0.0801$.
+
+\emph{Structure pairs.} For each protein, every pair of its deposited structures
+(\code{derived-missing\_residues-mobi-\{PDBID\}\_\{CHAIN\}}), restricted to
+residues both structures cover, gives a direct disagreement rate. Over the 159
+targets with $\ge 2$ structures and 2{,}746 structure pairs:
+$\eps_{\text{label}} = 0.0651$ pooled and 0.0342 median protein. The same
+enumeration gives $\eps_{\text{pair}} = 0.0100$ pooled and 0.0006 median, on the
+denominator \code{card\_comparablePairs} defines --- the pairs both structures
+order, $2(|T \cap L|\cdot|(T \cup L)^{c}| + du)$, and no larger set. The same run
+records the balance hypothesis rather than assuming it: 32 of 2{,}746 structure
+pairs satisfy both hypotheses of \code{nuPair\_le\_two\_eps\_sq}, and the bound
+holds on all 32.
+
+Per-structure coverage is approximated by the span of that structure's annotated
+region, because MobiDB publishes per-structure \emph{missing} regions and not
+per-structure coverage; residues outside a structure's span are treated as
+undetermined rather than observed, which is the conservative direction, since
+counting them as observed would manufacture disagreement from absence. Both
+rates are worst-case budgets over structure pairs, not probability models,
+matching the noise model the capacity theorem uses.
+
+\subsection*{Formal development}
+
+All theorems cited are Lean~4, \code{sorry}-free, and depend only on
+\code{propext}, \code{Classical.choice} and \code{Quot.sound}. The development
+covers:
+
+\begin{itemize}\itemsep1pt \parskip0pt
+\item the AUC decomposition and its invariance
+(\code{auc\_pooled\_decomp};\ \code{auc\_within\_strictMono\_invariant};\
+\code{auc\_pooled\_shift\_diff};\ \code{inversion\_requires\_between\_gap});
+\item label noise and certification
+(\code{LabelNoise.ranking\_certified};\ \code{RobustCertificate});
+\item benchmark capacity in three score models
+(\code{card\_le\_benchCapacity};\ \code{benchCapacity\_attained};\
+\code{benchCapacity\_noise\_only};\ \code{unresolvable\_pair};\
+\code{over\_capacity\_has\_close\_pair});
+\item pairwise scoring
+(\code{discordant\_eq\_flip\_product};\ \code{discordant\_le\_noise\_sq};\
+\code{card\_comparablePairs};\ \code{noise\_orderKey};\
+\code{pairwise\_capacity\_bound};\ \code{nuPair\_le\_two\_eps\_sq});
+\item calibration
+(\code{Calibration.risk\_decomposition};\ \code{validity\_is\_free});
+\item multiple testing under dependence
+(\code{wgt\_decomp};\ \code{selfConsistent\_fdr\_le\_harmonic};\
+\code{bh\_fdr\_eq\_harmonic};\ \code{harmonic\_factor\_sharp};\
+\code{fdp\_lift};\ \code{region\_screen\_fdr\_le};\
+\code{harmonic\_gain\_log});
+\item complexity (\code{biasThreshold\_hard};\
+\code{crossed\_bound\_loose\_unbounded}).
+\end{itemize}
+
+A full inventory is Supplementary Note~S6.
+
+Where the development supplies a worked example the analysis code reproduces it
+exactly --- \code{Example.inversion} returns within 1 / pooled 2/3 against within
+2/3 / pooled 5/6 --- which is the strongest available check that the Python
+computes the statistic the theorems describe.
+
+Two statements are used ahead of their formalisation and flagged as such:
+\code{auc\_target\_strictMono\_invariant}, the per-target form of the AUC
+invariance, which is what the protocol's step 3 needs (the published theorem is
+stated for the pair-weighted mean, and the invariance holds target by target
+before any averaging); and the validity of conformal risk control, cited rather
+than formalised.
+
+\subsection*{The pairwise protocol}
+
+For a reference with targets $t$ and per-residue labels in $\{0,1,-\}$:
+
+\begin{enumerate}\itemsep1pt \parskip0pt
+\item \emph{Eligibility.} A method is scored iff it supplies a finite
+prediction for every evaluated residue of every target, at the reference's
+length. Declining targets raises a within-protein score, so coverage is a gate,
+not a covariate. Ineligible methods are listed as \emph{not scored}, never as
+last.
+\item \emph{Per-target statistic.} For each target carrying both classes among
+evaluated residues, the Mann--Whitney AUC over that target's residues alone.
+Single-class targets contribute no ordered pair and are skipped, with the count
+reported.
+\item \emph{Method score.} The unweighted mean of the per-target AUCs. One
+protein, one vote; pair-weighting lets a few long chains carry the number.
+\item \emph{Ranking.} By that mean, descending.
+\item \emph{Separation.} Two methods are reported as ordered iff a paired test
+over targets rejects equality --- Wilcoxon signed-rank on the per-target
+differences, Holm-corrected within the benchmark. Otherwise they are reported as
+tied, at the same rank.
+\item \emph{Capacity.} The number of methods the reference can order is
+$\lceil 1/2\eps_{\text{pair}} \rceil$, with $\eps_{\text{pair}}$ estimated from
+repeat determinations of the same protein. Methods beyond that are reported as an
+unresolved group, never as a rank.
+\end{enumerate}
+
+The unweighted mean of step 3 differs from the pair-weighted
+$\mathrm{AUC}_{\text{within}}$ that the decomposition identity requires. Both are
+calibration-invariant, since the invariance holds target by target before any
+averaging; the unweighted form is what a paired per-target design naturally uses
+and is not dominated by long chains. A separation count is not a chain: the
+capacity of step 6 bounds a certified totally ordered family, whereas $k$
+separations against one leader are $k$ statements about the pairs
+$\{\text{leader}, X\}$, which need not compose into a chain of $k{+}1$.
+
+\subsection*{Model}
+
+\emph{Backbone.} ESM-2 650M\cite{esm2}, frozen. A learned scalar mixture over
+its 33 hidden layers (33 parameters) replaces fine-tuning. The design follows a
+measurement: in the small-data regime here ($\sim$1M evidenced residues from
+2{,}340 proteins) a 69.9M-parameter LoRA configuration reached pooled AUC 0.7454
+while a gradient-boosted tree on hand-crafted features reached 0.7804 and
+AlphaFold pLDDT alone reached 0.7906. The bottleneck was capacity/data fit, not
+the backbone.
+
+\emph{Head.} Four residual dilated-convolution blocks, hidden width 256,
+dilations $(1,4,16,32)$ --- a 213-residue convolutional receptive field for the
+same parameter count as the default $(1,2,4,8)$. The \emph{dependency span} is
+global, not 213: the head's GroupNorm pools statistics over the whole length
+axis, so every output position already depends on every input position. This is
+verified directly (\code{lite\_head.measured\_dependency\_span}: on a
+401-residue input, perturbing residue 0 moves the logit at residue 400).
+
+\emph{Structure channels.} Relative solvent accessibility, pLDDT (scaled),
+contact density, an availability flag, and the local gradient of solvent
+accessibility, encoded into a small learned block. Missing structure is explicit
+rather than imputed: an absent AlphaFold entry is not ``buried and confident'',
+it is no information. Post-hoc fusion of the structural signal failed
+($0.9581 \rightarrow 0.9554$); feeding structure as an input lets the trunk
+learn when to trust it.
+
+\emph{Read-outs.} One $1\times1$ convolution per task ($\sim$257 parameters
+each) over the shared trunk, deliberately linear: anything deeper would let a
+task with 15{,}683 positive residues (Linker) grow private capacity, which is
+the failure mode the architecture exists to avoid. The shared trunk carries
+disorder's 336{,}014 positive residues into the small tasks.
+
+\emph{Windowing.} Training and inference use a 1{,}022-residue window at stride
+511 with a raised-cosine taper on the overlap. Every window of a chain is
+assigned to the same side of every split, keyed on the parent sequence.
+
+\emph{Variants.} \code{mt\_windowed} (no protein bias, no private trunk; the
+pre-registered model of record), \code{mt\_pbias} (adds a per-protein bias
+term), and \code{DisorderNet-Ensemble} (equal-weight rank fusion of the
+checkpoints sharing the fixed validation holdout, with membership decided on the
+holdout and never on CAID3; both fixed in advance).
+
+\subsection*{Leak control}
+
+Splits are homology-clustered with BLASTp, clustered once over the union of
+proteins so a protein appearing in two tasks cannot land in different folds for
+each. Benchmark targets and their $\ge 40\%$-identity homologues are removed
+from training. A fixed 5\% validation holdout is selected by a salted hash of the
+parent sequence --- membership is a property of the sequence, not of the run ---
+so that two runs with different leak filters remain comparable; the salt is a
+module constant with no command-line override, and holdout membership is written
+into every checkpoint. The homology filter refuses to run if BLAST is
+unavailable rather than holding out nothing, because a validation number
+computed with a paralogue in training is worse than none: it looks like a
+measurement.
+
+The temporal holdout is built from protein polymer entities first released on or
+after 2026-08-11, the day after the later of the two training caches (DisProt
+2026-08-08, MobiDB 2026-08-10). Labels are RCSB's own
+\code{UNOBSERVED\_RESIDUE\_XYZ} annotation, not a re-derivation. X-ray and
+cryo-EM only; NMR is excluded, since every SEQRES residue has coordinates in
+every model.
+
+\subsection*{Statistics}
+
+Every p-value belongs to a family fixed in advance and Holm--Bonferroni\cite{holm}
+is applied within it --- Holm rather than Bonferroni because it is uniformly more
+powerful and assumes no independence, which these comparisons badly lack, sharing
+both our predictions and their targets. The primary CAID3 family is fixed in the
+pre-registration and encoded in the evaluator so it cannot be redefined after the
+numbers land; everything outside it is secondary, corrected within its own
+family, and labelled exploratory.
+
+Paired comparisons resample \emph{proteins}, not residues, since residues within
+a chain are heavily correlated and a residue-level interval is far too narrow.
+All tests are two-sided; 10{,}000 resamples for confirmatory runs. Bootstrap
+p-values use both tail boundaries and the Davison--Hinkley $+1$
+correction\cite{davison}, so a perfect null returns 1.0 rather than 0 and $p$ is
+never reported below $1/(B{+}1)$. Where a figure or table gives $p$, the test,
+the family size and the correction are stated with it; exact $n$ (targets,
+chains, structure pairs or methods) is given in every legend.
+
+Coverage is a gate, not a covariate. Measured against a fully-covering yardstick,
+declined targets are harder by $+0.035$ to $+0.125$ AUC and have median length
+1{,}214--1{,}684 against 344 across all CAID3 targets (Supplementary Table~S9).
+We predict every target on every benchmark and the evaluator aborts rather than
+scoring a subset. Both rank fields are always reported --- rank among all scored
+entrants (CAID's own accounting, which embeds the advantage) and rank among
+full-coverage entrants (the equal-footing field). Reporting only the first
+understates us; reporting only the second is cherry-picking. Neither alone is the
+truth.
+
+\subsection*{Conformal analysis}
+
+Split conformal prediction\cite{vovk} and conformal risk control\cite{crc} as
+implemented in \code{colab/conformal.py} (34 tests). Scores are rank-transformed
+within each method, because conformal needs a consistent score and not a
+probability. Calibration and evaluation are on disjoint halves of the targets,
+median over 12 protein splits, with the interquartile range recorded. The
+implementation refuses by name to report a guarantee at $\alpha < 1/(n{+}1)$,
+which is arithmetic about $n$ rather than a fact about any method.
+
+A per-residue promise is \emph{not} valid here, and the shortfall is measured
+rather than hidden: residues within a chain are not exchangeable, so the split
+is by chain, and at a 90\% target the realised per-residue coverage on the
+temporal holdout is 0.876. It is quoted as a measurement of how far the
+assumption is strained, not as a guarantee.
+
+\subsection*{Screening analysis}
+
+Two computations. \code{region\_screen.py} counts, for each CAID3 and CAID2
+reference, the evaluated residues and the maximal same-label runs, and reports
+both harmonic numbers, their difference, the proved floor $\log b - 1$, and the
+ratio of the two testing thresholds. A run is broken by any unevaluated residue,
+so a region interrupted by missing evidence counts as two candidates --- the
+conservative direction, since it states more hypotheses rather than fewer.
+Harmonic numbers are summed from the small end.
+
+\code{conformal\_screen.py} runs the screen itself on CAID3 Disorder-PDB (304
+usable chains, 98{,}938 evaluated residues). Candidates are consecutive blocks
+of $b$ residues, the partition \code{stdBlocks} describes; a block's score is
+the mean predicted disorder over its evaluated residues and a block is truly
+disordered when the majority of those residues are, so that the truth and the
+report are both unions of whole blocks, which is the condition \code{fdp\_lift}
+needs. P-values are split conformal against the known-ordered blocks of a
+calibration set of 80\% of chains,
+$p = (1 + \#\{\text{calibration blocks with score} \ge s\})/(n_{\text{cal}}+1)$,
+which is superuniform under exchangeability of the ordered blocks --- the only
+assumption \code{selfConsistent\_fdr\_le\_harmonic} makes. It is also why the
+correction must survive arbitrary dependence: every candidate is compared against
+the \emph{same} calibration set, so the p-values are dependent by construction.
+Four procedures are compared at the same guaranteed residue-level rate over 50
+random splits (region-level BY at $\alpha/H_M$; residue-level BY at
+$\alpha/H_n$; region-level uncorrected BH; region-level Bonferroni), and
+\code{fdp\_lift} is checked rather than assumed by printing the region-level and
+residue-level false discovery proportions of the same report side by side. The
+screen is a demonstration on a public benchmark; no biological discovery is
+claimed.
+
+\subsection*{Reproduction}
+
+Figures are regenerated from the analysis outputs by \code{paper/make\_figures.py}
+and supplementary tables by \code{paper/make\_supplementary.py}; each panel reads
+the JSON its job wrote, and the two panels that quote a table parse it from the
+committed result document rather than restating it, so a figure cannot drift from
+the number it illustrates. Job identifiers, batch scripts and raw outputs for
+every analysis are listed in Supplementary Table~S13.
+
+\subsection*{Reporting summary}
+
+Further information on research design is available in the Nature Portfolio
+Reporting Summary linked to this article.
