@@ -77,7 +77,10 @@ Monte Carlo. The only remedy is better labels.
 
 `over_capacity_has_close_pair` closes the loop: once the entry list exceeds the
 capacity, such a pair **necessarily exists**. With 117 entrants and a capacity
-of 7, CAID3 is over capacity by a factor of seventeen.
+of 7 on marginal scores, CAID3 is over capacity by a factor of
+seventeen; `RESULT_BOUND_TIGHTNESS.md` measures whether that worst case is
+reachable and finds a paired capacity of 18, so the factor for a leaderboard
+comparison is 6.5.
 
 ## What this project's own results look like under it
 

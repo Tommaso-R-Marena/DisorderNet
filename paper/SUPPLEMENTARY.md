@@ -18,6 +18,7 @@ Tommaso R. Marena
 | **Note S5** | Errors found and corrected, with the measurement that caught each |
 | **Note S6** | Inventory of the formal development |
 | **Note S7** | The screen: arbitrary dependence, and the unit of testing |
+| **Note S19** | Is the bound tight? Measured, and the scope condition it implies |
 | **Table S1** | AUC decomposition, every method × every reference (CSV, 430 rows) |
 | **Table S2** | Inversion certificates against the pooled winner (CSV) |
 | **Table S3** | Pairwise leaderboard, complete, five references (CSV, 357 rows) |
@@ -101,7 +102,10 @@ p-value itself alone. **Only new data or better labels move this bound.**
 
 `over_capacity_has_close_pair` closes the loop: once the entry list exceeds the
 capacity, a pair inside the budget necessarily exists. With 117 entrants and a
-capacity of 7, CAID3 is over capacity by a factor of seventeen.
+capacity of 7 on marginal scores, CAID3 is over capacity by a factor of
+seventeen — but see Note S19, which measures whether the worst case is reachable
+and finds a paired capacity of 18, so the honest factor for a *leaderboard
+comparison* is 6.5.
 
 ### Scope, stated rather than assumed
 
@@ -787,6 +791,115 @@ above is void. The screen reported above is a demonstration on a public benchmar
 are already known; **no biological discovery is claimed**, and its realised false
 discovery proportion sits far below nominal, as arbitrary-dependence control
 should.
+
+---
+
+## Note S19 — Is the bound tight, and does it transfer?
+
+`card_le_benchCapacity` is a **worst-case** statement: it allows the annotation
+errors to fall wherever they most damage a comparison. That is what makes the
+converse an impossibility rather than a power calculation, and it is also the
+one place the bound could be loose. A label flip on an item two methods *agree*
+about moves both scores identically and cancels exactly; only flips on
+disagreement items can change a comparison. So the budget that actually
+threatens a comparison of methods A and B is
+
+    nu_eff(A, B) = |{ambiguous} ∩ {A ≠ B}|        against    nu = |{ambiguous}|
+
+and whether the worst case is reachable is an empirical question, not a
+mathematical one:
+
+    enrichment = P(A ≠ B | ambiguous) / P(A ≠ B)
+
+### The measurement
+
+`results/caid3/bound_tightness.py`, job 30342579. Ambiguity comes from MobiDB's
+per-structure missing-residue calls; disagreement comes from the submitted CAID3
+predictions, each binarised at its own median over the evaluated set so that
+every method calls the same number of residues disordered and the comparison is
+about *which* residues rather than how many. The two sources are independent —
+unlike a confident-learning flag, which is defined by model disagreement and
+would make the test circular.
+
+86 methods aligned over 39,392 evaluated residues, of which 7,389 (18.8%) are
+context-dependent; 3,653 method pairs.
+
+| | median | mean | p10 | p90 |
+|---|---:|---:|---:|---:|
+| P(disagree) | 0.354 | 0.370 | 0.256 | 0.532 |
+| P(disagree \| ambiguous) | 0.364 | 0.370 | 0.251 | 0.506 |
+| **enrichment** | **0.992** | 1.009 | 0.880 | 1.175 |
+
+46.3% of pairs exceed an enrichment of 1; **none exceeds 2**.
+
+### It replicates on an independent round
+
+`bound_tightness.py` on CAID2 (job 30342771): 61 methods, 58,831 evaluated
+residues, 6,052 context-dependent (10.3%), 1,830 pairs.
+
+| | CAID3 | CAID2 |
+|---|---:|---:|
+| methods / pairs | 86 / 3,653 | 61 / 1,830 |
+| residues, ambiguity rate | 39,392 / 18.8% | 58,831 / 10.3% |
+| P(disagree) | 0.354 | 0.388 |
+| P(disagree \| ambiguous) | 0.364 | 0.372 |
+| **enrichment (median)** | **0.992** | **0.963** |
+| pairs with enrichment > 2 | 0 | 0 |
+
+A different round, different proteins, different methods, and the same answer:
+no enrichment. On CAID2 the enrichment is slightly *below* one, so the paired
+budget there is smaller still.
+
+### What it costs us
+
+**Annotation ambiguity is not concentrated where methods disagree.** Errors fall
+essentially independently of what any comparison turns on, which is the opposite
+of what would make the worst case reachable. The paired budget is therefore
+0.364× the marginal one, and:
+
+| CAID3 Disorder-PDB, ε = 0.0801 | capacity |
+|---|---:|
+| marginal scores | **7** |
+| paired, ×0.506 (10% of pairs are worse) | 13 |
+| **paired, ×0.364 (median pair)** | **18** |
+| paired, ×0.251 (10% of pairs are better) | 25 |
+
+**CAID3 is over capacity by 6.5×, not 17×.** The theorem is unchanged and
+correct — it bounds what a benchmark can certify about *marginal* scores, which
+is what every entrant publishes — and 117 entrants against a paired capacity of
+18 is still far over. But "over by a factor of seventeen" was the wrong number
+to attach to a leaderboard comparison, which is paired by construction.
+
+The refinement applies symmetrically: the pairwise item protocol goes from 51 to
+138. The escape route is not diminished; both numbers move together.
+
+### The principle, which is this paper's own
+
+This is the paper's thesis applied one level up. The escape route says *score
+pairs of items rather than items, because pairing cancels the error common to
+both*. This says *compare pairs of methods paired on items rather than comparing
+marginal scores*, for exactly the same reason. Two instances of one move.
+
+### The scope condition
+
+This is the honest answer to whether the findings transfer. **The theorem does;
+its tightness does not.** The bound holds for every benchmark whose score is an
+average over items, but how far the worst case overstates depends on a
+dataset-specific quantity:
+
+- **enrichment ≈ 1** — errors fall independently of the comparison, the paired
+  budget is smaller by `P(disagree)`, and the marginal bound is loose by that
+  factor. CAID3 is here.
+- **enrichment ≫ 1** — ambiguous items are the items methods disagree about, the
+  budget sits where comparisons are decided, and the marginal bound binds as
+  stated.
+
+Any benchmark with repeat annotations can measure this. Any benchmark without
+them cannot, and should quote the marginal bound as the conservative one.
+**Nothing licenses assuming CAID3's multiplier transfers**, and the ImageNet and
+CIFAR figures in Table S17 are marginal capacities for that reason: their
+adjudicated errors were selected by model disagreement, so they cannot be used
+to estimate an enrichment without circularity.
 
 ---
 

@@ -94,6 +94,8 @@
 \DeclareUnicodeCharacter{2079}{\ensuremath{^{9}}}
 \DeclareUnicodeCharacter{2082}{\ensuremath{_{2}}}
 \DeclareUnicodeCharacter{2083}{\ensuremath{_{3}}}
+\DeclareUnicodeCharacter{226B}{\ensuremath{\gg}}
+\DeclareUnicodeCharacter{226A}{\ensuremath{\ll}}
 
 \captionsetup{labelfont=bf,font=small,justification=justified,
               singlelinecheck=false}
@@ -333,6 +335,28 @@ $1/20$ under any true rate below 4\%, and at 4\% \emph{or above} a benchmark
 certifiably orders at most 13 methods. The test is one-sided by construction, since a measurement
 can only lower-bound the noise rate, which is the direction that shrinks
 capacity.
+
+\textbf{The worst case is not reached, and we measured that too.} The bound
+allows the errors to fall wherever they most damage a comparison, and a flip on
+an item two methods agree about cancels exactly, so whether the worst case is
+reachable is empirical. Measured on CAID3 --- MobiDB ambiguity against 86
+methods' calls over 39{,}392 residues and 3{,}653 pairs --- annotation ambiguity
+is \emph{not} concentrated on method disagreement: the enrichment
+$P(\text{disagree} \mid \text{ambiguous}) / P(\text{disagree})$ has median
+\textbf{0.992} and exceeds 2 for no pair. It replicates on CAID2 --- an
+independent round, different proteins, different methods --- at 0.963. The budget that can move a paired
+comparison is therefore $0.364\times$ the marginal one, and CAID3's capacity for
+a leaderboard comparison --- which is paired by construction --- is
+\textbf{18 rather than 7}, leaving it over capacity by 6.5$\times$ rather than
+seventeen. The theorem is unchanged: it bounds what a benchmark can certify
+about the \emph{marginal} scores its entrants publish. What changes is the
+factor to quote when the question is which of two methods is better, and the
+same refinement raises the pairwise protocol below from 51 to 138, so the two
+move together. This is the paper's own thesis one level up --- pairing cancels
+the error common to both arms, whether the pair is two items or two methods ---
+and Supplementary Note~S19 gives the scope condition it implies: the theorem
+transfers to any benchmark scored by an average over items, its \emph{tightness}
+does not, and a benchmark with repeat annotations can measure its own.
 
 How much of the field this leaves undecidable is counted rather than asserted.
 \code{card\_closePairs\_lower} is a pigeonhole on score blocks with a

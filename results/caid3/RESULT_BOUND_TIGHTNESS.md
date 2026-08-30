@@ -41,6 +41,24 @@ method pairs.
 
 46.3% of pairs have enrichment above 1; **none has enrichment above 2**.
 
+### It replicates on an independent round
+
+`bound_tightness.py` on CAID2 (job 30342771): 61 methods, 58,831 evaluated
+residues, 6,052 context-dependent (10.3%), 1,830 pairs.
+
+| | CAID3 | CAID2 |
+|---|---:|---:|
+| methods / pairs | 86 / 3,653 | 61 / 1,830 |
+| residues, ambiguity rate | 39,392 / 18.8% | 58,831 / 10.3% |
+| P(disagree) | 0.354 | 0.388 |
+| P(disagree \| ambiguous) | 0.364 | 0.372 |
+| **enrichment (median)** | **0.992** | **0.963** |
+| pairs with enrichment > 2 | 0 | 0 |
+
+A different round, different proteins, different methods, and the same answer:
+no enrichment. On CAID2 the enrichment is slightly *below* one, so the paired
+budget there is smaller still.
+
 ## What it means, plainly
 
 **Annotation ambiguity is not concentrated where methods disagree.** The errors
