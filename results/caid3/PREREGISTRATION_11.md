@@ -103,12 +103,27 @@ targets for proteins already in the union. Benchmark targets and their
 ≥40%-identity homologues stay out. The validation holdout is the same salted
 hash of the parent sequence, so the two runs are comparable by construction.
 
-**One new risk this creates.** The soft target is derived from the same MobiDB
-per-structure calls used to measure ε and ε_pair. Those measurements are made on
-CAID3 *reference* proteins; the training union excludes CAID3 targets and their
-homologues, so the two do not overlap. This is asserted here so that it is
-checked rather than assumed, and the check is a set intersection reported with
-the run.
+**One new risk this creates, and the check that found the claim was wrong.**
+The soft target is derived from the same MobiDB per-structure calls used to
+measure ε and ε_pair, which are measured on CAID3 *reference* proteins. An
+earlier draft of this section asserted that the cache and the benchmark do not
+overlap. **They do**: 141 of the 319 CAID3 reference accessions appear in the
+soft-label cache, because the cache is keyed by accession over the whole
+`pdb_missing` universe and is built before any filtering.
+
+That is not a leak, and the reason is an ordering that was verified rather than
+assumed. In `train_multitask.py` the pdb_missing rows are built (line 852) and
+merged (858) *before* `drop_caid_targets` runs (894), which then removes CAID3
+targets and their ≥40%-identity homologues from the merged union, before
+`reserve_validation_holdout` (916). The cache is a lookup keyed by accession; a
+soft target for a benchmark accession is never used because the row carrying it
+does not survive to training.
+
+So the invariant to state is the post-filter one, and the check to run is on the
+union after `drop_caid_targets`, not on the cache. The run reports both: the
+cache intersection (141, expected and harmless) and the post-filter intersection
+(must be 0). The first draft would have reported a passing check on the wrong
+set.
 
 ## Stopping rule
 
