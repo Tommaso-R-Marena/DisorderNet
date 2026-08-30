@@ -154,6 +154,9 @@ def chunk_long_rows(rows: list[dict], max_len: int, stride: int | None = None,
                 "uniprot_acc": r.get("uniprot_acc"),
                 "window_offset": a,
                 "task_labels": {t: v[a:b] for t, v in r["task_labels"].items()},
+                **({"task_labels_hard":
+                    {t: v[a:b] for t, v in r["task_labels_hard"].items()}}
+                   if "task_labels_hard" in r else {}),
                 "task_evidence": {t: v[a:b] for t, v in r["task_evidence"].items()},
                 # Structure is attached full-length before chunking, because
                 # structure_features matches on the whole sequence. Slice it to
@@ -168,7 +171,24 @@ def chunk_long_rows(rows: list[dict], max_len: int, stride: int | None = None,
     return out, {"proteins_chunked": n_chunked, "windows_added": n_windows}
 
 
-def load_pdb_missing_rows(cache_path: str, max_len: int, limit: int = 0) -> list[dict]:
+
+def hard_labels(row: dict, task: str) -> np.ndarray:
+    """The 0/1 label, whatever the training target happens to be.
+
+    With `--soft-labels` the training target is fractional. Every metric, every
+    class-balance statistic and every stratified split must use the hard label
+    instead, or an AUC gets computed against a target that is not a class. This
+    is the one place that distinction is made, so it cannot be made
+    inconsistently.
+    """
+    hard = row.get("task_labels_hard")
+    if hard is not None and task in hard:
+        return hard[task]
+    return row["task_labels"][task]
+
+
+def load_pdb_missing_rows(cache_path: str, max_len: int, limit: int = 0,
+                          soft_label_path: Optional[str] = None) -> list[dict]:
     """Training rows for CAID3 Disorder-PDB's own label definition.
 
     Everything else here learns DisProt's curated *functional* disorder, while
@@ -204,18 +224,61 @@ def load_pdb_missing_rows(cache_path: str, max_len: int, limit: int = 0) -> list
           f"{stats['n_evidenced_residues']:,} evidenced residues, "
           f"disorder {stats['disorder_fraction_of_evidenced']:.1%}")
 
-    rows = []
+    soft = load_soft_labels(soft_label_path)
+    rows, n_soft_rows, n_soft_res, n_intermediate = [], 0, 0, 0
     for p in labelled:
         labels = p.labels.astype(np.int8)
+        target = labels.astype(np.float32)
+        rec = soft.get(p.uniprot_acc) if soft else None
+        if rec is not None:
+            idx, val = rec
+            keep = idx < target.size
+            if keep.any():
+                # Only the residues MobiDB covers with >= 2 structures move; the
+                # rest keep the hard label they already had. PREREGISTRATION_11.
+                target[idx[keep]] = val[keep]
+                n_soft_rows += 1
+                n_soft_res += int(keep.sum())
+                n_intermediate += int(((val[keep] > 0) & (val[keep] < 1)).sum())
         rows.append({
             "id": f"MB:{p.id}",
             "sequence": p.sequence,
             "length": p.length,
             "uniprot_acc": p.uniprot_acc,
-            "task_labels": {"disorder_pdb": labels},
+            # `task_labels` is the training target and may be fractional;
+            # `task_labels_hard` is what every metric and every split uses, so a
+            # soft target can never leak into an AUC or a stratification.
+            "task_labels": {"disorder_pdb": target},
+            "task_labels_hard": {"disorder_pdb": labels},
             "task_evidence": {"disorder_pdb": p.evidence.astype(bool)},
         })
+    if soft:
+        print(f"  soft targets: {n_soft_rows:,} proteins, {n_soft_res:,} "
+              f"residues, {n_intermediate:,} strictly between 0 and 1 "
+              f"({n_intermediate / max(n_soft_res, 1):.2%})")
     return rows
+
+
+def load_soft_labels(path: Optional[str]):
+    """Accession -> (residue indices, soft target), from build_soft_labels.py.
+
+    Returns an empty mapping when no path is given, so the default behaviour of
+    this trainer is byte-identical to what it was before soft targets existed.
+    """
+    if not path:
+        return {}
+    if not os.path.isfile(path):
+        raise SystemExit(
+            f"--soft-labels {path} does not exist. A run registered as the "
+            f"soft-label arm must not silently fall back to hard labels.")
+    with open(path) as fh:
+        blob = json.load(fh)
+    out = {}
+    for acc, rec in blob.get("proteins", {}).items():
+        out[acc] = (np.asarray(rec["index"], dtype=np.int64),
+                    np.asarray(rec["soft"], dtype=np.float32))
+    print(f"  loaded soft targets for {len(out):,} accessions from {path}")
+    return out
 
 
 def merge_task_rows(base: list[dict], extra: list[dict],
@@ -789,7 +852,8 @@ def main(argv=None) -> int:
         extra = load_pdb_missing_rows(
             args.pdb_missing_cache,
             10 ** 6 if keep_long else args.max_len,
-            args.pdb_missing_limit)
+            args.pdb_missing_limit,
+            soft_label_path=args.soft_labels)
         tasks = tasks + ("disorder_pdb",)
         rows = merge_task_rows(rows, extra, tasks)
         coverage["disorder_pdb"] = sum(
@@ -885,7 +949,7 @@ def main(argv=None) -> int:
 
     for t in tasks:
         ev = np.concatenate([r["task_evidence"][t] for r in rows])
-        lb = np.concatenate([r["task_labels"][t] for r in rows])
+        lb = np.concatenate([hard_labels(r, t) for r in rows])
         if not ev.any():
             continue
         pos = float(lb[ev].mean())
@@ -986,7 +1050,7 @@ def main(argv=None) -> int:
                         m = r["task_evidence"][t][:n]
                         if not m.any():
                             continue
-                        pooled[t][0].append(r["task_labels"][t][:n][m])
+                        pooled[t][0].append(hard_labels(r, t)[:n][m])
                         pooled[t][1].append(p[bi, :n][m])
 
         from sklearn.metrics import average_precision_score, roc_auc_score
@@ -1126,7 +1190,7 @@ def main(argv=None) -> int:
                             m = r["task_evidence"][t][:n]
                             if not m.any():
                                 continue
-                            pooled[t][0].append(r["task_labels"][t][:n][m])
+                            pooled[t][0].append(hard_labels(r, t)[:n][m])
                             pooled[t][1].append(p[bi, :n][m])
 
             from sklearn.metrics import average_precision_score, roc_auc_score
