@@ -1,0 +1,137 @@
+{
+ "rows": [
+  {
+   "benchmark": "QuickDraw",
+   "modality": "image",
+   "n_items": 50426266,
+   "eps_percent": 10.12,
+   "capacity": 5,
+   "capacity_observed_range": null,
+   "score_range": null,
+   "source": "arXiv:2103.14749 Table 1"
+  },
+  {
+   "benchmark": "CAID3 (residue labels)",
+   "modality": "protein",
+   "n_items": 99239,
+   "eps_percent": 8.01,
+   "capacity": 7,
+   "capacity_observed_range": null,
+   "score_range": null,
+   "source": "this work"
+  },
+  {
+   "benchmark": "CIFAR-100",
+   "modality": "image",
+   "n_items": 10000,
+   "eps_percent": 5.85,
+   "capacity": 9,
+   "capacity_observed_range": 3,
+   "score_range": [
+    0.65,
+    0.96
+   ],
+   "source": "arXiv:2103.14749 Table 1"
+  },
+  {
+   "benchmark": "ImageNet",
+   "modality": "image",
+   "n_items": 50000,
+   "eps_percent": 5.83,
+   "capacity": 9,
+   "capacity_observed_range": 4,
+   "score_range": [
+    0.55,
+    0.92
+   ],
+   "source": "arXiv:2103.14749 Table 1"
+  },
+  {
+   "benchmark": "Amazon Reviews",
+   "modality": "text",
+   "n_items": 9996437,
+   "eps_percent": 3.9,
+   "capacity": 13,
+   "capacity_observed_range": null,
+   "score_range": null,
+   "source": "arXiv:2103.14749 Table 1"
+  },
+  {
+   "benchmark": "IMDB",
+   "modality": "text",
+   "n_items": 25000,
+   "eps_percent": 2.9,
+   "capacity": 18,
+   "capacity_observed_range": null,
+   "score_range": null,
+   "source": "arXiv:2103.14749 Table 1"
+  },
+  {
+   "benchmark": "Caltech-256",
+   "modality": "image",
+   "n_items": 29780,
+   "eps_percent": 1.54,
+   "capacity": 33,
+   "capacity_observed_range": null,
+   "score_range": null,
+   "source": "arXiv:2103.14749 Table 1"
+  },
+  {
+   "benchmark": "AudioSet",
+   "modality": "audio",
+   "n_items": 20371,
+   "eps_percent": 1.35,
+   "capacity": 38,
+   "capacity_observed_range": null,
+   "score_range": null,
+   "source": "arXiv:2103.14749 Table 1"
+  },
+  {
+   "benchmark": "20news",
+   "modality": "text",
+   "n_items": 7532,
+   "eps_percent": 1.09,
+   "capacity": 46,
+   "capacity_observed_range": null,
+   "score_range": null,
+   "source": "arXiv:2103.14749 Table 1"
+  },
+  {
+   "benchmark": "CAID3 (within-protein pairs)",
+   "modality": "protein",
+   "n_items": 99239,
+   "eps_percent": 1.0,
+   "capacity": 50,
+   "capacity_observed_range": null,
+   "score_range": null,
+   "source": "this work"
+  },
+  {
+   "benchmark": "CIFAR-10",
+   "modality": "image",
+   "n_items": 10000,
+   "eps_percent": 0.54,
+   "capacity": 93,
+   "capacity_observed_range": 9,
+   "score_range": [
+    0.9,
+    0.996
+   ],
+   "source": "arXiv:2103.14749 Table 1"
+  },
+  {
+   "benchmark": "MNIST",
+   "modality": "image",
+   "n_items": 10000,
+   "eps_percent": 0.15,
+   "capacity": 334,
+   "capacity_observed_range": 5,
+   "score_range": [
+    0.985,
+    0.9987
+   ],
+   "source": "arXiv:2103.14749 Table 1"
+  }
+ ],
+ "note": "eps from arXiv:2103.14749 Table 1 (validated estimates, lower bounds); capacity from benchCapacity_noise_only"
+}

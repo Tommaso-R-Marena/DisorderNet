@@ -56,14 +56,18 @@ disordernet_slurm_setup() {
   echo "============================================================"
 
   # Prefer Rockfish `ml` shorthand; fall back to `module`
-  if command -v ml &>/dev/null; then
-    ml purge 2>/dev/null || true
-    ml gcc/11.4.0 2>/dev/null || true
-    ml cuda/11.8.0 2>/dev/null || true
-  elif command -v module &>/dev/null; then
+  # gcc must load first: modern Python lives under the compiler hierarchy.
+  # blast-plus supplies blastp/makeblastdb for homology clustering — without it
+  # the split falls back to a pure-Python O(L^2) metric that cannot finish an
+  # all-vs-all over DisProt.
+  if command -v module &>/dev/null; then
     module purge 2>/dev/null || true
-    if module is-avail gcc/11.4.0 2>/dev/null; then module load gcc/11.4.0; fi
-    if module is-avail cuda/11.8.0 2>/dev/null; then module load cuda/11.8.0; fi
+    module load gcc/11.4.0 2>/dev/null || module load gcc/9.3.0 2>/dev/null || true
+    module load cuda/12.1.0 2>/dev/null || module load cuda/11.8.0 2>/dev/null || true
+    module load blast-plus/2.14.1 2>/dev/null || module load blast/2.13.0 2>/dev/null || true
+  fi
+  if ! command -v blastp &>/dev/null; then
+    echo "WARN: blastp not on PATH — homology clustering will use the slow fallback" >&2
   fi
 
   if [[ ! -f "${ENV_DIR}/bin/activate" ]]; then
@@ -85,14 +89,40 @@ disordernet_slurm_setup() {
     mkdir -p "${WK_DIR}" || exit 1
   fi
 
+  # Seed the DisProt cache from a shared copy when one exists. The REST API
+  # takes ~7 minutes and 34 paged requests to serve the full release; doing that
+  # once per job wastes GPU walltime and is needlessly hard on disprot.org.
+  # The cache is content-hashed, so a stale copy is detectable downstream.
+  local disprot_src="${DISORDERNET_DISPROT_CACHE:-${HOME}/.cache/disordernet/disprot_raw.json}"
+  local disprot_dst="${WK_DIR:-${PROJECT_DIR}}/disprot_raw.json"
+  if [[ -s "${disprot_src}" && ! -s "${disprot_dst}" ]]; then
+    mkdir -p "$(dirname "${disprot_dst}")"
+    if cp "${disprot_src}" "${disprot_dst}" 2>/dev/null; then
+      echo "Seeded DisProt cache from ${disprot_src}"
+    fi
+  fi
+
   export PYTHONUNBUFFERED=1
+  # ESM attention allocates in bursts across widely varying sequence lengths,
+  # which fragments the caching allocator badly enough to OOM with hundreds of
+  # MB still nominally free. Expandable segments let the allocator grow a
+  # region instead of hunting for a contiguous block.
+  export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
   export PYTHONPATH="${PROJECT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
   export OMP_NUM_THREADS="${OMP_NUM_THREADS:-${SLURM_CPUS_PER_TASK:-8}}"
   export MKL_NUM_THREADS="${MKL_NUM_THREADS:-${OMP_NUM_THREADS}}"
   export TOKENIZERS_PARALLELISM=false
+  # tqdm redraws with \r to stderr, which in a batch job turns each progress bar
+  # into one multi-megabyte line in the .err file and buries real tracebacks.
+  # Throttling the refresh keeps progress visible while making the logs greppable.
+  export TQDM_MININTERVAL="${TQDM_MININTERVAL:-30}"
   export TMPDIR="${TMPDIR:-/tmp}"
-  export HF_HOME="${HF_HOME:-${PROJECT_DIR}/.cache/huggingface}"
-  export TORCH_HOME="${TORCH_HOME:-${PROJECT_DIR}/.cache/torch}"
+  # Keep model weights in ONE persistent, shared cache. A repo-local default
+  # meant each checkout re-downloaded ESM-2 from scratch — 2.5GB for 650M and
+  # ~11GB for 3B, per job — while an already-populated ~/.cache/torch sat
+  # unused. Weights are immutable and version-keyed, so sharing is safe.
+  export HF_HOME="${HF_HOME:-${HOME}/.cache/huggingface}"
+  export TORCH_HOME="${TORCH_HOME:-${HOME}/.cache/torch}"
   mkdir -p "${HF_HOME}" "${TORCH_HOME}"
 }
 
@@ -129,6 +159,34 @@ disordernet_slurm_run() {
   fi
   if [[ "${RUN_NO_PLDDT_FEATURES:-0}" == "1" ]]; then
     EXTRA_ARGS+=(--no-plddt-features)
+  fi
+  # Ablation levers: label definition, data scale, epoch budget.
+  if [[ -n "${DISORDERNET_LABEL_SOURCE:-}" ]]; then
+    EXTRA_ARGS+=(--label-source "${DISORDERNET_LABEL_SOURCE}")
+  fi
+  if [[ -n "${DISORDERNET_MOBIDB_PROTEOME:-}" ]]; then
+    EXTRA_ARGS+=(--mobidb-proteome "${DISORDERNET_MOBIDB_PROTEOME}")
+  fi
+  # Pass explicitly rather than relying on the argparse env default, so the
+  # selector that was actually used appears in the logged command line. This
+  # flag was declared by the ablation and read by nothing for several runs.
+  if [[ "${DISORDERNET_MOBIDB_GLOBAL:-0}" == "1" ]]; then
+    EXTRA_ARGS+=(--mobidb-global)
+  fi
+  if [[ -n "${DISORDERNET_EXPECTED_RESIDUES:-}" ]]; then
+    export DISORDERNET_EXPECTED_RESIDUES
+  fi
+  if [[ -n "${DISORDERNET_MOBIDB_LIMIT:-}" && "${DISORDERNET_MOBIDB_LIMIT}" != "0" ]]; then
+    EXTRA_ARGS+=(--mobidb-limit "${DISORDERNET_MOBIDB_LIMIT}")
+  fi
+  if [[ -n "${DISORDERNET_MIN_EVIDENCE:-}" ]]; then
+    EXTRA_ARGS+=(--min-evidence-fraction "${DISORDERNET_MIN_EVIDENCE}")
+  fi
+  if [[ -n "${DISORDERNET_DETERMINISTIC:-}" ]]; then
+    export DISORDERNET_DETERMINISTIC
+  fi
+  if [[ -n "${DISORDERNET_NUM_EPOCHS:-}" ]]; then
+    EXTRA_ARGS+=(--num-epochs "${DISORDERNET_NUM_EPOCHS}")
   fi
   if [[ -n "${SEED_DIRS:-}" ]]; then
     EXTRA_ARGS+=(--seed-dirs "${SEED_DIRS}")

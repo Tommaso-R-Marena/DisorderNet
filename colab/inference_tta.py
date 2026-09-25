@@ -89,8 +89,15 @@ def mc_dropout_predict_probs(
     forward_fn,
     **forward_kw,
 ) -> torch.Tensor:
-    """Return sigmoid-averaged probabilities (B, L)."""
+    """Return sigmoid-averaged probabilities (B, L) as float32.
+
+    Callers convert these to numpy, and ``Tensor.numpy()`` has no bfloat16
+    support — under bf16 autocast this raised
+    ``TypeError: Got unsupported ScalarType BFloat16`` only once the fold soup
+    actually ran with TTA enabled. Casting here keeps the guarantee at the
+    source rather than at each call site.
+    """
     logits = mc_dropout_forward_logits(
         model, tokens, aa_idx, mask, rich_feats, n_passes, forward_fn, **forward_kw,
     )
-    return torch.sigmoid(logits)
+    return torch.sigmoid(logits).float()

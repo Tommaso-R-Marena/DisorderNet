@@ -86,6 +86,37 @@ Notes:
   which is test-only); the startup update script installs both.
 - Generated `data/`/`results*/` files are gitignored.
 
+### Fold alignment — the leakage rule that matters most
+Every post-training consumer (fold soup, v6/v6-pro OOF, fusion, stacking, stats,
+function head) must partition proteins **exactly the way training did**. Use
+`colab.cv_splits.resolve_cv_splits`, which prefers the `val_ids` recorded on each
+fold result and otherwise honours the run's own `split_method`.
+
+Calling `get_cv_splits(proteins, n_folds)` re-derives with the default
+`"protein"` method. The `ultra` / `ultra3b` / `screen_plus` profiles train with
+`split_method="homology"`, so that call silently disagrees with training and
+puts a fold model's own training proteins into its "held-out" evaluation set.
+`tests/test_leakage_guards.py` covers this; do not bypass it.
+
+Related invariants, all regression-tested:
+- The meta-stacker must be fitted **out-of-fold** (grouped by protein), never on
+  the residues it scores.
+- Isotonic calibration must be fitted **leave-one-fold-out**. Temperature scaling
+  is strictly monotone so it cannot move AUC/AP; isotonic is not and does.
+- Threshold-dependent metrics (f1/mcc) must take the cut-point from other folds.
+
+### Homology clustering (`colab/homology_splits.py`)
+- **`difflib.SequenceMatcher` must be constructed with `autojunk=False`.** With
+  the default, difflib junks every amino acid for inputs of 200+ residues, and
+  two 95%-identical proteins score ~0.01. This made homology splits and the CAID
+  leakage audit silent no-ops for 78.5% of DisProt. There is a preflight guard
+  in `rockfish/slurm/_smoke_checks.py`.
+- BLAST+ is the preferred backend and is ~1000x faster than the Python path
+  (16 s vs "does not finish" on 2663 proteins). `_common.sh` loads `blast-plus`
+  and warns if `blastp` is missing. `meta["backend"]` records which ran.
+- Never size worker pools from `os.cpu_count()` — that is the whole node, not
+  the allocation. Use `homology_splits.available_cpus()`.
+
 ### Rockfish publish path (HPC)
 - Operator ops guide (finish signals, timelines, stuck QOS recovery): root
   `README.md` § **Path C**. Also `rockfish/README.md` § From scratch,
@@ -95,7 +126,77 @@ Notes:
   (usually `sfried3_gpu`); CPU/`shared` stays `-A sfried3` with no qos.
   Prefer `bash rockfish/slurm/submit_v8.sh` (never submits an empty `--qos`).
   Discover GPU account via `sacctmgr … | awk … /qos_gpu/`.
-- **Walltime:** Rockfish a100 max is **72 h** (not 48 h); shared ≈ 36 h.
+- **Sizing:** a100 / ica100 / shared / express enforce `MaxMemPerCPU=4000`.
+  Slurm silently raises `AllocCPUS` to `ceil(mem_MB / 4000)` when a request
+  exceeds that ratio, so `--mem=180G` grabbed **47 of 48 CPUs** on a 4-GPU node
+  to run one GPU — blocking three A100s and quadrupling the billing. Always size
+  as `cpus-per-task * 4000M`. Measured peak RSS for this pipeline is ~12 GB.
+  Also note `--mem=192G` exceeds a100 node RealMemory (187.5 GiB).
+- **`_common.sh` sourcing:** Slurm copies the batch script into a per-job spool
+  directory, so `${BASH_SOURCE[0]}` does **not** resolve to the repo. Resolve
+  against `PROJECT_DIR` first (every sbatch already does; keep it that way).
+- **QOS caps:** `express_queue` is 4 CPUs/job; `shared` is 32; `qos_gpu` allows
+  10 GPUs per user. GPU jobs need `-A sfried3_gpu --qos=qos_gpu`; CPU jobs use
+  `-A sfried3` with no qos.
+- **Never run compute on a login node.** Even the pytest suite goes to `shared`
+  (it takes ~2.5 min there).
+- **Sync one directory per `rsync`.** `rsync -az tests/ colab/ host:dn_rigor/`
+  copies the *contents of both* into the destination root — it does not create
+  `tests/` and `colab/` there. That scattered 127 modules and test files across
+  the repo root, where `pytest` then collected each test twice under two module
+  names, and a stale duplicate of an edited module sat one `sys.path` entry away
+  from shadowing the real one. Write the destination explicitly, one source at a
+  time: `rsync -az colab/ host:dn_rigor/colab/`. Check for the damage by
+  comparing the remote's root against the repo's rather than against a fixed
+  number — the count drifts as modules are added, and a stale constant makes
+  the check ambiguous exactly when it matters:
+  `diff <(ls *.py) <(ssh rockfish 'ls dn_rigor/*.py | xargs -n1 basename')`.
+  Scatter shows up as dozens of `colab/`-ish and `test_*` names appearing at
+  the remote root; a handful of extra one-off probe scripts written on the
+  cluster (`caid4b.py`, `probe_mobidb.py`, `verify_punch.py`, …) are expected
+  and are not damage.
+- **Always export `TORCH_HOME` to scratch. One omission killed four jobs.**
+  `fair-esm` downloads into `$TORCH_HOME` (default `~/.cache/torch`), and
+  ESM-2 3B is **5.7 GB**. A `lite_3b` submission that forgot the variable took
+  home from 45 GB to 51 GB, past the 50 GB quota, and killed every other job
+  running at the time — `lite_pdb_missing` at fold 5, `lite_pdb_long` at fold 2,
+  and an `ultra` recovery at 1h16 — with empty `.err` files, because the quota
+  also blocks writing the traceback. The 650M model is 2.6 GB and 3B is 5.7 GB,
+  so two backbones alone exceed a fifth of the quota:
+  `export TORCH_HOME=/scratch4/<PI>/<user>_disordernet/torch_home`.
+  Belt and braces, because the export is easy to forget and `_common.sh`
+  defaults to `$HOME/.cache/torch`: make that path a **symlink** into the same
+  scratch directory, so the default resolves off home even when a submitter
+  omits the variable. `~/.cache/torch -> /scratch4/sfried3/jbeale3_disordernet/torch_home`
+  is in place and already holds the 35M/150M/650M checkpoints (3.2 GB), so a
+  job that forgets the export neither grows home nor re-downloads. Do not
+  `rm -rf` that path to reclaim space — deleting the link once sent 3.2 GB of
+  fresh downloads straight back into `$HOME`.
+- **"No GPU detected" has two distinct causes here; check the banner.** Both
+  present identically — the job dies in `setup_environment` about seven seconds
+  in while `sacct` reports `gres/gpu:a100=1` allocated. Compare the `ENV_DIR=`
+  and node lines of a failing run against a working one:
+  - wrong venv (see next bullet) — `ENV_DIR` differs, any node;
+  - a bad node — `ENV_DIR` matches a working job and the node repeats. `icgpu04`
+    failed two `lite_3b` submissions this way while `icgpu03` ran the sibling
+    arm from the same `sbatch` call. Resubmit with `--exclude=<node>`.
+  Do not settle on one explanation before checking the other: both were live at
+  the same time, and each looked like the other.
+- **Do not set `DISORDERNET_VENV=~/venvs/disordernet_rigor` for GPU jobs.** That
+  venv's PyTorch (2.5.1+cu121) cannot see the GPU on the ica100 nodes, and the
+  job dies in `setup_environment` with "No GPU detected" about seven seconds in
+  — while `sacct` cheerfully reports `gres/gpu:a100=1` allocated, which makes it
+  look like node flakiness. It is not: `~/venvs/disordernet` (2.7.1+cu118)
+  works on the same nodes, and the ablation submitter succeeds precisely because
+  it never sets the variable. Six jobs were lost to this before the `ENV_DIR=`
+  line in the two banners was compared side by side. `disordernet_rigor` is fine
+  for pytest and CPU analysis.
+- **GPU jobs submitted with `--wrap` need `--gres=gpu:1` spelled out.** The
+  `#SBATCH` lines in `rockfish/slurm/*.sbatch` do not apply to a wrapped command,
+  and `--partition=ica100 --qos=qos_gpu` alone allocates no GPU: the job starts,
+  loads config, and dies in `setup_environment` with "No GPU detected" ten
+  seconds in. Prefer the real sbatch scripts over `--wrap`.
+- **Walltime:** Rockfish a100 max is **72 h** (not 48 h); shared ≈ 36 h; l40s 24 h.
   Fold resume via `cv_progress.json`; campaign watchdog:
   `bash rockfish/slurm/submit_publish_full.sh`.
 - Use the two publish submitters (not the retired all-in-one):

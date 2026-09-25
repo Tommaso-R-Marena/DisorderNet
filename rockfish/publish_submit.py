@@ -70,6 +70,13 @@ def _submit_gpu_chain(
     QOS/accounts are not valid there.
     """
     qos = (qos or "").strip() or "qos_gpu"
+    # Rockfish a100/ica100 enforce MaxMemPerCPU=4000MB, so Slurm silently raises
+    # the CPU count to ceil(mem_MB/4000) when --mem exceeds cpus*4000. The old
+    # 180G ask therefore allocated 47 of 48 CPUs on a 4-GPU node to run one GPU,
+    # blocking the other three A100s and inflating queue time and billing.
+    # Measured peak RSS for this pipeline is ~12GB, so 48000M (= 12 CPUs * 4000)
+    # keeps a 4x headroom while matching the sbatch --cpus-per-task=12 exactly.
+    gpu_mem = (os.environ.get("DISORDERNET_GPU_MEM") or "").strip() or "48000M"
     defaults = env_defaults()
     cpu_account = os.environ.get("DISORDERNET_CPU_ACCOUNT") or account.replace("_gpu", "")
     base_env = {
@@ -119,7 +126,7 @@ def _submit_gpu_chain(
             dry_run=dry_run,
             env=job_env,
             extra_args=mail_args,
-            mem="180G",
+            mem=gpu_mem,
         )
         job_ids[label] = jid
         print(

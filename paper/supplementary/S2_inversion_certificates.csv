@@ -1,0 +1,5 @@
+benchmark,pooled_winner,method,within_gap,between_gap_measured,between_gap_required,over_determined_by,certificate_holds
+Disorder-NOX,DisorderNet-windowed,Metapredict-v3,0.021808,0.083254,0.00014814,562.0,True
+Disorder-NOX,DisorderNet-windowed,AIUPred-2-disorder,0.009280,0.069484,0.00006304,1102.2,True
+Disorder-NOX,DisorderNet-windowed,AlphaFold3-pLDDT,0.007738,0.083255,0.00005257,1583.8,True
+Disorder-NOX,DisorderNet-windowed,AlphaFold3-rsa,0.003337,0.052251,0.00002267,2305.3,True

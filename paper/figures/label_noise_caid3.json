@@ -1,0 +1,606 @@
+{
+  "noise": {
+    "disorder_pdb|disorder_nox": {
+      "n_shared_targets": 204,
+      "n_comparable_targets": 204,
+      "residues_evaluated_by_both": 58015,
+      "residues_disagreeing": 0,
+      "disagreement_rate": 0.0
+    },
+    "binding|binding_idr": {
+      "n_shared_targets": 52,
+      "n_comparable_targets": 52,
+      "residues_evaluated_by_both": 7741,
+      "residues_disagreeing": 0,
+      "disagreement_rate": 0.0
+    }
+  },
+  "disorder_pdb": {
+    "n_evaluated": 99239,
+    "best": "DisorderNet-pbias",
+    "counts": {
+      "AUCpred-no-profile": {
+        "errors": 15460,
+        "n_evaluated": 99239,
+        "error_rate": 0.1557855278670684
+      },
+      "AUCpred-profile": {
+        "errors": 12523,
+        "n_evaluated": 99239,
+        "error_rate": 0.12619030824575017
+      },
+      "DARUMA-beta": {
+        "errors": 12075,
+        "n_evaluated": 99239,
+        "error_rate": 0.12167595401001623
+      },
+      "DFLpred": {
+        "errors": 36592,
+        "n_evaluated": 99239,
+        "error_rate": 0.3687260048972682
+      },
+      "DeepDISObind-all": {
+        "errors": 17557,
+        "n_evaluated": 99239,
+        "error_rate": 0.17691633329638548
+      },
+      "DeepDISObind-nucleic": {
+        "errors": 30722,
+        "n_evaluated": 99239,
+        "error_rate": 0.30957587238887935
+      },
+      "DeepDISObind-protein": {
+        "errors": 24327,
+        "n_evaluated": 99239,
+        "error_rate": 0.24513548101048982
+      },
+      "DeepIDP-2L": {
+        "errors": 12748,
+        "n_evaluated": 99239,
+        "error_rate": 0.12845756204717904
+      },
+      "DisoRDPbind-dna": {
+        "errors": 30594,
+        "n_evaluated": 99239,
+        "error_rate": 0.3082860568929554
+      },
+      "DisoRDPbind-prot": {
+        "errors": 25792,
+        "n_evaluated": 99239,
+        "error_rate": 0.25989782242868226
+      },
+      "DisoRDPbind-rna": {
+        "errors": 34622,
+        "n_evaluated": 99239,
+        "error_rate": 0.3488749382803132
+      },
+      "ESpritz-D": {
+        "errors": 21292,
+        "n_evaluated": 99239,
+        "error_rate": 0.2145527464001048
+      },
+      "ESpritz-N": {
+        "errors": 16832,
+        "n_evaluated": 99239,
+        "error_rate": 0.16961073771400356
+      },
+      "ESpritz-X": {
+        "errors": 23410,
+        "n_evaluated": 99239,
+        "error_rate": 0.23589516218422193
+      },
+      "FoldUnfold": {
+        "errors": 20283,
+        "n_evaluated": 99239,
+        "error_rate": 0.20438537268614154
+      },
+      "IsUnstruct": {
+        "errors": 16406,
+        "n_evaluated": 99239,
+        "error_rate": 0.16531807051663155
+      },
+      "LINKER-Pred-Lite": {
+        "errors": 26201,
+        "n_evaluated": 99239,
+        "error_rate": 0.2640191860055019
+      },
+      "LINKER-Pred": {
+        "errors": 26266,
+        "n_evaluated": 99239,
+        "error_rate": 0.2646741704370258
+      },
+      "LINKER-Pred2": {
+        "errors": 25502,
+        "n_evaluated": 99239,
+        "error_rate": 0.2569755841957295
+      },
+      "Metapredict-v1": {
+        "errors": 14785,
+        "n_evaluated": 99239,
+        "error_rate": 0.14898376646278177
+      },
+      "Metapredict-v2": {
+        "errors": 11581,
+        "n_evaluated": 99239,
+        "error_rate": 0.11669807233043461
+      },
+      "Metapredict-v3": {
+        "errors": 10115,
+        "n_evaluated": 99239,
+        "error_rate": 0.10192565422868026
+      },
+      "MobiDB-lite": {
+        "errors": 19848,
+        "n_evaluated": 99239,
+        "error_rate": 0.20000201533671239
+      },
+      "PUNCH2-Light": {
+        "errors": 8716,
+        "n_evaluated": 99239,
+        "error_rate": 0.08782837392557362
+      },
+      "PUNCH2": {
+        "errors": 8460,
+        "n_evaluated": 99239,
+        "error_rate": 0.08524874293372565
+      },
+      "PredIDR2-Prof-Art": {
+        "errors": 14191,
+        "n_evaluated": 99239,
+        "error_rate": 0.14299821642700955
+      },
+      "PredIDR2-Prof-Rnd": {
+        "errors": 14628,
+        "n_evaluated": 99239,
+        "error_rate": 0.1474017271435625
+      },
+      "PredIDR2-Seq-Art": {
+        "errors": 13751,
+        "n_evaluated": 99239,
+        "error_rate": 0.13856447565977087
+      },
+      "PredIDR2-Seq-Rnd": {
+        "errors": 15480,
+        "n_evaluated": 99239,
+        "error_rate": 0.15598706153830652
+      },
+      "ProBiPred-nucleic": {
+        "errors": 30249,
+        "n_evaluated": 99239,
+        "error_rate": 0.30480960106409777
+      },
+      "ProBiPred-protein": {
+        "errors": 31050,
+        "n_evaluated": 99239,
+        "error_rate": 0.3128810245971846
+      },
+      "SETH-0": {
+        "errors": 9977,
+        "n_evaluated": 99239,
+        "error_rate": 0.10053507189713722
+      },
+      "SETH-1": {
+        "errors": 12117,
+        "n_evaluated": 99239,
+        "error_rate": 0.12209917471961627
+      },
+      "SPOT-Disorder-Single": {
+        "errors": 14462,
+        "n_evaluated": 99239,
+        "error_rate": 0.1457289976722861
+      },
+      "bindEmbed21IDR-idrGeneral": {
+        "errors": 31306,
+        "n_evaluated": 99239,
+        "error_rate": 0.3154606555890325
+      },
+      "bindEmbed21IDR-idrNuc": {
+        "errors": 31350,
+        "n_evaluated": 99239,
+        "error_rate": 0.3159040296657564
+      },
+      "bindEmbed21IDR-rawGeneral": {
+        "errors": 34401,
+        "n_evaluated": 99239,
+        "error_rate": 0.34664799121313195
+      },
+      "bindEmbed21IDR-rawNuc": {
+        "errors": 31913,
+        "n_evaluated": 99239,
+        "error_rate": 0.32157720251110955
+      },
+      "flDPlr": {
+        "errors": 23673,
+        "n_evaluated": 99239,
+        "error_rate": 0.23854532996100322
+      },
+      "flDPlr2": {
+        "errors": 17485,
+        "n_evaluated": 99239,
+        "error_rate": 0.17619081207992826
+      },
+      "flDPnn2": {
+        "errors": 22447,
+        "n_evaluated": 99239,
+        "error_rate": 0.22619131591410635
+      },
+      "flDPnn3a": {
+        "errors": 17121,
+        "n_evaluated": 99239,
+        "error_rate": 0.17252289926339442
+      },
+      "flDPnn3b": {
+        "errors": 16271,
+        "n_evaluated": 99239,
+        "error_rate": 0.16395771823577424
+      },
+      "pyHCA": {
+        "errors": 16620,
+        "n_evaluated": 99239,
+        "error_rate": 0.16747448079887947
+      },
+      "DisorderNet-windowed": {
+        "errors": 8481,
+        "n_evaluated": 99239,
+        "error_rate": 0.08546035328852568
+      },
+      "DisorderNet-pbias": {
+        "errors": 8000,
+        "n_evaluated": 99239,
+        "error_rate": 0.08061346849524885
+      }
+    },
+    "certified": false,
+    "breakdown_rates": [
+      0.0023176372192384043,
+      0.0024234423966384183,
+      0.0036074527151623856,
+      0.009960801700944185,
+      0.010656092866715707,
+      0.01804230191759288,
+      0.02053124275738369,
+      0.02074285311218372,
+      0.022788419875250657,
+      0.023922046775965093,
+      0.028975503582261006,
+      0.03119237396588035,
+      0.032557764588518626,
+      0.033394129324156835,
+      0.03418514898376646,
+      0.03758602968590977,
+      0.037686796521528836,
+      0.0416721248702627,
+      0.04235230101069136,
+      0.04343050615181532,
+      0.04449863460937736,
+      0.045954715384072795,
+      0.047788671792339706,
+      0.04815143240056832,
+      0.05969427342073177,
+      0.061885952095446346,
+      0.06696963895242798,
+      0.07278892370942876,
+      0.07764084684448654,
+      0.0789659307328772,
+      0.08226100625762049,
+      0.08818105785024033,
+      0.08964217696671671,
+      0.09170285875512652,
+      0.09203035097088846,
+      0.11209806628442447,
+      0.11383629419885327,
+      0.11448120194681527,
+      0.11613377805096786,
+      0.11742359354689184,
+      0.11764528058525378,
+      0.12048186700793034,
+      0.13301726135894154,
+      0.13413073489253216,
+      0.1440562682010097
+    ],
+    "frontier": {
+      "0.001": 45,
+      "0.0025": 43,
+      "0.005": 42,
+      "0.01": 41,
+      "0.02": 39,
+      "0.03": 34,
+      "0.05": 21,
+      "0.1": 10
+    }
+  },
+  "disorder_nox": {
+    "n_evaluated": 99977,
+    "best": "DisorderNet-windowed",
+    "counts": {
+      "AUCpred-no-profile": {
+        "errors": 24957,
+        "n_evaluated": 99977,
+        "error_rate": 0.24962741430529023
+      },
+      "AUCpred-profile": {
+        "errors": 24077,
+        "n_evaluated": 99977,
+        "error_rate": 0.24082538983966312
+      },
+      "DARUMA-beta": {
+        "errors": 25298,
+        "n_evaluated": 99977,
+        "error_rate": 0.2530381987857207
+      },
+      "DFLpred": {
+        "errors": 32823,
+        "n_evaluated": 99977,
+        "error_rate": 0.3283055102673615
+      },
+      "DeepDISObind-all": {
+        "errors": 23326,
+        "n_evaluated": 99977,
+        "error_rate": 0.23331366214229274
+      },
+      "DeepDISObind-nucleic": {
+        "errors": 26582,
+        "n_evaluated": 99977,
+        "error_rate": 0.265881152665113
+      },
+      "DeepDISObind-protein": {
+        "errors": 24572,
+        "n_evaluated": 99977,
+        "error_rate": 0.24577652860157836
+      },
+      "DeepIDP-2L": {
+        "errors": 24629,
+        "n_evaluated": 99977,
+        "error_rate": 0.2463466597317383
+      },
+      "DisoRDPbind-dna": {
+        "errors": 26785,
+        "n_evaluated": 99977,
+        "error_rate": 0.2679116196725247
+      },
+      "DisoRDPbind-prot": {
+        "errors": 26311,
+        "n_evaluated": 99977,
+        "error_rate": 0.263170529221721
+      },
+      "DisoRDPbind-rna": {
+        "errors": 29841,
+        "n_evaluated": 99977,
+        "error_rate": 0.29847865008952057
+      },
+      "ESpritz-D": {
+        "errors": 22426,
+        "n_evaluated": 99977,
+        "error_rate": 0.2243115916660832
+      },
+      "ESpritz-N": {
+        "errors": 24389,
+        "n_evaluated": 99977,
+        "error_rate": 0.24394610760474908
+      },
+      "ESpritz-X": {
+        "errors": 25541,
+        "n_evaluated": 99977,
+        "error_rate": 0.2554687578142973
+      },
+      "FoldUnfold": {
+        "errors": 31418,
+        "n_evaluated": 99977,
+        "error_rate": 0.3142522780239455
+      },
+      "IsUnstruct": {
+        "errors": 29215,
+        "n_evaluated": 99977,
+        "error_rate": 0.2922172099582904
+      },
+      "LINKER-Pred-Lite": {
+        "errors": 25677,
+        "n_evaluated": 99977,
+        "error_rate": 0.2568290706862578
+      },
+      "LINKER-Pred": {
+        "errors": 26043,
+        "n_evaluated": 99977,
+        "error_rate": 0.2604899126799164
+      },
+      "LINKER-Pred2": {
+        "errors": 25729,
+        "n_evaluated": 99977,
+        "error_rate": 0.2573491903137722
+      },
+      "Metapredict-v1": {
+        "errors": 23352,
+        "n_evaluated": 99977,
+        "error_rate": 0.2335737219560499
+      },
+      "Metapredict-v2": {
+        "errors": 25224,
+        "n_evaluated": 99977,
+        "error_rate": 0.2522980285465657
+      },
+      "Metapredict-v3": {
+        "errors": 23917,
+        "n_evaluated": 99977,
+        "error_rate": 0.23922502175500365
+      },
+      "MobiDB-lite": {
+        "errors": 23270,
+        "n_evaluated": 99977,
+        "error_rate": 0.2327535333126619
+      },
+      "PUNCH2-Light": {
+        "errors": 25498,
+        "n_evaluated": 99977,
+        "error_rate": 0.25503865889154503
+      },
+      "PUNCH2": {
+        "errors": 25042,
+        "n_evaluated": 99977,
+        "error_rate": 0.25047760985026557
+      },
+      "PredIDR2-Prof-Art": {
+        "errors": 36433,
+        "n_evaluated": 99977,
+        "error_rate": 0.36441381517749083
+      },
+      "PredIDR2-Prof-Rnd": {
+        "errors": 37488,
+        "n_evaluated": 99977,
+        "error_rate": 0.37496624223571423
+      },
+      "PredIDR2-Seq-Art": {
+        "errors": 36095,
+        "n_evaluated": 99977,
+        "error_rate": 0.3610330375986477
+      },
+      "PredIDR2-Seq-Rnd": {
+        "errors": 39882,
+        "n_evaluated": 99977,
+        "error_rate": 0.39891174970243154
+      },
+      "ProBiPred-nucleic": {
+        "errors": 25768,
+        "n_evaluated": 99977,
+        "error_rate": 0.25773928003440794
+      },
+      "ProBiPred-protein": {
+        "errors": 26068,
+        "n_evaluated": 99977,
+        "error_rate": 0.26073997019314443
+      },
+      "SETH-0": {
+        "errors": 24336,
+        "n_evaluated": 99977,
+        "error_rate": 0.24341598567670564
+      },
+      "SETH-1": {
+        "errors": 25138,
+        "n_evaluated": 99977,
+        "error_rate": 0.25143783070106124
+      },
+      "SPOT-Disorder-Single": {
+        "errors": 23200,
+        "n_evaluated": 99977,
+        "error_rate": 0.2320533722756234
+      },
+      "bindEmbed21IDR-idrGeneral": {
+        "errors": 26335,
+        "n_evaluated": 99977,
+        "error_rate": 0.2634105844344199
+      },
+      "bindEmbed21IDR-idrNuc": {
+        "errors": 26380,
+        "n_evaluated": 99977,
+        "error_rate": 0.26386068795823037
+      },
+      "bindEmbed21IDR-rawGeneral": {
+        "errors": 28870,
+        "n_evaluated": 99977,
+        "error_rate": 0.2887664162757434
+      },
+      "bindEmbed21IDR-rawNuc": {
+        "errors": 27132,
+        "n_evaluated": 99977,
+        "error_rate": 0.2713824179561299
+      },
+      "flDPlr": {
+        "errors": 22382,
+        "n_evaluated": 99977,
+        "error_rate": 0.22387149044280186
+      },
+      "flDPlr2": {
+        "errors": 23123,
+        "n_evaluated": 99977,
+        "error_rate": 0.23128319513488102
+      },
+      "flDPnn2": {
+        "errors": 20803,
+        "n_evaluated": 99977,
+        "error_rate": 0.20807785790731867
+      },
+      "flDPnn3a": {
+        "errors": 24937,
+        "n_evaluated": 99977,
+        "error_rate": 0.2494273682947078
+      },
+      "flDPnn3b": {
+        "errors": 24949,
+        "n_evaluated": 99977,
+        "error_rate": 0.24954739590105723
+      },
+      "pyHCA": {
+        "errors": 26834,
+        "n_evaluated": 99977,
+        "error_rate": 0.26840173239845166
+      },
+      "DisorderNet-windowed": {
+        "errors": 18084,
+        "n_evaluated": 99977,
+        "error_rate": 0.1808816027686368
+      },
+      "DisorderNet-pbias": {
+        "errors": 18983,
+        "n_evaluated": 99977,
+        "error_rate": 0.1898736709443172
+      }
+    },
+    "certified": false,
+    "breakdown_rates": [
+      0.004496034087840203,
+      0.01359812756934095,
+      0.021494943837082527,
+      0.021714994448723206,
+      0.02520079618312212,
+      0.025585884753493302,
+      0.025935965272012564,
+      0.02621602968682797,
+      0.026346059593706554,
+      0.029171709493183432,
+      0.029971893535513168,
+      0.03126719145403443,
+      0.031532252418056156,
+      0.03244746291647079,
+      0.032732528481550754,
+      0.0342728827630355,
+      0.034332896566210226,
+      0.03437290576832672,
+      0.03479800354081439,
+      0.03527811396621223,
+      0.03570821288896446,
+      0.03607829800854197,
+      0.03707852806145413,
+      0.03729357752283025,
+      0.03797373395881053,
+      0.03823379377256769,
+      0.03842883863288556,
+      0.0398041549556398,
+      0.03992918371225382,
+      0.041144463226542104,
+      0.04126449083289156,
+      0.041489542594796806,
+      0.042499774948238096,
+      0.04351500845194395,
+      0.04376006481490743,
+      0.04525040759374656,
+      0.053942406753553315,
+      0.05566780359482681,
+      0.0587985236604419,
+      0.06668533762765436,
+      0.07371195374936235,
+      0.09007571741500545,
+      0.09176610620442702,
+      0.09704231973353872,
+      0.10901507346689739
+    ],
+    "frontier": {
+      "0.001": 45,
+      "0.0025": 45,
+      "0.005": 44,
+      "0.01": 44,
+      "0.02": 43,
+      "0.03": 34,
+      "0.05": 9,
+      "0.1": 1
+    }
+  }
+}

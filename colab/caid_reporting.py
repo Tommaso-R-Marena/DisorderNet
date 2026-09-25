@@ -128,10 +128,20 @@ def run_stratified_caid_report(
     by_length: dict[str, tuple[list, list]] = {b[0]: ([], []) for b in LENGTH_BINS}
     by_organism: dict[str, tuple[list, list]] = {}
 
+    from colab.biological_utility import evidenced
+
     for item in aligned:
         p = item["protein"]
-        labels = item["labels"]
-        probs = item["probs"]
+        # Aligned items are full-length with sentinels (-1 label, NaN prob) at
+        # residues the label source never evaluated. Every stratum below pools
+        # residues and scores them, so the sentinels must go here — not only in
+        # the final pooled call. Leaving them in made a PDB-labelled run die at
+        # `Target is multiclass but average='binary'` after 1h12 of eval.
+        keep = evidenced(item)
+        if not keep.any():
+            continue
+        labels = np.asarray(item["labels"], dtype=np.float32)[keep]
+        probs = np.asarray(item["probs"], dtype=np.float32)[keep]
 
         d_bin = _bin_label(p.get("frac_dis", 0.0), DISORDER_FRAC_BINS)
         if d_bin:
@@ -163,8 +173,12 @@ def run_stratified_caid_report(
     if other_labels:
         organism_strata["other"] = _aggregate_stratum(other_labels, other_probs, threshold)
 
-    pooled_labels = np.concatenate([item["labels"] for item in aligned])
-    pooled_probs = np.concatenate([item["probs"] for item in aligned])
+    # Drop residues with no label evidence. Under PDB-derived labels ~20% of
+    # residues are unlabelled and carry sentinels, and pooling them would score
+    # fabricated calls.
+    from colab.biological_utility import pool_evidenced
+
+    pooled_labels, pooled_probs = pool_evidenced(aligned)
     pooled = compute_caid_metrics(pooled_labels, pooled_probs, threshold=threshold)
 
     return {

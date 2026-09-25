@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+title: "DisorderNet: benchmark capacity and the pairwise scoring protocol"
+message: "If you use this software or its results, please cite the paper."
+type: software
+authors:
+  - given-names: Tommaso
+    name-particle: R.
+    family-names: Marena
+    email: marena@cua.edu
+    orcid: "https://orcid.org/0009-0002-9574-3511"
+    affiliation: "The Catholic University of America"
+repository-code: "https://github.com/Tommaso-R-Marena/DisorderNet"
+license: MIT
+version: 1.0.0
+keywords:
+  - benchmark evaluation
+  - label noise
+  - intrinsically disordered proteins
+  - conformal prediction
+  - formal verification
+preferred-citation:
+  type: article
+  title: "Every benchmark has a capacity: how many methods imperfect labels can place in order"
+  authors:
+    - given-names: Tommaso
+      name-particle: R.
+      family-names: Marena
+      orcid: "https://orcid.org/0009-0002-9574-3511"
+      affiliation: "The Catholic University of America"
+  year: 2026

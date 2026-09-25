@@ -57,42 +57,253 @@ def _resolve_workdir(path: Optional[str]) -> str:
     return os.getcwd()
 
 
+def _apply_caid_leak_free_filter(proteins: list, meta: dict, cfg, args) -> tuple[list, dict]:
+    """Drop training proteins that ID- or homology-hit the CAID reference set.
+
+    Shared by every label source. It previously lived inline in the DisProt
+    branch, so the MobiDB branch returned before reaching it and trained
+    unfiltered. That matters most for exactly the arm it was added for:
+    ``pdb_missing`` trains on the same missing-residue definition CAID3 scores,
+    and CAID3's Disorder-PDB references have PDB structures by construction, so
+    the overlap is expected to be larger than DisProt's — training on it would
+    make the CAID3 number measure memorisation.
+    """
+    if args is None or not getattr(args, "caid_leak_free_train", False):
+        return proteins, meta
+
+    from colab.caid_challenge import resolve_caid3_references
+    from colab.caid_leakage import (
+        audit_train_vs_caid,
+        filter_train_proteins,
+        load_caid_refs_for_audit,
+        save_leakage_audit,
+    )
+
+    ckpt = cfg.checkpoint_dir
+    os.makedirs(ckpt, exist_ok=True)
+    refs = resolve_caid3_references(ckpt, getattr(args, "caid3_reference", None))
+    caid_prots = load_caid_refs_for_audit(list(refs.values()))
+    if not caid_prots:
+        print("  CAID leak-free train: no reference proteins resolved — SKIPPED")
+        return proteins, meta
+
+    audit = audit_train_vs_caid(
+        proteins,
+        caid_prots,
+        min_identity=float(getattr(args, "caid_leak_identity", 0.40)),
+    )
+    proteins, filt = filter_train_proteins(proteins, audit)
+    audit["filter"] = filt
+    audit["applied_before_cv"] = True
+    audit["label_source"] = getattr(args, "label_source", "disprot")
+    save_leakage_audit(audit, os.path.join(ckpt, "caid_leakage_audit.json"))
+    meta = dict(meta or {})
+    meta["caid_leak_free_train"] = filt
+    print(
+        f"  CAID leak-free train: removed {filt['n_removed']} / {filt['n_before']} "
+        f"proteins (identity>={getattr(args, 'caid_leak_identity', 0.40)})"
+    )
+    return proteins, meta
+
+
+def preflight_writable_space(directory: str, probe_mb: int = 128) -> None:
+    """Fail now if checkpoints will not be writable, rather than at hour four.
+
+    Three lite_frozen replicates died between 1.2 and 1.5 hours in, at fold
+    boundaries, on two different nodes, with exit code 1 and *no traceback in
+    any log*. The home directory had reached its 50 GB quota, so the checkpoint
+    write failed — and so did the write of the Python traceback reporting it.
+    A full disk is the one failure that also destroys its own evidence.
+
+    ``df`` cannot detect this: it reported 13 TB free on the filesystem while
+    the per-user quota was exhausted, and the quota itself was not visible to
+    ``quota(1)``. The only reliable test is to write. The probe is sized like a
+    real checkpoint (compact folds are ~15 MB, full ones several GB) so that
+    passing it means something.
+    """
+    os.makedirs(directory, exist_ok=True)
+    probe = os.path.join(directory, f".preflight_{os.getpid()}.tmp")
+    chunk = b"\0" * (1024 * 1024)
+    written = 0
+    try:
+        with open(probe, "wb") as fh:
+            for _ in range(probe_mb):
+                fh.write(chunk)
+                written += 1
+            fh.flush()
+            os.fsync(fh.fileno())
+    except OSError as exc:
+        raise SystemExit(
+            f"\nERROR: cannot write {probe_mb} MB to {directory} "
+            f"(failed after {written} MB): {exc}\n"
+            "\n"
+            "This job would train for hours and then die silently when it tried\n"
+            "to save a checkpoint — a full disk also prevents the traceback from\n"
+            "being logged, which is why such failures leave no evidence.\n"
+            "\n"
+            "On Rockfish the home quota is 50 GB and is not reported by df or\n"
+            "quota(1); check with `du -sh ~`. Point runs at group scratch:\n"
+            "  export DISORDERNET_RESULTS=/scratch4/<PI>/<user>_disordernet\n"
+        ) from exc
+    finally:
+        if os.path.exists(probe):
+            os.unlink(probe)
+
+
+def _assert_label_set_matches_budget(
+    stats: dict, label_source: str, universe: str, tolerance: float = 0.25
+) -> None:
+    """Abort if the label set is not the size the epoch budget assumed.
+
+    The ablation step-matches epochs from a table of measured evidenced-residue
+    counts, so the budget and the data are coupled through a constant that
+    nothing checked. When the cross-organism selector silently fell back to the
+    human proteome, the arm got 1.2M evidenced residues instead of 6.6M and ran
+    the 5 epochs matched to the larger figure — a badly undertrained run wearing
+    the label of a matched-budget comparison. Nothing in the output said so.
+
+    The submitter exports the count it budgeted for; this refuses to train if
+    reality disagrees. Failing at minute two beats a plausible wrong number
+    after several GPU-hours.
+    """
+    expected_raw = os.environ.get("DISORDERNET_EXPECTED_RESIDUES", "").strip()
+    if not expected_raw:
+        return
+    try:
+        expected = int(expected_raw)
+    except ValueError:
+        print(f"  WARNING: unparseable DISORDERNET_EXPECTED_RESIDUES={expected_raw!r}")
+        return
+    if expected <= 0:
+        return
+
+    actual = int(stats.get("n_evidenced_residues", 0))
+    ratio = actual / expected
+    if abs(ratio - 1.0) <= tolerance:
+        print(
+            f"  label-set size check: {actual:,} evidenced residues "
+            f"({ratio:.2f}x budgeted) — OK"
+        )
+        return
+
+    raise SystemExit(
+        "\nERROR: label set is not the size this run's epoch budget assumes.\n"
+        f"  label source : {label_source}\n"
+        f"  universe     : {universe}\n"
+        f"  budgeted for : {expected:,} evidenced residues\n"
+        f"  actually got : {actual:,} ({ratio:.2f}x)\n"
+        "\n"
+        "The epoch count is step-matched off the budgeted figure, so training\n"
+        "now would produce a result that is not comparable to the baseline.\n"
+        "Check --mobidb-global / DISORDERNET_MOBIDB_GLOBAL (human proteome\n"
+        "yields ~3.4k proteins, the cross-organism set ~19.8k), then either\n"
+        "correct the selector or update EVIDENCED_RESIDUES in\n"
+        "rockfish/ablation.py to the measured value and resubmit."
+    )
+
+
+def _load_proteins_mobidb(cfg, args) -> tuple[list, dict]:
+    """Load training proteins from MobiDB under a non-DisProt label definition.
+
+    Used for the label-source ablation: ``pdb_missing`` trains on the same
+    definition CAID3's Disorder-PDB reference scores, removing the domain shift
+    of training on curated functional disorder and testing on crystallographic
+    disorder.
+    """
+    from colab.label_sources import (
+        GLOBAL_PDB_COVERAGE_NAME,
+        GLOBAL_PDB_COVERAGE_QUERY,
+        LabelSource,
+        build_labelled_set,
+        fetch_mobidb_proteome,
+        to_pipeline_proteins,
+    )
+
+    source = LabelSource(args.label_source)
+    # The cross-organism selector was implemented in label_sources but never
+    # reachable from here — `query` was simply never passed — so every arm that
+    # asked for it silently trained on the human reference proteome instead:
+    # 3,388 proteins / 1.2M evidenced residues rather than 19,819 / 6.6M. The
+    # ablation's epoch budget is step-matched off the larger figure, so the arm
+    # ran at 5 epochs on DisProt-sized data and looked like a matched-budget
+    # comparison while being a badly undertrained one.
+    use_global = bool(getattr(args, "mobidb_global", False))
+    query = GLOBAL_PDB_COVERAGE_QUERY if use_global else None
+    universe = GLOBAL_PDB_COVERAGE_NAME if use_global else args.mobidb_proteome
+    cache = getattr(args, "mobidb_cache", "") or os.path.join(
+        os.path.expanduser("~/.cache/disordernet"), f"mobidb_{universe}.ndjson"
+    )
+    records = fetch_mobidb_proteome(
+        args.mobidb_proteome,
+        cache,
+        limit=getattr(args, "mobidb_limit", None) or None,
+        query=query,
+    )
+    labelled, stats = build_labelled_set(
+        records,
+        source,
+        min_len=cfg.min_seq_len,
+        max_len=cfg.max_seq_len,
+        min_evidence_fraction=float(getattr(args, "min_evidence_fraction", 0.10)),
+        min_disorder=cfg.min_disorder,
+        min_order=cfg.min_order,
+    )
+    _assert_label_set_matches_budget(stats, source.value, universe)
+
+    proteins = to_pipeline_proteins(labelled)
+    # Same filter the DisProt path applies. Must run BEFORE the content hash so
+    # the resume fingerprint describes the set actually trained on.
+    proteins, _ = _apply_caid_leak_free_filter(proteins, {}, cfg, args)
+    meta = {
+        "label_source": source.value,
+        # Which universe was actually pulled, not which flag was requested.
+        "mobidb_universe": universe,
+        "mobidb_global": use_global,
+        "mobidb_proteome": args.mobidb_proteome,
+        "mobidb_cache": cache,
+        # Content hash of the label set, so CV resume can tell one label
+        # definition from another rather than silently reusing foreign folds.
+        "content_sha256": _label_set_sha(proteins),
+        "label_stats": stats,
+    }
+    return proteins, meta
+
+
+def _label_set_sha(proteins: list) -> str:
+    import hashlib
+
+    import numpy as np
+
+    h = hashlib.sha256()
+    for p in proteins:
+        h.update(p["id"].encode())
+        h.update(b"\x00")
+        h.update(np.asarray(p["labels"], dtype=np.int8).tobytes())
+        h.update(np.asarray(p["label_evidence"], dtype=bool).tobytes())
+    return h.hexdigest()
+
+
 def _load_proteins(data_cache: str, cfg, args=None) -> tuple[list, dict]:
     from colab.disordernet_gpu import fetch_disprot, get_disprot_cache_meta, process_disprot
 
+    # Non-DisProt label definitions come from MobiDB and skip the DisProt REST
+    # path entirely (different source, different evidence semantics).
+    if args is not None and getattr(args, "label_source", "disprot") != "disprot":
+        return _load_proteins_mobidb(cfg, args)
+
     entries = fetch_disprot(cache_path=data_cache)
-    proteins, disprot_meta = process_disprot(entries, cfg)
+    # process_disprot returns (proteins, skipped_counter) — the second value is a
+    # Counter of filter reasons, NOT the DisProt cache metadata. Binding it to
+    # `disprot_meta` meant load_cv_progress compared a real content_sha256 against
+    # None on every resume attempt and always rejected the saved folds, so
+    # auto-resume silently restarted CV from fold 0 — which makes the campaign's
+    # walltime-resume guarantee hollow on jobs that need it most.
+    proteins, skipped = process_disprot(entries, cfg)
+    disprot_meta = dict(get_disprot_cache_meta(data_cache) or {})
+    if skipped:
+        disprot_meta["skipped"] = dict(skipped)
 
-    # Leak-free CAID training: drop DisProt proteins that ID/homology-hit CAID refs.
-    if args is not None and getattr(args, "caid_leak_free_train", False):
-        from colab.caid_challenge import resolve_caid3_references
-        from colab.caid_leakage import (
-            audit_train_vs_caid,
-            filter_train_proteins,
-            load_caid_refs_for_audit,
-            save_leakage_audit,
-        )
-
-        ckpt = cfg.checkpoint_dir
-        os.makedirs(ckpt, exist_ok=True)
-        refs = resolve_caid3_references(ckpt, getattr(args, "caid3_reference", None))
-        caid_prots = load_caid_refs_for_audit(list(refs.values()))
-        if caid_prots:
-            audit = audit_train_vs_caid(
-                proteins,
-                caid_prots,
-                min_identity=float(getattr(args, "caid_leak_identity", 0.40)),
-            )
-            proteins, filt = filter_train_proteins(proteins, audit)
-            audit["filter"] = filt
-            audit["applied_before_cv"] = True
-            save_leakage_audit(audit, os.path.join(ckpt, "caid_leakage_audit.json"))
-            disprot_meta = dict(disprot_meta or {})
-            disprot_meta["caid_leak_free_train"] = filt
-            print(
-                f"  CAID leak-free train: removed {filt['n_removed']} / {filt['n_before']} "
-                f"proteins (identity≥{getattr(args, 'caid_leak_identity', 0.40)})"
-            )
+    proteins, disprot_meta = _apply_caid_leak_free_filter(proteins, disprot_meta, cfg, args)
     return proteins, disprot_meta
 
 
@@ -110,6 +321,8 @@ def _build_cfg(args, workdir: str):
         else args.data_cache,
         num_workers=args.num_workers,
     )
+    if getattr(args, "num_epochs", None):
+        overrides["num_epochs"] = int(args.num_epochs)
     if getattr(args, "function_head", False):
         overrides["use_function_head"] = True
     if getattr(args, "no_function_head", False):
@@ -294,6 +507,7 @@ def stage_stack(args, cfg, proteins, fold_results, cv_summary) -> tuple[list, di
         seed=cfg.seed,
         use_v6_pro=True,
         use_meta_ensemble=True,
+        cfg=cfg,
     )
     print_sota_stack_report(sota_report)
     save_sota_stack_report(
@@ -301,9 +515,17 @@ def stage_stack(args, cfg, proteins, fold_results, cv_summary) -> tuple[list, di
         os.path.join(cfg.checkpoint_dir, "sota_stack_report.json"),
     )
 
+    # Do NOT overwrite pooled_auc here. It used to be reassigned to the stacked
+    # result, so the field kept its name while changing meaning: it stopped
+    # being the neural model's cross-validated AUC and became the score of an
+    # ensemble with a gradient-boosted tree on physics features. Everything
+    # downstream inherited that — eval_summary.pooled_auc, and a phase3 headline
+    # reading "GPU AUC 0.788" for a number the GPU model did not produce. In the
+    # 650M run the model's own pooled OOF AUC was 0.7203 and the stack's 0.7876.
     if sota_report.get("after", {}).get("pooled"):
-        cv_summary["pooled_auc"] = sota_report["after"]["pooled"]["auc"]
-        cv_summary["pooled_ap"] = sota_report["after"]["pooled"]["ap"]
+        cv_summary["stacked_pooled_auc"] = sota_report["after"]["pooled"]["auc"]
+        cv_summary["stacked_pooled_ap"] = sota_report["after"]["pooled"]["ap"]
+        cv_summary["stacked_components"] = "gpu + v6_pro GBDT + meta_ensemble"
     cv_summary["gpu_v6_ensemble"] = ensemble_report
     cv_summary["sota_stack"] = sota_report
 
@@ -780,6 +1002,7 @@ def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
     ckpt = cfg.checkpoint_dir
     downstream = refresh_downstream_metrics(
         proteins, fold_results, n_folds=cfg.n_folds, print_reports=True,
+        split_method=getattr(cfg, "split_method", "protein"),
     )
 
     # Disorder → function (multi-label) OOF report
@@ -1029,7 +1252,19 @@ def stage_eval(args, cfg, proteins, fold_results, cv_summary) -> dict:
             except Exception as exc:
                 print(f"Distrust figures skipped: {exc}")
 
+    # Name what each figure is. "pooled_auc" previously meant whichever stage
+    # last touched fold_results, and was read downstream as the model's score.
     eval_summary = {
+        "final_pooled_auc": cv_pooled["auc"],
+        "final_pooled_ap": cv_pooled["ap"],
+        "final_components": "gpu + v6_pro GBDT + meta_ensemble + fusion",
+        # The neural model on its own, cross-validated — the number that is
+        # comparable to a published sequence-only predictor.
+        "model_pooled_auc": (cv_summary or {}).get("pooled_auc"),
+        "model_mean_fold_auc": (cv_summary or {}).get("mean_auc"),
+        "model_fold_auc_sd": (cv_summary or {}).get("std_auc"),
+        # Retained so older readers do not KeyError. Same value as
+        # final_pooled_auc, which is what it always actually held.
         "pooled_auc": cv_pooled["auc"],
         "pooled_ap": cv_pooled["ap"],
         "phase3_headline": phase3.get("headline"),
@@ -1240,6 +1475,11 @@ def run_pipeline(args) -> int:
     print(f"Stage: {args.stage}  profile={args.profile}  backbone={args.backbone}")
 
     cfg = _build_cfg(args, workdir)
+    # Before loading a 650M backbone or touching a GPU: prove the checkpoint
+    # directory is writable. A run that discovers this at fold 4 has burned the
+    # GPU-hours and cannot even log why it stopped.
+    if not args.skip_space_preflight:
+        preflight_writable_space(cfg.checkpoint_dir, probe_mb=args.preflight_mb)
     proteins, disprot_meta = _load_proteins(cfg.data_cache, cfg, args=args)
     print(f"Proteins: {len(proteins):,}  residues: {sum(p['length'] for p in proteins):,}")
 
@@ -1411,6 +1651,60 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--backbone", default="650M", help="ESM-2 backbone key (650M, 3B, …)")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--n-folds", type=int, default=5)
+    p.add_argument(
+        "--label-source",
+        default=os.environ.get("DISORDERNET_LABEL_SOURCE", "disprot"),
+        choices=["disprot", "mobidb_curated", "pdb_missing", "union"],
+        help="Disorder definition to train on. 'pdb_missing' matches the CAID3 "
+             "Disorder-PDB benchmark (missing residues); 'disprot' is curated "
+             "functional disorder. Non-DisProt sources come from MobiDB and carry "
+             "per-residue evidence masks.",
+    )
+    p.add_argument(
+        "--mobidb-proteome",
+        default=os.environ.get("DISORDERNET_MOBIDB_PROTEOME", "UP000005640"),
+        help="UniProt proteome id for MobiDB label sources (default: human)",
+    )
+    p.add_argument(
+        "--mobidb-global",
+        action="store_true",
+        default=os.environ.get("DISORDERNET_MOBIDB_GLOBAL", "0") not in ("", "0", "false"),
+        help="Select across all of MobiDB by missing-residue annotation rather "
+             "than one reference proteome. Human alone yields ~3.4k trainable "
+             "proteins; the cross-organism set yields ~19.8k. Overrides "
+             "--mobidb-proteome.",
+    )
+    p.add_argument(
+        "--preflight-mb", type=int,
+        default=int(os.environ.get("DISORDERNET_PREFLIGHT_MB", "128") or 128),
+        help="Size of the writability probe taken before any GPU work (MB).",
+    )
+    p.add_argument(
+        "--skip-space-preflight", action="store_true",
+        help="Skip the checkpoint-writability probe. Only for read-only stages "
+             "on a filesystem you know is fine.",
+    )
+    p.add_argument("--mobidb-cache", default=os.environ.get("DISORDERNET_MOBIDB_CACHE", ""))
+    p.add_argument(
+        "--mobidb-limit",
+        type=int,
+        default=int(os.environ.get("DISORDERNET_MOBIDB_LIMIT", "0") or 0),
+        help="Cap the MobiDB pull (0 = whole proteome). Useful for ablation sizing.",
+    )
+    p.add_argument(
+        "--min-evidence-fraction",
+        type=float,
+        default=float(os.environ.get("DISORDERNET_MIN_EVIDENCE", "0.10")),
+        help="Drop proteins whose labelled residues cover less than this fraction "
+             "of the chain (PDB-derived labels only cover crystallised regions)",
+    )
+    p.add_argument(
+        "--num-epochs",
+        type=int,
+        default=None,
+        help="Override the profile's epoch budget (diagnostics: distinguishes an "
+             "undertrained run from a broken one)",
+    )
     p.add_argument("--workdir", default=None, help="Working directory (default: Slurm scratch)")
     p.add_argument("--checkpoint-dir", default="checkpoints", help="Relative to workdir")
     p.add_argument("--data-cache", default="disprot_raw.json", help="DisProt cache path")

@@ -75,7 +75,12 @@ def apply_temperature(probs: np.ndarray, temperature: float) -> np.ndarray:
 
 
 def fit_isotonic_calibration(labels: np.ndarray, probs: np.ndarray) -> dict:
-    """Isotonic regression calibrator (can help AP; use with care on small OOF)."""
+    """Isotonic regression calibrator (can help AP; use with care on small OOF).
+
+    ``auc_after`` / ``ap_after`` here are in-sample diagnostics of the fit.
+    ``calibrate_fold_results`` overwrites them with leave-one-fold-out values
+    before they reach any report.
+    """
     labels = np.asarray(labels, dtype=np.float32)
     probs = np.asarray(probs, dtype=np.float32)
     if len(np.unique(labels)) < 2 or len(labels) < 100:
@@ -123,15 +128,39 @@ def calibrate_fold_results(
         iso_report = fit_isotonic_calibration(all_labels, all_probs)
         if iso_report.get("insufficient_data"):
             return fold_results, iso_report
-        iso = IsotonicRegression(out_of_bounds="clip")
-        iso.fit(all_probs, all_labels)
+        # Isotonic regression is a non-strictly-monotone step function: unlike
+        # temperature scaling it can merge and reorder scores, so fitting it on
+        # the same residues it then transforms genuinely inflates AUC/AP rather
+        # than leaving them invariant. Calibrate each fold with an isotonic map
+        # fitted on the *other* folds so the reported metrics stay honest.
         updated = []
-        for r in fold_results:
+        n = len(fold_results)
+        for i, r in enumerate(fold_results):
+            if n > 1:
+                fit_probs = np.concatenate(
+                    [np.asarray(fr["val_probs"]) for j, fr in enumerate(fold_results) if j != i]
+                )
+                fit_labels = np.concatenate(
+                    [np.asarray(fr["val_labels"]) for j, fr in enumerate(fold_results) if j != i]
+                )
+            else:
+                fit_probs, fit_labels = all_probs, all_labels
             fr = dict(r)
-            fr["val_probs"] = apply_isotonic(np.asarray(r["val_probs"]), iso)
+            if len(np.unique(fit_labels)) < 2:
+                fr["val_probs"] = np.asarray(r["val_probs"], dtype=np.float32)
+            else:
+                iso_i = IsotonicRegression(out_of_bounds="clip")
+                iso_i.fit(fit_probs, fit_labels)
+                fr["val_probs"] = apply_isotonic(np.asarray(r["val_probs"]), iso_i)
             fr["calibrated"] = True
             updated.append(fr)
         iso_report["method"] = "isotonic"
+        iso_report["fit"] = "leave_one_fold_out" if n > 1 else "in_sample_single_fold"
+        # auc_after from fit_isotonic_calibration is in-sample; recompute honestly.
+        oof_probs = np.concatenate([fr["val_probs"] for fr in updated])
+        if len(np.unique(all_labels)) > 1:
+            iso_report["auc_after"] = float(roc_auc_score(all_labels, oof_probs))
+            iso_report["ap_after"] = float(average_precision_score(all_labels, oof_probs))
         return updated, iso_report
 
     if method == "temperature_then_isotonic":

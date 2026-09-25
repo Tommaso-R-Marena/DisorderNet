@@ -111,16 +111,45 @@ def load_fold_ensemble_models(
     device: torch.device,
     n_folds: int = 5,
 ) -> list[DisorderNetGPU]:
-    """Load all compact fold checkpoints from a CV run."""
+    """Load all fold checkpoints from a CV run.
+
+    Two naming conventions exist in this repo and they did not agree:
+    training writes ``fold{N}_best.pt`` (disordernet_gpu.train_fold, and what
+    fold_model_soup reads back), while this loader looked only for
+    ``fold_{N}_*.pt``. The checkpoints were therefore present and simply never
+    found, so CAID3 evaluation — the one measurement comparable to published
+    methods — failed with "No fold checkpoints" at the very end of a run that
+    had already trained all five folds. Accept both spellings.
+    """
     models: list[DisorderNetGPU] = []
+    missing: list[int] = []
     for fold in range(1, n_folds + 1):
-        for name in (f"fold_{fold}_compact.pt", f"fold_{fold}_best.pt"):
+        for name in (
+            f"fold_{fold}_compact.pt",
+            f"fold_{fold}_best.pt",
+            f"fold{fold}_compact.pt",
+            f"fold{fold}_best.pt",
+        ):
             path = os.path.join(checkpoint_dir, name)
             if os.path.isfile(path):
                 models.append(_load_fold_model(path, esm_backbone, cfg, device))
                 break
+        else:
+            missing.append(fold)
     if not models:
-        raise FileNotFoundError(f"No fold checkpoints in {checkpoint_dir}")
+        try:
+            present = sorted(
+                f for f in os.listdir(checkpoint_dir) if f.endswith(".pt")
+            )[:10]
+        except OSError:
+            present = []
+        raise FileNotFoundError(
+            f"No fold checkpoints in {checkpoint_dir}. "
+            f"Looked for fold[_]N_[compact|best].pt for folds 1–{n_folds}; "
+            f"found .pt files: {present or 'none'}"
+        )
+    if missing:
+        print(f"  ⚠ fold ensemble missing folds {missing} — using {len(models)} model(s)")
     return models
 
 

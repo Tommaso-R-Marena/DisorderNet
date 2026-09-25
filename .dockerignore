@@ -1,0 +1,15 @@
+.git
+.github
+lean
+paper
+results
+results_v6
+results_v7
+logs
+token_cache
+experiments
+rockfish
+__pycache__
+*.pyc
+.venv
+*.tar.gz
