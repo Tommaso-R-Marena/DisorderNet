@@ -1,8 +1,9 @@
 # Pre-registration 11 — train on the label that was measured, not the one that was rounded
 
-Committed **before** the soft-label cache is built and before any number from
-this run exists. Methodology `METHODOLOGY.md`. Control is `mt_control`, which
-shares this run's training union and validation holdout.
+Committed **before** the soft-label cache was built and before any number from
+this run existed. Methodology `METHODOLOGY.md`. The control is `mt_hard`, an arm
+trained in the same window on exactly the same rows with hard labels — see *The
+control* below for why this replaced the pre-existing `mt_control`.
 
 ## The argument, from this project's own measurement
 
@@ -89,12 +90,17 @@ From `PREREGISTRATION_6.md`, unchanged. The variant is rejected if any fails.
 
 ## The control, and what makes it matched
 
-`mt_control` shares this run's training union, its homology-clustered folds and
-its fixed validation holdout. The only difference is the target on residues
-MobiDB covers with two or more structures. If a second control is needed because
-the training union changes when the MobiDB join is applied, it is trained in the
-same window with hard labels on **exactly the same rows**, and that is the
-comparison reported.
+The registered comparison is `mt_soft` against `mt_hard`: two arms submitted in
+the same window, on the same rows, with the same backbone, folds, epochs,
+structure dimension, task set, references and holdout salt. The only difference
+is the target on residues MobiDB covers with two or more structures.
+
+`mt_control` was the originally named control and is retained as a secondary
+reference point, but it was trained in a different window. A difference against
+it could be the window rather than the labels, and this project has already
+learned once (PREREGISTRATION_5/6, chirality) how much a regime-matched control
+changes the reading. Paying for a second arm is cheaper than an ambiguous
+result.
 
 ## Leak control
 
@@ -149,5 +155,22 @@ torch caches from the DisorderNet project directory (`torch_home`,
 `torch_cache_from_wrong_repo`), which unblocked writes. Nothing else was
 removed, and no run output, checkpoint or benchmark artefact was touched.
 
-`rockfish/build_soft_labels.py` fetches the per-structure calls for the 22,839
-accessions of the `pdb_missing` training universe.
+`rockfish/build_soft_labels.py` fetched the per-structure calls for the 22,839
+accessions of the `pdb_missing` training universe: **18,125 proteins,
+6,380,212 residues** with two or more covering structures, of which **14.64%
+are strictly between 0 and 1** (mean 0.395). That the training universe is more
+ambiguous than the benchmark reference (14.6% against 8.0%) is expected — it is
+larger and less curated — and it is the quantity this run acts on.
+
+**Launched as a matched pair**, rather than against the pre-existing
+`mt_control`, so that the only difference between the two arms is the target:
+
+| arm | job | workdir |
+|---|---:|---|
+| `mt_soft` (`--soft-labels`) | 31210553 | `multitask_soft` |
+| `mt_hard` (control) | 31210554 | `multitask_hard` |
+
+Identical backbone, folds, epochs, structure dimension, task set, references and
+holdout salt; submitted in the same window. `mt_control` is retained as a
+secondary reference point but the registered comparison is `mt_soft` against
+`mt_hard`.

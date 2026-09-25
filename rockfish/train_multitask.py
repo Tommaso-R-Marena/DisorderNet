@@ -897,6 +897,30 @@ def main(argv=None) -> int:
         print(f"CAID leak-free: removed {leak['n_removed']} / {leak['n_before']} "
               f"proteins at identity>={args.leak_identity} "
               f"({leak['n_id_overlap']} exact id/sequence hits)")
+        # PREREGISTRATION_11 promises this check, and promises it on the right
+        # set. The soft-label cache is keyed by accession over the whole
+        # pdb_missing universe and does overlap the benchmark (141 of 319 CAID3
+        # accessions). That is harmless because the rows carrying them are
+        # removed here; what must be zero is the intersection *after* this
+        # filter, so that is what is asserted rather than the cache's.
+        if args.soft_labels:
+            soft_accs = set(load_soft_labels(args.soft_labels))
+            ref_accs = set()
+            for r in (args.caid_reference or []):
+                if r and os.path.isfile(r):
+                    with open(r) as fh:
+                        for line in fh:
+                            if line.startswith(">"):
+                                ref_accs.add(line[1:].split()[0])
+            surviving = {row.get("uniprot_acc") for row in rows}
+            still_here = soft_accs & ref_accs & surviving
+            print(f"soft-label leak check: {len(soft_accs & ref_accs)} cache/"
+                  f"reference accessions before the filter, "
+                  f"{len(still_here)} surviving it")
+            if still_here:
+                raise SystemExit(
+                    f"a benchmark accession carrying a soft target survived "
+                    f"drop_caid_targets: {sorted(still_here)[:5]}")
         if leak["n_removed"] == 0:
             print("  WARNING: nothing removed — is the CAID3 reference resolvable?")
     else:
