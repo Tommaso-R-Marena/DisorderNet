@@ -393,6 +393,64 @@ def structure_batch(batch, L, device):
     return rsa, pl, av, ct, hd
 
 
+def soft_label_leak_report(rows, entries, reference_fastas, soft_accs) -> dict:
+    """Which benchmark proteins carry a soft target, before and after filtering.
+
+    Extracted from ``main`` because the version that lived there could not be
+    tested and was wrong for it. It intersected CAID reference ids with
+    soft-label cache keys — but references are keyed by DisProt id (``DP02732``)
+    and the cache by UniProt accession (``A0A003``), so the intersection was
+    empty for every possible input. It printed "0 before the filter, 0
+    surviving" and no leak could ever have tripped it.
+
+    Two things make the replacement capable of failing. The reference is mapped
+    through DisProt, which carries both ids, and ``can_fail`` is reported so the
+    caller can refuse a run whose check resolved nothing. Sequence is compared
+    as well as accession, since sequence belongs to no namespace and catches a
+    target whose id does not map at all.
+
+    ``rows`` are the rows that survived ``drop_caid_targets``; a non-empty
+    ``surviving`` means a protein the model is scored on is in its training set
+    with a soft target attached.
+    """
+    from colab.caid3_eval import parse_caid_reference_fasta
+
+    dp_to_acc = {}
+    for e in entries:
+        dp, acc = e.get("disprot_id"), (e.get("acc") or "").strip()
+        if dp and acc:
+            dp_to_acc[dp] = acc
+
+    paths = ([reference_fastas] if isinstance(reference_fastas, (str, bytes))
+             else list(reference_fastas or []))
+    ref_accs, ref_seqs, unmapped = set(), set(), set()
+    for path in paths:
+        if not (path and os.path.isfile(path)):
+            continue
+        for t in parse_caid_reference_fasta(path):
+            ref_seqs.add(t["sequence"])
+            acc = dp_to_acc.get(t["id"])
+            if acc:
+                ref_accs.add(acc)
+            elif str(t["id"]).startswith("DP"):
+                unmapped.add(t["id"])
+            else:
+                ref_accs.add(t["id"])          # already an accession
+
+    soft_accs = set(soft_accs)
+    surviving = {r.get("uniprot_acc") for r in rows
+                 if r.get("uniprot_acc") in soft_accs
+                 and (r.get("uniprot_acc") in ref_accs
+                      or r.get("sequence") in ref_seqs)}
+    return {
+        "benchmark_accessions": len(ref_accs),
+        "on_benchmark_before_filter": len(soft_accs & ref_accs),
+        "surviving": sorted(x for x in surviving if x),
+        "unmapped": sorted(unmapped),
+        "can_fail": bool(ref_accs),
+    }
+
+
 def drop_caid_targets(
     rows: list[dict], reference_fasta, min_identity: float,
     allow_missing_homology: bool = False,
@@ -922,45 +980,26 @@ def main(argv=None) -> int:
         # a mapping that resolves nothing is itself an error — a silent pass is
         # what this check exists to prevent.
         if args.soft_labels:
-            soft_accs = set(load_soft_labels(args.soft_labels))
-            dp_to_acc = {}
-            for e in entries:
-                dp, acc = e.get("disprot_id"), (e.get("acc") or "").strip()
-                if dp and acc:
-                    dp_to_acc[dp] = acc
-            ref_accs, ref_seqs, unmapped = set(), set(), set()
-            for r in (args.caid_reference or []):
-                if not (r and os.path.isfile(r)):
-                    continue
-                for t in parse_caid_reference_fasta(r):
-                    ref_seqs.add(t["sequence"])
-                    acc = dp_to_acc.get(t["id"])
-                    if acc:
-                        ref_accs.add(acc)
-                    elif t["id"].startswith("DP"):
-                        unmapped.add(t["id"])
-                    else:
-                        ref_accs.add(t["id"])      # already an accession
-            if not ref_accs:
+            report = soft_label_leak_report(
+                rows, entries, args.caid_reference,
+                set(load_soft_labels(args.soft_labels)))
+            print("soft-label leak check: "
+                  f"{report['on_benchmark_before_filter']} of "
+                  f"{report['benchmark_accessions']} benchmark accessions "
+                  f"carry a soft target before the filter, "
+                  f"{len(report['surviving'])} survive it"
+                  + (f" ({len(report['unmapped'])} reference ids unmapped)"
+                     if report["unmapped"] else ""))
+            if not report["can_fail"]:
                 raise SystemExit(
                     "soft-label leak check resolved no benchmark accessions: "
-                    f"{len(unmapped)} reference ids could not be mapped through "
-                    "DisProt. A check that cannot fail is worse than none.")
-            # Sequence is namespace-free, so it catches a target whose id does
-            # not map at all — the residual the id join cannot see.
-            still_here = {row.get("uniprot_acc") for row in rows
-                          if row.get("uniprot_acc") in soft_accs
-                          and (row.get("uniprot_acc") in ref_accs
-                               or row.get("sequence") in ref_seqs)}
-            print(f"soft-label leak check: {len(soft_accs & ref_accs)} of "
-                  f"{len(ref_accs)} benchmark accessions carry a soft target "
-                  f"before the filter, {len(still_here)} survive it"
-                  + (f" ({len(unmapped)} reference ids unmapped)"
-                     if unmapped else ""))
-            if still_here:
+                    f"{len(report['unmapped'])} reference ids could not be "
+                    "mapped through DisProt. A check that cannot fail is worse "
+                    "than none.")
+            if report["surviving"]:
                 raise SystemExit(
-                    f"a benchmark accession carrying a soft target survived "
-                    f"drop_caid_targets: {sorted(still_here)[:5]}")
+                    "a benchmark accession carrying a soft target survived "
+                    f"drop_caid_targets: {report['surviving'][:5]}")
         if leak["n_removed"] == 0:
             print("  WARNING: nothing removed — is the CAID3 reference resolvable?")
     else:

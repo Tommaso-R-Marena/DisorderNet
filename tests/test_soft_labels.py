@@ -81,3 +81,89 @@ class TestTheTargetItself:
         losses = {p: float(torch.nn.functional.binary_cross_entropy_with_logits(
             torch.logit(torch.tensor([p])), soft)) for p in (0.1, 0.5, 0.9)}
         assert losses[0.5] < losses[0.1] and losses[0.5] < losses[0.9]
+
+
+class TestTheLeakCheckCanActuallyFail:
+    """The first version of this check could not fail, for any input.
+
+    CAID reference FASTAs are keyed by DisProt id (``DP02732``); the soft-label
+    cache is keyed by UniProt accession (``A0A003``). The original check
+    intersected the two directly, so it reported "0 cache/reference accessions
+    before the filter, 0 surviving it" on a run whose pre-registration records a
+    141-accession overlap. A guard that passes on every input is not a guard,
+    and the pre-registration had already warned about exactly this ("the first
+    draft would have reported a passing check on the wrong set").
+    """
+
+    @staticmethod
+    def _reference(tmp_path, entries, ids):
+        """A CAID reference FASTA, in the real format: header, sequence, labels."""
+        seqs = {e["disprot_id"]: e["sequence"] for e in entries}
+        path = tmp_path / "ref.fasta"
+        path.write_text("".join(
+            f">{i}\n{seqs[i]}\n{'0' * len(seqs[i])}\n" for i in ids))
+        return str(path)
+
+    @staticmethod
+    def _entries():
+        return [
+            {"disprot_id": "DP00001", "acc": "P11111", "sequence": "MKV" * 12},
+            {"disprot_id": "DP00002", "acc": "P22222", "sequence": "AGH" * 12},
+            {"disprot_id": "DP00003", "acc": "P33333", "sequence": "CWY" * 12},
+        ]
+
+    def test_it_sees_the_overlap_the_id_namespaces_hid(self, tmp_path):
+        from rockfish.train_multitask import soft_label_leak_report
+
+        entries = self._entries()
+        ref = self._reference(tmp_path, entries, ["DP00001", "DP00002"])
+        rep = soft_label_leak_report(
+            rows=[], entries=entries, reference_fastas=[ref],
+            soft_accs={"P11111", "P22222", "P99999"})
+
+        assert rep["can_fail"], "no benchmark accession resolved"
+        assert rep["benchmark_accessions"] == 2
+        # The number the broken version reported as 0.
+        assert rep["on_benchmark_before_filter"] == 2
+
+    def test_a_surviving_benchmark_row_is_reported(self, tmp_path):
+        from rockfish.train_multitask import soft_label_leak_report
+
+        entries = self._entries()
+        ref = self._reference(tmp_path, entries, ["DP00001"])
+        survivor = {"uniprot_acc": "P11111", "sequence": entries[0]["sequence"]}
+        clean = {"uniprot_acc": "P33333", "sequence": entries[2]["sequence"]}
+
+        rep = soft_label_leak_report(
+            rows=[survivor, clean], entries=entries, reference_fastas=[ref],
+            soft_accs={"P11111", "P33333"})
+        assert rep["surviving"] == ["P11111"], rep
+
+    def test_an_unmappable_reference_is_still_caught_by_sequence(self, tmp_path):
+        """Sequence belongs to no namespace, so it covers the id join's blind spot."""
+        from rockfish.train_multitask import soft_label_leak_report
+
+        entries = self._entries()
+        ref = self._reference(tmp_path, entries, ["DP00001", "DP00002"])
+        # DisProt no longer knows DP00001, so its accession cannot be resolved.
+        thin = [e for e in entries if e["disprot_id"] != "DP00001"]
+        survivor = {"uniprot_acc": "P11111", "sequence": entries[0]["sequence"]}
+
+        rep = soft_label_leak_report(
+            rows=[survivor], entries=thin, reference_fastas=[ref],
+            soft_accs={"P11111"})
+        assert rep["unmapped"] == ["DP00001"]
+        assert rep["surviving"] == ["P11111"], "sequence fallback did not fire"
+
+    def test_a_check_that_resolves_nothing_reports_that_it_cannot_fail(self, tmp_path):
+        from rockfish.train_multitask import soft_label_leak_report
+
+        entries = self._entries()
+        ref = self._reference(tmp_path, entries, ["DP00001"])
+        rep = soft_label_leak_report(
+            rows=[], entries=[], reference_fastas=[ref],
+            soft_accs={"P11111"})
+        assert not rep["can_fail"], (
+            "with no DisProt mapping nothing resolves, and the run must refuse "
+            "rather than print a passing check"
+        )
