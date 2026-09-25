@@ -146,8 +146,15 @@ Related invariants, all regression-tested:
   the repo root, where `pytest` then collected each test twice under two module
   names, and a stale duplicate of an edited module sat one `sys.path` entry away
   from shadowing the real one. Write the destination explicitly, one source at a
-  time: `rsync -az colab/ host:dn_rigor/colab/`. Check for the damage with
-  `ls *.py | wc -l` (should be 21 in `~/dn_rigor`).
+  time: `rsync -az colab/ host:dn_rigor/colab/`. Check for the damage by
+  comparing the remote's root against the repo's rather than against a fixed
+  number — the count drifts as modules are added, and a stale constant makes
+  the check ambiguous exactly when it matters:
+  `diff <(ls *.py) <(ssh rockfish 'ls dn_rigor/*.py | xargs -n1 basename')`.
+  Scatter shows up as dozens of `colab/`-ish and `test_*` names appearing at
+  the remote root; a handful of extra one-off probe scripts written on the
+  cluster (`caid4b.py`, `probe_mobidb.py`, `verify_punch.py`, …) are expected
+  and are not damage.
 - **Always export `TORCH_HOME` to scratch. One omission killed four jobs.**
   `fair-esm` downloads into `$TORCH_HOME` (default `~/.cache/torch`), and
   ESM-2 3B is **5.7 GB**. A `lite_3b` submission that forgot the variable took
