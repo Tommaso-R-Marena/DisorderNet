@@ -894,6 +894,8 @@ def main(argv=None) -> int:
     # scored a model trained on its own targets.
     # --stats-only trains nothing, so requiring BLAST there would block a
     # read-only coverage check on any machine without the module.
+    from colab.caid3_eval import parse_caid_reference_fasta
+
     if args.stats_only:
         leak = {"skipped": "stats-only"}
     elif not args.no_caid_filter:
@@ -909,20 +911,52 @@ def main(argv=None) -> int:
         # accessions). That is harmless because the rows carrying them are
         # removed here; what must be zero is the intersection *after* this
         # filter, so that is what is asserted rather than the cache's.
+        #
+        # The two sides are in different namespaces and the first version of
+        # this check did not convert between them. CAID reference FASTAs are
+        # keyed by DisProt id (``DP02732``); the soft-label cache is keyed by
+        # UniProt accession (``A0A003``). Intersecting them directly is empty
+        # for every input, so the check reported "0 before the filter, 0
+        # surviving" and could not have failed. DisProt carries both ids, so
+        # the reference is mapped through it before the sets are compared, and
+        # a mapping that resolves nothing is itself an error — a silent pass is
+        # what this check exists to prevent.
         if args.soft_labels:
             soft_accs = set(load_soft_labels(args.soft_labels))
-            ref_accs = set()
+            dp_to_acc = {}
+            for e in entries:
+                dp, acc = e.get("disprot_id"), (e.get("acc") or "").strip()
+                if dp and acc:
+                    dp_to_acc[dp] = acc
+            ref_accs, ref_seqs, unmapped = set(), set(), set()
             for r in (args.caid_reference or []):
-                if r and os.path.isfile(r):
-                    with open(r) as fh:
-                        for line in fh:
-                            if line.startswith(">"):
-                                ref_accs.add(line[1:].split()[0])
-            surviving = {row.get("uniprot_acc") for row in rows}
-            still_here = soft_accs & ref_accs & surviving
-            print(f"soft-label leak check: {len(soft_accs & ref_accs)} cache/"
-                  f"reference accessions before the filter, "
-                  f"{len(still_here)} surviving it")
+                if not (r and os.path.isfile(r)):
+                    continue
+                for t in parse_caid_reference_fasta(r):
+                    ref_seqs.add(t["sequence"])
+                    acc = dp_to_acc.get(t["id"])
+                    if acc:
+                        ref_accs.add(acc)
+                    elif t["id"].startswith("DP"):
+                        unmapped.add(t["id"])
+                    else:
+                        ref_accs.add(t["id"])      # already an accession
+            if not ref_accs:
+                raise SystemExit(
+                    "soft-label leak check resolved no benchmark accessions: "
+                    f"{len(unmapped)} reference ids could not be mapped through "
+                    "DisProt. A check that cannot fail is worse than none.")
+            # Sequence is namespace-free, so it catches a target whose id does
+            # not map at all — the residual the id join cannot see.
+            still_here = {row.get("uniprot_acc") for row in rows
+                          if row.get("uniprot_acc") in soft_accs
+                          and (row.get("uniprot_acc") in ref_accs
+                               or row.get("sequence") in ref_seqs)}
+            print(f"soft-label leak check: {len(soft_accs & ref_accs)} of "
+                  f"{len(ref_accs)} benchmark accessions carry a soft target "
+                  f"before the filter, {len(still_here)} survive it"
+                  + (f" ({len(unmapped)} reference ids unmapped)"
+                     if unmapped else ""))
             if still_here:
                 raise SystemExit(
                     f"a benchmark accession carrying a soft target survived "
