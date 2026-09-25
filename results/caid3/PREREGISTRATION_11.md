@@ -131,6 +131,38 @@ cache intersection (141, expected and harmless) and the post-filter intersection
 (must be 0). The first draft would have reported a passing check on the wrong
 set.
 
+**And then the implementation made the same class of mistake, one level down.**
+The check as first written intersected the reference ids with the cache keys
+directly. CAID reference FASTAs are keyed by DisProt id (`DP02732`); the cache
+is keyed by UniProt accession (`A0A003`). The two sets are disjoint for every
+possible input, so the check printed
+
+    soft-label leak check: 0 cache/reference accessions before the filter, 0 surviving it
+
+in the run of 31214999 — and *would have printed the same line* on a run whose
+training set was entirely benchmark targets. It is reported here rather than
+quietly repaired because the "0 before the filter" is visibly inconsistent with
+the 141 recorded two paragraphs above, and that inconsistency is the only reason
+it was caught.
+
+The check now maps the reference through DisProt, which carries both ids,
+compares sequences as well as accessions (sequence belongs to no namespace, so
+it covers what the id join cannot resolve), and reports whether it resolved any
+benchmark accession at all — a run whose check resolves nothing now aborts
+instead of passing. `tests/test_soft_labels.py::TestTheLeakCheckCanActuallyFail`
+pins all four properties, and one of its cases is a surviving benchmark row with
+a soft target that the old logic scored as clean.
+
+**What this does and does not change about the run in flight.** Nothing about
+the training. The leak *prevention* is `drop_caid_targets`, which is unchanged,
+separately regression-tested, and removed 2,039 of 27,412 proteins (530 exact
+id/sequence hits) in this very run. What was missing was the *evidence* that it
+left no residual, so the evidence is produced separately by
+`rockfish/verify_soft_label_leak.py`, which replays the same inputs through the
+same filter on CPU and reports both numbers. Its result is recorded below, and
+the arms are not scored until it passes. Restarting nine hours of GPU time to
+re-run a verification that can be run beside it would have been the wrong trade.
+
 ## Stopping rule
 
 Scored once, under the floors above. No weight sweep, no threshold on how much
