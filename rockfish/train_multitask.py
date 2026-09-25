@@ -714,6 +714,12 @@ def main(argv=None) -> int:
     )
     ap.add_argument("--leak-identity", type=float, default=0.40)
     ap.add_argument(
+        "--soft-labels", default=None,
+        help="JSON from rockfish/build_soft_labels.py. Replaces the hard "
+             "Disorder-PDB target with the fraction of covering structures "
+             "calling each residue missing, on residues with at least two. "
+             "PREREGISTRATION_11.")
+    ap.add_argument(
         "--holdout-fraction", type=float, default=HOLDOUT_FRACTION,
         help="Share of proteins reserved for the fixed validation set, chosen "
              "by a hash of the sequence so every run holds out the same "
