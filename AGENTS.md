@@ -157,6 +157,14 @@ Related invariants, all regression-tested:
   also blocks writing the traceback. The 650M model is 2.6 GB and 3B is 5.7 GB,
   so two backbones alone exceed a fifth of the quota:
   `export TORCH_HOME=/scratch4/<PI>/<user>_disordernet/torch_home`.
+  Belt and braces, because the export is easy to forget and `_common.sh`
+  defaults to `$HOME/.cache/torch`: make that path a **symlink** into the same
+  scratch directory, so the default resolves off home even when a submitter
+  omits the variable. `~/.cache/torch -> /scratch4/sfried3/jbeale3_disordernet/torch_home`
+  is in place and already holds the 35M/150M/650M checkpoints (3.2 GB), so a
+  job that forgets the export neither grows home nor re-downloads. Do not
+  `rm -rf` that path to reclaim space — deleting the link once sent 3.2 GB of
+  fresh downloads straight back into `$HOME`.
 - **"No GPU detected" has two distinct causes here; check the banner.** Both
   present identically — the job dies in `setup_environment` about seven seconds
   in while `sacct` reports `gres/gpu:a100=1` allocated. Compare the `ENV_DIR=`
