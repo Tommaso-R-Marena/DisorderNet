@@ -167,8 +167,18 @@ larger and less curated — and it is the quantity this run acts on.
 
 | arm | job | workdir |
 |---|---:|---|
-| `mt_soft` (`--soft-labels`) | 31210553 | `multitask_soft` |
-| `mt_hard` (control) | 31210554 | `multitask_hard` |
+| `mt_soft` (`--soft-labels`) | 31214999 | `multitask_soft` |
+| `mt_hard` (control) | 31215000 | `multitask_hard` |
+
+The first submission of this pair (31210553 / 31210554) died 33 s in: the
+`--soft-labels` flag was documented and threaded through `train_multitask.py`
+but never registered in `argparse`, so both arms rejected it as an unknown
+argument. The flag is now registered and the registration is asserted at import,
+and `--help` was checked on both the local and the cluster copy before
+resubmitting. The soft arm's log confirms the target was actually used —
+`17,400 proteins, 6,053,995 residues, 725,999 strictly between 0 and 1` — which
+is the line whose absence would otherwise have let a silently-hard run be
+reported as the soft arm.
 
 Identical backbone, folds, epochs, structure dimension, task set, references and
 holdout salt; submitted in the same window. `mt_control` is retained as a
