@@ -104,6 +104,15 @@ Related invariants, all regression-tested:
 - Isotonic calibration must be fitted **leave-one-fold-out**. Temperature scaling
   is strictly monotone so it cannot move AUC/AP; isotonic is not and does.
 - Threshold-dependent metrics (f1/mcc) must take the cut-point from other folds.
+- **Never compare protein ids across namespaces.** CAID references are keyed by
+  DisProt id (`DP02732`), MobiDB rows by `MB:`-prefixed id plus UniProt
+  accession (`A1C3L3`). A set intersection between the two is empty for every
+  input, so a check built on it passes vacuously and a filter built on it does
+  nothing. Both happened: the soft-label leak check printed "0 surviving" on
+  every run, and `drop_caid_targets`' exact step could not fire for 21,966 of
+  22,914 proteins, which let one benchmark protein into training. Go through
+  `rockfish.train_multitask.disprot_accession_map`, and write the test so it
+  would fail on the pre-fix code.
 
 ### Homology clustering (`colab/homology_splits.py`)
 - **`difflib.SequenceMatcher` must be constructed with `autojunk=False`.** With
@@ -138,6 +147,11 @@ Related invariants, all regression-tested:
 - **QOS caps:** `express_queue` is 4 CPUs/job; `shared` is 32; `qos_gpu` allows
   10 GPUs per user. GPU jobs need `-A sfried3_gpu --qos=qos_gpu`; CPU jobs use
   `-A sfried3` with no qos.
+- **Do not rsync a module that a running job imports.** Python reads source
+  lazily for tracebacks, so a job that crashes after the sync prints the *new*
+  file's lines against the *old* code's line numbers. `31214999`'s traceback
+  pointed at `structure_batch` and `AdamW` for a crash in `roc_auc_score`. Sync
+  to a separate copy, or read only the library frames of such a traceback.
 - **Never run compute on a login node.** Even the pytest suite goes to `shared`
   (it takes ~2.5 min there).
 - **Sync one directory per `rsync`.** `rsync -az tests/ colab/ host:dn_rigor/`
