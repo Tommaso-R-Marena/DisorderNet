@@ -1,0 +1,604 @@
+{
+  "disorder_pdb: DN-rank vs PUNCH2": {
+    "n_targets": 233,
+    "wins": 130,
+    "mean": 0.01850332290404845,
+    "sd": 0.08259472481687345,
+    "ci": [
+      0.00828531992571853,
+      0.029507147581077465
+    ],
+    "p_bootstrap": 0.00039996000399960006,
+    "p_ttest": 0.0007407748977354027,
+    "p_wilcoxon": 0.00017812844277186884
+  },
+  "disorder_pdb: DN-rank vs AlphaFold-rsa": {
+    "n_targets": 233,
+    "wins": 143,
+    "mean": 0.033197731456883976,
+    "sd": 0.10835504111624049,
+    "ci": [
+      0.02005452116549917,
+      0.04798036406840159
+    ],
+    "p_bootstrap": 0.00019998000199980003,
+    "p_ttest": 4.950782539982395e-06,
+    "p_wilcoxon": 6.909831385450922e-08
+  },
+  "disorder_pdb: Ensemble vs PUNCH2": {
+    "n_targets": 233,
+    "wins": 138,
+    "mean": 0.01850959511912298,
+    "sd": 0.08172167883885162,
+    "ci": [
+      0.008414805811429012,
+      0.029309057778062208
+    ],
+    "p_bootstrap": 0.00019998000199980003,
+    "p_ttest": 0.0006488840991010842,
+    "p_wilcoxon": 5.52577896700765e-06
+  },
+  "disorder_pdb: Ensemble vs AlphaFold-rsa": {
+    "n_targets": 233,
+    "wins": 145,
+    "mean": 0.033204003671958505,
+    "sd": 0.10833140996664109,
+    "ci": [
+      0.0200242732182316,
+      0.04772924441224295
+    ],
+    "p_bootstrap": 0.00019998000199980003,
+    "p_ttest": 4.9089785518471004e-06,
+    "p_wilcoxon": 1.9412247944764424e-08
+  },
+  "disorder_pdb: DN-pbias vs PUNCH2": {
+    "n_targets": 233,
+    "wins": 131,
+    "mean": 0.018949909647409172,
+    "sd": 0.0872502973311593,
+    "ci": [
+      0.008235037644788265,
+      0.030643990352604643
+    ],
+    "p_bootstrap": 0.00019998000199980003,
+    "p_ttest": 0.0010623929911759325,
+    "p_wilcoxon": 0.00010941878780738639
+  },
+  "disorder_pdb: DN-pbias vs AlphaFold-rsa": {
+    "n_targets": 233,
+    "wins": 144,
+    "mean": 0.033644318200244695,
+    "sd": 0.10992239758795427,
+    "ci": [
+      0.02036671141991085,
+      0.04862509507053404
+    ],
+    "p_bootstrap": 0.00019998000199980003,
+    "p_ttest": 5.054742933427467e-06,
+    "p_wilcoxon": 6.629398374387075e-09
+  },
+  "disorder_nox: DN-rank vs PUNCH2": {
+    "n_targets": 178,
+    "wins": 96,
+    "mean": 0.044315970331717934,
+    "sd": 0.19201783522524074,
+    "ci": [
+      0.017516941524932054,
+      0.07283093667805451
+    ],
+    "p_bootstrap": 0.0017998200179982,
+    "p_ttest": 0.0024070705946766576,
+    "p_wilcoxon": 0.04405254303598937
+  },
+  "disorder_nox: DN-rank vs AlphaFold-rsa": {
+    "n_targets": 178,
+    "wins": 89,
+    "mean": 0.049438914391557086,
+    "sd": 0.21182243949885818,
+    "ci": [
+      0.019110823957882193,
+      0.08113091520803246
+    ],
+    "p_bootstrap": 0.0013998600139986002,
+    "p_ttest": 0.002153719228008176,
+    "p_wilcoxon": 0.059647919225332906
+  },
+  "disorder_nox: Ensemble vs PUNCH2": {
+    "n_targets": 178,
+    "wins": 96,
+    "mean": 0.04957138395680947,
+    "sd": 0.16942192234754372,
+    "ci": [
+      0.025441766687545803,
+      0.07500805379267621
+    ],
+    "p_bootstrap": 0.00019998000199980003,
+    "p_ttest": 0.00013454825552788072,
+    "p_wilcoxon": 0.0031458477980939115
+  },
+  "disorder_nox: Ensemble vs AlphaFold-rsa": {
+    "n_targets": 178,
+    "wins": 94,
+    "mean": 0.05469432801664863,
+    "sd": 0.19899762823239742,
+    "ci": [
+      0.026127060637427188,
+      0.0848805904049892
+    ],
+    "p_bootstrap": 0.00039996000399960006,
+    "p_ttest": 0.00032441826515652324,
+    "p_wilcoxon": 0.010393128438181637
+  },
+  "disorder_nox: DN-pbias vs PUNCH2": {
+    "n_targets": 178,
+    "wins": 92,
+    "mean": 0.05243173123918802,
+    "sd": 0.192156341011634,
+    "ci": [
+      0.02558915264207564,
+      0.0817925755491469
+    ],
+    "p_bootstrap": 0.00019998000199980003,
+    "p_ttest": 0.0003571482426185647,
+    "p_wilcoxon": 0.04195643790723889
+  },
+  "disorder_nox: DN-pbias vs AlphaFold-rsa": {
+    "n_targets": 178,
+    "wins": 90,
+    "mean": 0.057554675299027185,
+    "sd": 0.2142682590350979,
+    "ci": [
+      0.026522452955758866,
+      0.09016271144357765
+    ],
+    "p_bootstrap": 0.00019998000199980003,
+    "p_ttest": 0.00043777541737796395,
+    "p_wilcoxon": 0.051911953295175915
+  },
+  "binding: DN-rank vs PUNCH2": {
+    "n_targets": 49,
+    "wins": 35,
+    "mean": 0.11696965283012845,
+    "sd": 0.3007247195901052,
+    "ci": [
+      0.03542571018873528,
+      0.2034522867540309
+    ],
+    "p_bootstrap": 0.003999600039996,
+    "p_ttest": 0.00899905702841113,
+    "p_wilcoxon": 0.008583404380164694
+  },
+  "binding: DN-rank vs AlphaFold-rsa": {
+    "n_targets": 49,
+    "wins": 32,
+    "mean": 0.10340049103457248,
+    "sd": 0.3088998840800474,
+    "ci": [
+      0.01906290047267246,
+      0.1904840345712482
+    ],
+    "p_bootstrap": 0.017798220177982202,
+    "p_ttest": 0.023312065947038513,
+    "p_wilcoxon": 0.02239138563494336
+  },
+  "binding: Ensemble vs PUNCH2": {
+    "n_targets": 49,
+    "wins": 33,
+    "mean": 0.14345271490907863,
+    "sd": 0.26676748296129615,
+    "ci": [
+      0.07280330280356835,
+      0.22153353252597824
+    ],
+    "p_bootstrap": 0.00019998000199980003,
+    "p_ttest": 0.0004554367347652272,
+    "p_wilcoxon": 0.0010259586218275274
+  },
+  "binding: Ensemble vs AlphaFold-rsa": {
+    "n_targets": 49,
+    "wins": 30,
+    "mean": 0.12988355311352265,
+    "sd": 0.2704854875580008,
+    "ci": [
+      0.05696468459627597,
+      0.20754224651307254
+    ],
+    "p_bootstrap": 0.00039996000399960006,
+    "p_ttest": 0.0015292639567854583,
+    "p_wilcoxon": 0.002020892944525343
+  },
+  "binding: DN-pbias vs PUNCH2": {
+    "n_targets": 49,
+    "wins": 34,
+    "mean": 0.11762506807211805,
+    "sd": 0.2888638527816965,
+    "ci": [
+      0.04001890480904547,
+      0.1998328081744314
+    ],
+    "p_bootstrap": 0.0027997200279972004,
+    "p_ttest": 0.006417117859908102,
+    "p_wilcoxon": 0.0068904398259697075
+  },
+  "binding: DN-pbias vs AlphaFold-rsa": {
+    "n_targets": 49,
+    "wins": 30,
+    "mean": 0.10405590627656208,
+    "sd": 0.29549478938505624,
+    "ci": [
+      0.02270775483775022,
+      0.18773304307206154
+    ],
+    "p_bootstrap": 0.0117988201179882,
+    "p_ttest": 0.017330874030101133,
+    "p_wilcoxon": 0.010313875523515037
+  },
+  "binding_idr: DN-rank vs PUNCH2": {
+    "n_targets": 42,
+    "wins": 27,
+    "mean": 0.22529849352852918,
+    "sd": 0.46475686250452747,
+    "ci": [
+      0.08394303926879133,
+      0.36223998634939913
+    ],
+    "p_bootstrap": 0.0011998800119988001,
+    "p_ttest": 0.0031156891946502127,
+    "p_wilcoxon": 0.0041289947785116965
+  },
+  "binding_idr: DN-rank vs AlphaFold-rsa": {
+    "n_targets": 42,
+    "wins": 30,
+    "mean": 0.2366940751652024,
+    "sd": 0.4652536709999589,
+    "ci": [
+      0.09692624210594919,
+      0.37245271708313676
+    ],
+    "p_bootstrap": 0.0005999400059994001,
+    "p_ttest": 0.002023997805863927,
+    "p_wilcoxon": 0.0024799531054515997
+  },
+  "binding_idr: Ensemble vs PUNCH2": {
+    "n_targets": 42,
+    "wins": 27,
+    "mean": 0.22529849352852918,
+    "sd": 0.46475686250452747,
+    "ci": [
+      0.08394303926879133,
+      0.36223998634939913
+    ],
+    "p_bootstrap": 0.0011998800119988001,
+    "p_ttest": 0.0031156891946502127,
+    "p_wilcoxon": 0.0041289947785116965
+  },
+  "binding_idr: Ensemble vs AlphaFold-rsa": {
+    "n_targets": 42,
+    "wins": 30,
+    "mean": 0.2366940751652024,
+    "sd": 0.4652536709999589,
+    "ci": [
+      0.09692624210594919,
+      0.37245271708313676
+    ],
+    "p_bootstrap": 0.0005999400059994001,
+    "p_ttest": 0.002023997805863927,
+    "p_wilcoxon": 0.0024799531054515997
+  },
+  "binding_idr: DN-pbias vs PUNCH2": {
+    "n_targets": 42,
+    "wins": 28,
+    "mean": 0.2559373157319383,
+    "sd": 0.44487221066492544,
+    "ci": [
+      0.1251254957943803,
+      0.3886294319045785
+    ],
+    "p_bootstrap": 0.00019998000199980003,
+    "p_ttest": 0.0005832140935039078,
+    "p_wilcoxon": 0.001253627802725532
+  },
+  "binding_idr: DN-pbias vs AlphaFold-rsa": {
+    "n_targets": 42,
+    "wins": 28,
+    "mean": 0.2673328973686115,
+    "sd": 0.42697426053633636,
+    "ci": [
+      0.1392618080452276,
+      0.39174592734467634
+    ],
+    "p_bootstrap": 0.00019998000199980003,
+    "p_ttest": 0.00021692960914759712,
+    "p_wilcoxon": 0.0006389273252959228
+  },
+  "linker: DN-rank vs PUNCH2": {
+    "n_targets": 31,
+    "wins": 29,
+    "mean": 0.1349854783807906,
+    "sd": 0.18379917805591187,
+    "ci": [
+      0.07827563771783075,
+      0.20459576874566932
+    ],
+    "p_bootstrap": 0.00019998000199980003,
+    "p_ttest": 0.00029876990214678354,
+    "p_wilcoxon": 8.419156074523926e-07
+  },
+  "linker: DN-rank vs AlphaFold-rsa": {
+    "n_targets": 31,
+    "wins": 28,
+    "mean": 0.13639796540096139,
+    "sd": 0.1874298627031936,
+    "ci": [
+      0.0768348663142586,
+      0.20781661523179532
+    ],
+    "p_bootstrap": 0.00019998000199980003,
+    "p_ttest": 0.0003310974989202238,
+    "p_wilcoxon": 7.006339728832245e-06
+  },
+  "linker: Ensemble vs PUNCH2": {
+    "n_targets": 31,
+    "wins": 29,
+    "mean": 0.13639083143860725,
+    "sd": 0.18424923592854028,
+    "ci": [
+      0.07887434751596216,
+      0.20598726350512556
+    ],
+    "p_bootstrap": 0.00019998000199980003,
+    "p_ttest": 0.00027312854296173756,
+    "p_wilcoxon": 1.1743977665901184e-06
+  },
+  "linker: Ensemble vs AlphaFold-rsa": {
+    "n_targets": 31,
+    "wins": 27,
+    "mean": 0.13780331845877805,
+    "sd": 0.1924772202714748,
+    "ci": [
+      0.0762352753354491,
+      0.21062145128011314
+    ],
+    "p_bootstrap": 0.00019998000199980003,
+    "p_ttest": 0.0003965794581163327,
+    "p_wilcoxon": 2.507772296667099e-05
+  },
+  "linker: DN-pbias vs PUNCH2": {
+    "n_targets": 31,
+    "wins": 24,
+    "mean": 0.10621441790794728,
+    "sd": 0.21244664519570264,
+    "ci": [
+      0.03694283585912607,
+      0.18465815249871922
+    ],
+    "p_bootstrap": 0.0017998200179982,
+    "p_ttest": 0.009213828160949279,
+    "p_wilcoxon": 0.0017160577699542046
+  },
+  "linker: DN-pbias vs AlphaFold-rsa": {
+    "n_targets": 31,
+    "wins": 24,
+    "mean": 0.10762690492811805,
+    "sd": 0.23675244514983543,
+    "ci": [
+      0.028778397291748862,
+      0.19448423064643622
+    ],
+    "p_bootstrap": 0.008399160083991601,
+    "p_ttest": 0.016849084937582626,
+    "p_wilcoxon": 0.006217258051037788
+  },
+  "_holm": {
+    "disorder_pdb: DN-pbias vs AlphaFold-rsa": {
+      "p_raw": 6.629398374387075e-09,
+      "p_adjusted": 1.9888195123161224e-07,
+      "significant": true,
+      "rank": 1,
+      "n_comparisons": 30
+    },
+    "disorder_pdb: Ensemble vs AlphaFold-rsa": {
+      "p_raw": 1.9412247944764424e-08,
+      "p_adjusted": 5.629551903981683e-07,
+      "significant": true,
+      "rank": 2,
+      "n_comparisons": 30
+    },
+    "disorder_pdb: DN-rank vs AlphaFold-rsa": {
+      "p_raw": 6.909831385450922e-08,
+      "p_adjusted": 1.934752787926258e-06,
+      "significant": true,
+      "rank": 3,
+      "n_comparisons": 30
+    },
+    "linker: DN-rank vs PUNCH2": {
+      "p_raw": 8.419156074523926e-07,
+      "p_adjusted": 2.27317214012146e-05,
+      "significant": true,
+      "rank": 4,
+      "n_comparisons": 30
+    },
+    "linker: Ensemble vs PUNCH2": {
+      "p_raw": 1.1743977665901184e-06,
+      "p_adjusted": 3.053434193134308e-05,
+      "significant": true,
+      "rank": 5,
+      "n_comparisons": 30
+    },
+    "disorder_pdb: Ensemble vs PUNCH2": {
+      "p_raw": 5.52577896700765e-06,
+      "p_adjusted": 0.00013814447417519123,
+      "significant": true,
+      "rank": 6,
+      "n_comparisons": 30
+    },
+    "linker: DN-rank vs AlphaFold-rsa": {
+      "p_raw": 7.006339728832245e-06,
+      "p_adjusted": 0.00016815215349197388,
+      "significant": true,
+      "rank": 7,
+      "n_comparisons": 30
+    },
+    "linker: Ensemble vs AlphaFold-rsa": {
+      "p_raw": 2.507772296667099e-05,
+      "p_adjusted": 0.0005767876282334328,
+      "significant": true,
+      "rank": 8,
+      "n_comparisons": 30
+    },
+    "disorder_pdb: DN-pbias vs PUNCH2": {
+      "p_raw": 0.00010941878780738639,
+      "p_adjusted": 0.0024072133317625003,
+      "significant": true,
+      "rank": 9,
+      "n_comparisons": 30
+    },
+    "disorder_pdb: DN-rank vs PUNCH2": {
+      "p_raw": 0.00017812844277186884,
+      "p_adjusted": 0.003740697298209246,
+      "significant": true,
+      "rank": 10,
+      "n_comparisons": 30
+    },
+    "binding_idr: DN-pbias vs AlphaFold-rsa": {
+      "p_raw": 0.0006389273252959228,
+      "p_adjusted": 0.012778546505918455,
+      "significant": true,
+      "rank": 11,
+      "n_comparisons": 30
+    },
+    "binding: Ensemble vs PUNCH2": {
+      "p_raw": 0.0010259586218275274,
+      "p_adjusted": 0.01949321381472302,
+      "significant": true,
+      "rank": 12,
+      "n_comparisons": 30
+    },
+    "binding_idr: DN-pbias vs PUNCH2": {
+      "p_raw": 0.001253627802725532,
+      "p_adjusted": 0.022565300449059578,
+      "significant": true,
+      "rank": 13,
+      "n_comparisons": 30
+    },
+    "linker: DN-pbias vs PUNCH2": {
+      "p_raw": 0.0017160577699542046,
+      "p_adjusted": 0.029172982089221478,
+      "significant": true,
+      "rank": 14,
+      "n_comparisons": 30
+    },
+    "binding: Ensemble vs AlphaFold-rsa": {
+      "p_raw": 0.002020892944525343,
+      "p_adjusted": 0.03233428711240549,
+      "significant": true,
+      "rank": 15,
+      "n_comparisons": 30
+    },
+    "binding_idr: DN-rank vs AlphaFold-rsa": {
+      "p_raw": 0.0024799531054515997,
+      "p_adjusted": 0.037199296581774,
+      "significant": true,
+      "rank": 16,
+      "n_comparisons": 30
+    },
+    "binding_idr: Ensemble vs AlphaFold-rsa": {
+      "p_raw": 0.0024799531054515997,
+      "p_adjusted": 0.037199296581774,
+      "significant": true,
+      "rank": 17,
+      "n_comparisons": 30
+    },
+    "disorder_nox: Ensemble vs PUNCH2": {
+      "p_raw": 0.0031458477980939115,
+      "p_adjusted": 0.04089602137522085,
+      "significant": true,
+      "rank": 18,
+      "n_comparisons": 30
+    },
+    "binding_idr: DN-rank vs PUNCH2": {
+      "p_raw": 0.0041289947785116965,
+      "p_adjusted": 0.04954793734214036,
+      "significant": true,
+      "rank": 19,
+      "n_comparisons": 30
+    },
+    "binding_idr: Ensemble vs PUNCH2": {
+      "p_raw": 0.0041289947785116965,
+      "p_adjusted": 0.04954793734214036,
+      "significant": true,
+      "rank": 20,
+      "n_comparisons": 30
+    },
+    "linker: DN-pbias vs AlphaFold-rsa": {
+      "p_raw": 0.006217258051037788,
+      "p_adjusted": 0.062172580510377884,
+      "significant": false,
+      "rank": 21,
+      "n_comparisons": 30
+    },
+    "binding: DN-pbias vs PUNCH2": {
+      "p_raw": 0.0068904398259697075,
+      "p_adjusted": 0.062172580510377884,
+      "significant": false,
+      "rank": 22,
+      "n_comparisons": 30
+    },
+    "binding: DN-rank vs PUNCH2": {
+      "p_raw": 0.008583404380164694,
+      "p_adjusted": 0.06866723504131755,
+      "significant": false,
+      "rank": 23,
+      "n_comparisons": 30
+    },
+    "binding: DN-pbias vs AlphaFold-rsa": {
+      "p_raw": 0.010313875523515037,
+      "p_adjusted": 0.07219712866460526,
+      "significant": false,
+      "rank": 24,
+      "n_comparisons": 30
+    },
+    "disorder_nox: Ensemble vs AlphaFold-rsa": {
+      "p_raw": 0.010393128438181637,
+      "p_adjusted": 0.07219712866460526,
+      "significant": false,
+      "rank": 25,
+      "n_comparisons": 30
+    },
+    "binding: DN-rank vs AlphaFold-rsa": {
+      "p_raw": 0.02239138563494336,
+      "p_adjusted": 0.11195692817471681,
+      "significant": false,
+      "rank": 26,
+      "n_comparisons": 30
+    },
+    "disorder_nox: DN-pbias vs PUNCH2": {
+      "p_raw": 0.04195643790723889,
+      "p_adjusted": 0.16782575162895555,
+      "significant": false,
+      "rank": 27,
+      "n_comparisons": 30
+    },
+    "disorder_nox: DN-rank vs PUNCH2": {
+      "p_raw": 0.04405254303598937,
+      "p_adjusted": 0.16782575162895555,
+      "significant": false,
+      "rank": 28,
+      "n_comparisons": 30
+    },
+    "disorder_nox: DN-pbias vs AlphaFold-rsa": {
+      "p_raw": 0.051911953295175915,
+      "p_adjusted": 0.16782575162895555,
+      "significant": false,
+      "rank": 29,
+      "n_comparisons": 30
+    },
+    "disorder_nox: DN-rank vs AlphaFold-rsa": {
+      "p_raw": 0.059647919225332906,
+      "p_adjusted": 0.16782575162895555,
+      "significant": false,
+      "rank": 30,
+      "n_comparisons": 30
+    }
+  }
+}

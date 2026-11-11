@@ -16,12 +16,13 @@ import hashlib
 import json
 import math
 import os
+import tempfile
 import subprocess
 import sys
 import time
 from collections import Counter
 from dataclasses import dataclass, field, asdict
-from typing import Callable, Iterator, Optional
+from typing import Callable, ClassVar, Iterator, Optional
 
 import numpy as np
 import requests
@@ -326,7 +327,15 @@ class TrainConfig:
     use_hallucination_weighting: bool = True
     hallucination_weight: float = 3.0
     high_plddt_threshold: float = 70.0
-    af_plddt_cache_dir: str = "af_plddt_cache"
+    # Absolute by default when DISORDERNET_PLDDT_CACHE is set. Two call sites
+    # resolve this differently — CV uses it relative to the CWD, postprocess joins
+    # it onto checkpoint_dir — so a relative value means the cache built during CV
+    # is not found later and every AlphaFold entry is re-fetched over HTTP, on GPU
+    # walltime, once per run. An absolute path makes os.path.join a no-op at both
+    # sites and lets main + clean share one cache.
+    af_plddt_cache_dir: str = field(
+        default_factory=lambda: os.environ.get("DISORDERNET_PLDDT_CACHE", "af_plddt_cache")
+    )
 
     # Train-time structure channel (novel vs sequence-only SOTA)
     use_plddt_features: bool = False
@@ -337,12 +346,40 @@ class TrainConfig:
     function_loss_weight: float = 0.35
     function_on_disordered_only: bool = True
 
+    # Lite track (profile "lite"): frozen backbone + small dilated head.
+    # Rationale in colab/lite_head.py — 69.9M trainable parameters on ~1M
+    # evidenced residues is a capacity/data mismatch, and the LoRA model loses to
+    # a physics GBDT (0.7454 vs 0.7804) as a result.
+    frozen_backbone: bool = False  # ESM runs under no_grad; only the head trains
+    lite_hidden: int = 256
+    lite_blocks: int = 4
+
     # Set automatically by setup_environment()
     device: torch.device = field(default_factory=lambda: torch.device("cpu"))
     amp_dtype: torch.dtype = torch.float16
     pin_memory: bool = False
     gpu_name: str = "cpu"
     vram_gb: float = 0.0
+
+    HEAD_TYPES: ClassVar[tuple[str, ...]] = ("cnn", "sota", "lite")
+
+    def __post_init__(self) -> None:
+        # Unknown head types used to fall through to the CNN head, so a typo in a
+        # profile or a --head-type flag silently trained a different model than
+        # the one being reported.
+        if self.head_type not in self.HEAD_TYPES:
+            raise ValueError(
+                f"Unknown head_type {self.head_type!r}. Choose: {list(self.HEAD_TYPES)}"
+            )
+        if self.frozen_backbone:
+            # A frozen backbone means exactly that: no adapters, no unfrozen tail.
+            # Enforced rather than assumed so a profile override cannot produce a
+            # run that reports "frozen" while training 70M parameters.
+            self.lora_layers = 0
+            self.unfreeze_last_layers = 0
+            # Checkpointing only trades compute for activation memory on the
+            # backward pass, and there is no backward pass through a frozen ESM.
+            self.use_gradient_checkpointing = False
 
     def effective_batch(self) -> int:
         return self.batch_size * self.accum_steps
@@ -547,6 +584,59 @@ class TrainConfig:
                 "use_hallucination_weighting": False,
                 "use_plddt_features": False,
             },
+            # lite — the capacity/data hypothesis, tested directly.
+            #
+            # ultra trains 69.9M parameters on ~1M evidenced residues from 2,340
+            # proteins under ten simultaneous regularisers, reaches train loss
+            # 0.069 against validation AUC 0.66, and loses to a physics GBDT
+            # (0.7454 vs 0.7804). If that gap is overfitting rather than a weak
+            # backbone, freezing ESM and training ~2M head parameters on the same
+            # data should close some of it. Precedent: SETH, a frozen ProtT5 plus
+            # a CNN, reaches 0.830 on CAID with no fine-tuning at all.
+            #
+            # Everything optional is off. Each regulariser in ultra was tuned
+            # while the evaluation was leaking, so none has earned its place
+            # against the measured 0.023 AUC noise floor; they get added back one
+            # at a time, if and when they beat it.
+            "lite": {
+                "frozen_backbone": True,
+                "head_type": "lite",
+                "lite_hidden": 256,
+                "lite_blocks": 4,
+                # No backward pass through ESM, so activations are cheap and the
+                # batch can be far larger than ultra's 2x8.
+                "batch_size": 16,
+                "accum_steps": 1,
+                "num_epochs": 30,
+                "lr_head": 1e-3,
+                "weight_decay": 1e-2,
+                "patience": 8,
+                # Mix widely: with the backbone frozen, which depth carries the
+                # signal is the one thing left to learn about it.
+                "esm_fusion_layers": 12,
+                "fusion_type": "softmax",
+                "physico_dim": 64,
+                "use_physico_features": True,
+                "use_rich_features": False,
+                "head_dropout": 0.1,
+                # Plain weighted BCE plus the boundary term the CAID segment
+                # metrics actually reward. Nothing else.
+                "use_focal_loss": False,
+                "boundary_weight": 2.0,
+                "use_dice_loss": False,
+                "use_tversky_loss": False,
+                "use_rdrop": False,
+                "use_swa": False,
+                "use_ema": False,
+                "label_smoothing": 0.0,
+                "use_v6_distill": False,
+                "use_hallucination_weighting": False,
+                "use_plddt_features": False,
+                "early_stop_mode": "auc",
+                "split_method": "homology",
+                "homology_min_identity": 0.40,
+                "compact_checkpoints": True,
+            },
         }
         # ultra_clean = ultra capacity without structure-training contamination
         if profile == "ultra_clean":
@@ -662,6 +752,10 @@ def setup_environment(cfg: TrainConfig) -> TrainConfig:
 
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
+    # Ablations need reproducible runs more than they need autotuned kernels:
+    # without this the seed spread (~0.023 AUC) swamps the effects being measured.
+    if os.environ.get("DISORDERNET_DETERMINISTIC", "") in ("1", "true", "True"):
+        cfg.deterministic = True
     if cfg.deterministic:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
@@ -925,6 +1019,8 @@ def print_training_config_summary(cfg: TrainConfig, proteins: Optional[list] = N
     print(f"  Profile            : {getattr(cfg, '_profile_name', 'custom')}")
     print(f"  ESM backbone       : {getattr(cfg, 'esm_backbone', '650M')} "
           f"(dim={getattr(cfg, 'esm_embed_dim', 1280)})")
+    if getattr(cfg, "frozen_backbone", False):
+        print("  Backbone           : FROZEN (feature extractor, no_grad, 0 trainable)")
     print(f"  LoRA rank / layers : {cfg.lora_rank} / {cfg.lora_layers}")
     print(f"  Epochs / patience  : {cfg.num_epochs} / {cfg.patience}")
     print(f"  Batch × accum      : {cfg.batch_size} × {cfg.accum_steps} "
@@ -1200,7 +1296,12 @@ class DisorderNetGPU(nn.Module):
                 self.esm.set_gradient_checkpointing(True)
 
         n_layers = len(self.esm.layers)
-        start = n_layers - cfg.lora_layers
+        # Clamp: asking for more LoRA layers than the backbone has made `start`
+        # negative, and range(-8, 12) yields -8..-1 before 0..11 — so on a small
+        # backbone the deeper layers were silently wrapped twice, stacking two
+        # adapters on one projection. It only surfaced as an IndexError when the
+        # negative index also ran past the front of the stack.
+        start = max(0, n_layers - cfg.lora_layers)
         self._lora_modules: list[LoRALinear] = []
         proj_names = ["q_proj", "v_proj"]
         if cfg.lora_on_k:
@@ -1232,7 +1333,7 @@ class DisorderNetGPU(nn.Module):
 
         self._esm_tail_params: list[nn.Parameter] = []
         if cfg.unfreeze_last_layers > 0:
-            tail_start = n_layers - cfg.unfreeze_last_layers
+            tail_start = max(0, n_layers - cfg.unfreeze_last_layers)
             for layer_idx in range(tail_start, n_layers):
                 layer = self.esm.layers[layer_idx]
                 for mod_name in ("self_attn_layer_norm", "final_layer_norm"):
@@ -1257,6 +1358,7 @@ class DisorderNetGPU(nn.Module):
         else:
             self.layer_fusion = ESMLayerFusion(fusion_n, dim=esm_dim)
 
+        self.frozen_backbone = bool(getattr(cfg, "frozen_backbone", False))
         self.use_rich = cfg.use_rich_features
         self.use_physico = cfg.use_physico_features and not self.use_rich
         self.use_plddt = cfg.use_plddt_features
@@ -1288,6 +1390,14 @@ class DisorderNetGPU(nn.Module):
                 dropout=cfg.head_dropout,
                 n_transformer_layers=3 if cfg.use_rich_features else 2,
             )
+        elif cfg.head_type == "lite":
+            from colab.lite_head import LiteDisorderHead
+            self.head = LiteDisorderHead(
+                in_dim=head_in,
+                dropout=cfg.head_dropout,
+                hidden=cfg.lite_hidden,
+                n_blocks=cfg.lite_blocks,
+            )
         else:
             self.head = DisorderCNNHead(in_dim=head_in, dropout=cfg.head_dropout)
 
@@ -1317,6 +1427,9 @@ class DisorderNetGPU(nn.Module):
                 f"  Parameters: {total / 1e6:.1f}M total, "
                 f"{trainable / 1e6:.2f}M trainable ({100 * trainable / total:.2f}%)"
             )
+
+    def n_trainable_params(self) -> int:
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
     def train(self, mode: bool = True) -> "DisorderNetGPU":
         """Keep frozen ESM in eval mode (LayerNorm) while LoRA dropout is active."""
@@ -1353,10 +1466,26 @@ class DisorderNetGPU(nn.Module):
         plddt_feats: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Shared ESM fusion + optional physico/rich/plddt features → (B, L, C)."""
-        out = self.esm(tokens, repr_layers=self._fusion_layer_ids, return_contacts=False)
-        layer_hiddens = [
-            out["representations"][i][:, 1:-1, :] for i in self._fusion_layer_ids
-        ]
+        if self.frozen_backbone:
+            # No parameter in the backbone requires grad, so building the graph
+            # through it only costs activation memory. torch.no_grad (not
+            # inference_mode) — inference tensors poison the rotary cache and
+            # cannot be saved for backward, which failed a fold at 4.9 hours.
+            with torch.no_grad():
+                out = self.esm(
+                    tokens, repr_layers=self._fusion_layer_ids, return_contacts=False
+                )
+            layer_hiddens = [
+                out["representations"][i][:, 1:-1, :].detach()
+                for i in self._fusion_layer_ids
+            ]
+        else:
+            out = self.esm(
+                tokens, repr_layers=self._fusion_layer_ids, return_contacts=False
+            )
+            layer_hiddens = [
+                out["representations"][i][:, 1:-1, :] for i in self._fusion_layer_ids
+            ]
         embeddings = self.layer_fusion(layer_hiddens)
 
         if self.rich_encoder is not None:
@@ -1481,6 +1610,18 @@ class DisProtDataset(Dataset):
                 sample_weight = (
                     1.0 + (boundary_weight - 1.0) * is_boundary
                 ) * hall_weights
+
+                # Per-residue label evidence (see colab/label_sources.py). PDB-derived
+                # labels only inform residues some structure actually covers; a
+                # never-crystallised residue is UNKNOWN, not ordered. Zero weight
+                # removes it from both the loss and the metrics. Absent for curated
+                # sources, where the whole chain is annotated.
+                ev = p.get("label_evidence")
+                if ev is not None:
+                    ev_arr = np.zeros(n_res, dtype=np.float64)
+                    usable = min(n_res, len(ev))
+                    ev_arr[:usable] = np.asarray(ev[:usable], dtype=bool).astype(np.float64)
+                    sample_weight = sample_weight * ev_arr
 
                 if "aa_idx" in cached:
                     aa_tensor = cached["aa_idx"]
@@ -1672,7 +1813,14 @@ def _disorder_loss(
         )
 
     if sample_weight is not None:
+        # Weighted mean, not mean-of-weighted. A plain .mean() divides by the
+        # residue count rather than the weight mass, so (a) boundary/hallucination
+        # upweighting silently rescales the loss and therefore the effective
+        # learning rate, and (b) zero-weight residues — the UNKNOWN positions of
+        # PDB-derived labels — still inflate the denominator instead of being
+        # excluded. Dividing by the weight sum makes zero weight mean "absent".
         loss = loss * sample_weight
+        return loss.sum() / sample_weight.sum().clamp(min=1e-8)
 
     return loss.mean()
 
@@ -1687,7 +1835,18 @@ def _warmup_cosine_scheduler(optimizer, total_steps: int, warmup_steps: int):
     return LambdaLR(optimizer, lr_lambda)
 
 
-@torch.inference_mode()
+# NOTE: must be no_grad, NOT inference_mode.
+#
+# fair-esm's RotaryEmbedding memoises its cos/sin tables on the module, keyed by
+# sequence length. A table first materialised inside torch.inference_mode() is
+# permanently flagged as an inference tensor, and the *next training* batch that
+# happens to hit that same sequence length dies with
+#   RuntimeError: Inference tensors cannot be saved for backward.
+# Because the cache is length-keyed and the backbone is shared across folds, the
+# failure surfaces at an arbitrary later fold — this killed the 650M publish run
+# at fold 3 after 4.9h, having sailed through folds 1 and 2. no_grad() gives the
+# same memory/speed profile here without poisoning the cache.
+@torch.no_grad()
 def eval_epoch(
     model: nn.Module,
     loader: DataLoader,
@@ -1700,6 +1859,10 @@ def eval_epoch(
 ) -> dict:
     model.eval()
     all_probs, all_labels = [], []
+    # Separate stream for segment metrics: they need contiguous per-protein
+    # predictions, so they cannot use the evidence-masked residue stream.
+    seg_probs, seg_labels = [], []
+    n_masked_total, n_evidenced_total = 0, 0
     all_fn_probs, all_fn_labels = [], []
     total_loss, n_batches = 0.0, 0
     use_fn = bool(cfg is not None and getattr(cfg, "use_function_head", False))
@@ -1749,8 +1912,25 @@ def eval_epoch(
         n_batches += 1
 
         probs = torch.sigmoid(logits)
-        all_probs.append(probs[mask].float().cpu().numpy())
-        all_labels.append(labels[mask].cpu().numpy())
+        # Score only residues that carry label evidence. Zero sample weight marks
+        # an UNKNOWN position (PDB-derived labels over never-crystallised
+        # residues); scoring those against a fabricated "ordered" label would
+        # make the metric measure the labelling artefact rather than the model.
+        # Two streams, because they answer different questions:
+        #  * residue metrics (AUC/AP) must EXCLUDE residues with no label
+        #    evidence — scoring a fabricated "ordered" label measures the
+        #    labelling artefact, not the model.
+        #  * segment metrics need CONTIGUOUS per-protein predictions; a segment
+        #    cannot be delimited if neighbouring residues are missing. They
+        #    therefore keep the full padding-masked stream, and are reported as
+        #    unreliable when evidence is partial (see `partial_evidence` below).
+        metric_mask = mask & (sample_weight > 0) if sample_weight is not None else mask
+        all_probs.append(probs[metric_mask].float().cpu().numpy())
+        all_labels.append(labels[metric_mask].cpu().numpy())
+        seg_probs.append(probs[mask].float().cpu().numpy())
+        seg_labels.append(labels[mask].cpu().numpy())
+        n_masked_total += int(mask.sum())
+        n_evidenced_total += int(metric_mask.sum())
 
         if use_fn and fn_logits is not None and proteins_by_id is not None:
             if fn_labels is None:  # cfg was None, so the loss branch never built them
@@ -1771,6 +1951,14 @@ def eval_epoch(
         )
     all_probs = np.concatenate(all_probs)
     all_labels = np.concatenate(all_labels)
+    seg_probs_arr = np.concatenate(seg_probs) if seg_probs else all_probs
+    seg_labels_arr = np.concatenate(seg_labels) if seg_labels else all_labels
+    # Partial evidence means some residues carry no label at all. Segment
+    # metrics still run on the full stream (they need contiguity) but they then
+    # score fabricated labels on the unevidenced positions, so callers must
+    # treat them as unreliable rather than silently folding them into an
+    # early-stopping score.
+    partial_evidence = n_evidenced_total < n_masked_total
     preds = (all_probs >= 0.5).astype(int)
     labels_int = all_labels.astype(int)
 
@@ -1782,6 +1970,13 @@ def eval_epoch(
         "mcc": matthews_corrcoef(labels_int, preds),
         "probs": all_probs,
         "labels": all_labels,
+        # Full padding-masked stream, aligned with proteins_val, for segment
+        # metrics. Equal to probs/labels whenever every residue is evidenced.
+        "segment_probs": seg_probs_arr,
+        "segment_labels": seg_labels_arr,
+        "partial_evidence": partial_evidence,
+        "n_evidenced_residues": n_evidenced_total,
+        "n_masked_residues": n_masked_total,
     }
     if all_fn_probs:
         result["function_probs"] = np.concatenate(all_fn_probs)
@@ -2055,11 +2250,16 @@ def train_fold(
         from colab.segment_postprocess import composite_early_stop_score, pooled_segment_f1
 
         seg_f1 = 0.0
-        if cfg.use_segment_early_stop:
+        # Segment metrics need contiguous per-protein predictions; a disorder
+        # segment cannot be delimited when neighbouring residues carry no label.
+        # Under partial evidence (PDB-derived labels) they would score fabricated
+        # labels, so they are skipped and the composite falls back to AUC/AP.
+        partial_ev = bool(val_metrics.get("partial_evidence"))
+        if cfg.use_segment_early_stop and not partial_ev:
             seg_f1 = pooled_segment_f1(
                 proteins_val,
-                val_metrics["probs"],
-                val_metrics["labels"],
+                val_metrics.get("segment_probs", val_metrics["probs"]),
+                val_metrics.get("segment_labels", val_metrics["labels"]),
                 min_region_len=cfg.segment_min_region_len,
                 postprocess_min_len=cfg.segment_postprocess_min_len,
                 postprocess_max_gap=cfg.segment_postprocess_max_gap,
@@ -2107,14 +2307,14 @@ def train_fold(
             best_epoch = epoch + 1
             if ema is not None:
                 ema.apply_shadow(fold_model)
-                best_state = copy.deepcopy(fold_model.state_dict())
+                best_state = _snapshot_best_state(fold_model)
                 ema.restore(fold_model)
             elif swa is not None and swa.ready and epoch >= swa_start_epoch:
                 swa_backup = swa.apply_swa(fold_model)
-                best_state = copy.deepcopy(fold_model.state_dict())
+                best_state = _snapshot_best_state(fold_model)
                 swa.restore(fold_model, swa_backup)
             else:
-                best_state = copy.deepcopy(fold_model.state_dict())
+                best_state = _snapshot_best_state(fold_model)
             best_probs = val_metrics["probs"]
             best_labels = val_metrics["labels"]
             best_fn_probs = val_metrics.get("function_probs")
@@ -2126,6 +2326,11 @@ def train_fold(
                 "best_ap": best_ap,
                 "best_epoch": best_epoch,
                 "profile": getattr(cfg, "_profile_name", "custom"),
+                # The cost side of the ablation: an arm that changes capacity
+                # should say by how much, in the checkpoint itself, rather than
+                # leaving it to be re-derived from the profile name.
+                "n_trainable_params": fold_model.n_trainable_params(),
+                "frozen_backbone": bool(getattr(cfg, "frozen_backbone", False)),
             }
             if cfg.compact_checkpoints:
                 from colab.compact_checkpoint import save_compact_checkpoint
@@ -2135,7 +2340,8 @@ def train_fold(
                 if ema is not None:
                     ema.restore(fold_model)
             else:
-                torch.save(best_state, ckpt_path)
+                from colab.compact_checkpoint import atomic_torch_save
+                atomic_torch_save(best_state, ckpt_path)
             marker = " ◀ BEST"
         else:
             patience_counter += 1
@@ -2162,7 +2368,21 @@ def train_fold(
     )
 
     if best_state is not None:
-        fold_model.load_state_dict(best_state)
+        # strict=False: the snapshot holds only trainable tensors, since frozen
+        # ones are unchanged from the values already in the model.
+        missing, unexpected = fold_model.load_state_dict(best_state, strict=False)
+        if unexpected:
+            raise RuntimeError(
+                f"best-epoch snapshot has {len(unexpected)} tensor(s) with no "
+                f"destination in the model: {unexpected[:5]}"
+            )
+        still_trainable = {n for n, p in fold_model.named_parameters() if p.requires_grad}
+        lost = sorted(still_trainable - set(best_state))
+        if lost:
+            raise RuntimeError(
+                f"best-epoch snapshot is missing {len(lost)} trained tensor(s), so "
+                f"the fold would return weights it never validated: {lost[:5]}"
+            )
 
     del train_dl, val_dl, fold_model
     if device.type == "cuda":
@@ -2188,6 +2408,32 @@ def train_fold(
         result["val_function_probs"] = best_fn_probs
         result["val_function_labels"] = best_fn_labels
     return result
+
+
+def _snapshot_best_state(model: nn.Module) -> dict:
+    """Copy only the tensors that can have changed during this fold.
+
+    This was ``copy.deepcopy(model.state_dict())``, which copies the whole
+    model — including the frozen ESM-2 backbone. At 650M parameters that is
+    ~2.6 GB per snapshot, taken again on every epoch that improves validation,
+    with the previous copy still referenced until the assignment lands. Under
+    the lite profile it copied 653M parameters to preserve the 1.96M that are
+    trainable, and two replicates were killed at a fold boundary with no
+    traceback — the signature of the kernel OOM killer, which loses buffered
+    output.
+
+    Restricting the snapshot to trainable tensors is not an approximation: a
+    parameter with ``requires_grad=False`` cannot be updated by the optimizer,
+    so its value at the end of the fold is its value at the start. Buffers that
+    do change without gradients (BatchNorm running statistics) are covered
+    because ``extract_trainable_state_dict`` also takes the buffers of any
+    module owning a trained parameter.
+
+    Restore with ``strict=False`` — the snapshot is deliberately partial.
+    """
+    from colab.compact_checkpoint import extract_trainable_state_dict
+
+    return extract_trainable_state_dict(model)
 
 
 def _serialize_fold_result(result: dict) -> dict:
@@ -2222,15 +2468,42 @@ def save_cv_progress(
         "n_proteins": len(proteins),
         "protein_ids": [p["id"] for p in proteins],
         "proteins_fingerprint": proteins_fingerprint(proteins),
-        "fold_val_ids": get_fold_val_protein_ids(proteins, cfg.n_folds),
+        # Must carry the run's own split_method — recording "protein" splits for a
+        # homology-split run makes this reproducibility artifact describe a CV
+        # design the run never used.
+        "fold_val_ids": get_fold_val_protein_ids(
+            proteins,
+            cfg.n_folds,
+            split_method=getattr(cfg, "split_method", "protein"),
+            homology_min_identity=getattr(cfg, "homology_min_identity", 0.40),
+        ),
+        "split_method": getattr(cfg, "split_method", "protein"),
+        "homology_min_identity": getattr(cfg, "homology_min_identity", 0.40),
         "config_fingerprint": config_fingerprint(cfg),
         "n_folds": cfg.n_folds,
         "seed": cfg.seed,
         "disprot_meta": disprot_meta,
         "fold_results": [_serialize_fold_result(r) for r in fold_results],
     }
-    with open(path, "w") as f:
-        json.dump(payload, f)
+    # Atomic for the same reason checkpoints are: this file IS the resume
+    # record, and it is rewritten after every fold. A job killed during the
+    # write would leave truncated JSON, so a resume would fail to parse it and
+    # silently restart cross-validation from fold 1 — discarding hours of
+    # completed folds that are still sitting in the checkpoint directory.
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".tmp_cvprog_", suffix=".json")
+    os.close(fd)
+    try:
+        with open(tmp, "w") as f:
+            json.dump(payload, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
 
 def load_cv_progress(
@@ -2426,9 +2699,34 @@ def run_cross_validation(
     fold_aps = [r["best_ap"] for r in fold_results]
     total_cv_h = (time.time() - cv_t0) / 3600
 
+    # Pooled AUC ranks every OOF residue against every other, including pairs
+    # scored by different fold models. Those models are separately calibrated:
+    # in the 650M run the per-fold median probability ranged from 0.0003 to
+    # 0.6523 at near-identical disorder prevalence (0.175-0.188), which dragged
+    # pooled AUC to 0.7203 against a mean-of-folds of 0.7491.
+    #
+    # Rank-normalising within each fold removes exactly that offset and nothing
+    # else — it is monotone inside a fold, so no within-fold AUC can change. If
+    # the rank-normalised figure lands near mean-of-folds, the raw pooled/mean
+    # gap was cross-fold calibration drift rather than anything about the model.
+    rank_probs = np.empty_like(all_probs, dtype=np.float64)
+    offset = 0
+    for r in fold_results:
+        n = len(r["val_probs"])
+        chunk = np.asarray(r["val_probs"], dtype=np.float64)
+        rank_probs[offset:offset + n] = (chunk.argsort().argsort() + 0.5) / max(n, 1)
+        offset += n
+    pooled_auc_rank = roc_auc_score(all_labels, rank_probs)
+
     summary = {
         "pooled_auc": float(pooled_auc),
         "pooled_ap": float(pooled_ap),
+        "pooled_auc_fold_rank_normalized": float(pooled_auc_rank),
+        "cross_fold_calibration_drift": float(pooled_auc_rank - pooled_auc),
+        "per_fold_median_prob": [
+            float(np.median(np.asarray(r["val_probs"], dtype=np.float64)))
+            for r in fold_results
+        ],
         "fold_aucs": [float(a) for a in fold_aucs],
         "fold_aps": [float(a) for a in fold_aps],
         "mean_auc": float(np.mean(fold_aucs)),
@@ -2475,6 +2773,19 @@ def _print_cv_summary(fold_results: list, summary: dict) -> None:
     print(f"{'Std':>5} {summary['std_auc']:>8.4f}")
     print(f"{'─' * 35}")
     print(f"{'Pooled':>5} {summary['pooled_auc']:>8.4f} {summary['pooled_ap']:>8.4f}")
+    drift = summary.get("cross_fold_calibration_drift")
+    if drift is not None and abs(drift) >= 0.005:
+        meds = summary.get("per_fold_median_prob") or []
+        print(
+            f"{'':>5} rank-normalised pooled AUC "
+            f"{summary['pooled_auc_fold_rank_normalized']:.4f} ({drift:+.4f})"
+        )
+        print(
+            f"        ⚠ fold models are differently calibrated "
+            f"(median p per fold: {', '.join(f'{m:.4f}' for m in meds)}).\n"
+            f"          Pooled AUC mixes their score scales; mean-of-folds "
+            f"({summary['mean_auc']:.4f}) is the safer headline."
+        )
     print(f"{'═' * 60}")
     conf = summary.get("confidence")
     if conf:

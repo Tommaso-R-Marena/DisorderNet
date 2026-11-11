@@ -28,14 +28,23 @@ def apply_hpc_runtime_settings(
     """
     report: dict[str, Any] = {}
     if torch.cuda.is_available():
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        torch.backends.cudnn.benchmark = True
-        report["tf32"] = True
-        report["cudnn_benchmark"] = True
+        # Respect a caller that has already asked for determinism. This function
+        # runs *after* setup_environment applies cfg.deterministic, and
+        # unconditionally re-enabling benchmark silently undid it — so
+        # deterministic=True never took effect on HPC, and identical reruns
+        # diverged by ~0.023 AUC over ~30 epochs. Autotuned kernel selection is a
+        # speed optimisation; reproducibility outranks it when asked for.
+        deterministic = bool(torch.backends.cudnn.deterministic)
+        torch.backends.cuda.matmul.allow_tf32 = not deterministic
+        torch.backends.cudnn.allow_tf32 = not deterministic
+        torch.backends.cudnn.benchmark = not deterministic
+        report["tf32"] = not deterministic
+        report["cudnn_benchmark"] = not deterministic
+        report["deterministic"] = deterministic
         try:
-            torch.set_float32_matmul_precision(matmul_precision)
-            report["matmul_precision"] = matmul_precision
+            precision = "highest" if deterministic else matmul_precision
+            torch.set_float32_matmul_precision(precision)
+            report["matmul_precision"] = precision
         except Exception as exc:  # pragma: no cover
             report["matmul_precision_error"] = str(exc)
 
@@ -49,7 +58,11 @@ def apply_hpc_runtime_settings(
         torch_home = os.path.join(scratch, "torch_hub")
         os.makedirs(torch_home, exist_ok=True)
         os.environ.setdefault("TORCH_HOME", torch_home)
-        report["torch_home"] = torch_home
+    # Report the value actually in force. setdefault is a no-op when the job
+    # script already exported TORCH_HOME, so reporting the computed path made
+    # the log claim a cache location the process was not using.
+    if os.environ.get("TORCH_HOME"):
+        report["torch_home"] = os.environ["TORCH_HOME"]
 
     if verbose and report:
         print("HPC efficiency:", ", ".join(f"{k}={v}" for k, v in report.items()))

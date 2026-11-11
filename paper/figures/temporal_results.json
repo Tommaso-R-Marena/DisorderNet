@@ -1,0 +1,816 @@
+{
+  "filter": {
+    "n_before": 645,
+    "n_exact_sequence": 175,
+    "n_homologous": 284,
+    "n_after": 186,
+    "min_identity": 0.4,
+    "homology_filter": "blast"
+  },
+  "results": {
+    "multitask_windowed": {
+      "pooled": 0.8933304963778015,
+      "within": 0.8501649227328311,
+      "within_unweighted": 0.906693119198074,
+      "between": 0.8936494746075017,
+      "w_within": 0.007335437895726562,
+      "n_targets": 186,
+      "ceiling": 0.9989008940961053,
+      "ceiling_attainable": false,
+      "inference_seconds": 8.2,
+      "n_with_structure": 61,
+      "structured_subset": {
+        "pooled": 0.90950234288896,
+        "within": 0.8023271069945578,
+        "within_unweighted": 0.9284855881547686,
+        "between": 0.9120110541336347,
+        "w_within": 0.022872182394144274,
+        "n_targets": 61,
+        "ceiling": 0.9954787895368014,
+        "ceiling_attainable": false
+      },
+      "vs_baseline": {
+        "opponent": "AlphaFold-pLDDT",
+        "delta": 0.03583469377009152,
+        "ci": [
+          0.002006471954765171,
+          0.07382403985723003
+        ],
+        "p": 0.03698150924537731,
+        "n_chains": 61
+      }
+    },
+    "multitask_pbias": {
+      "pooled": 0.8859468156698367,
+      "within": 0.8170900677943191,
+      "within_unweighted": 0.8969876069090446,
+      "between": 0.8864556425354516,
+      "w_within": 0.007335437895726562,
+      "n_targets": 186,
+      "ceiling": 0.9986582755517937,
+      "ceiling_attainable": false,
+      "inference_seconds": 6.3,
+      "n_with_structure": 61,
+      "structured_subset": {
+        "pooled": 0.9023602699722528,
+        "within": 0.7889707910402766,
+        "within_unweighted": 0.9299467253454741,
+        "between": 0.9050144415115132,
+        "w_within": 0.022872182394144274,
+        "n_targets": 61,
+        "ceiling": 0.9951733014421813,
+        "ceiling_attainable": false
+      },
+      "vs_baseline": {
+        "opponent": "AlphaFold-pLDDT",
+        "delta": 0.02869262085338431,
+        "ci": [
+          -0.007219833009330134,
+          0.07170396144512413
+        ],
+        "p": 0.12093953023488256,
+        "n_chains": 61
+      }
+    },
+    "AlphaFold-rsa": {
+      "pooled": 0.8228655591508441,
+      "within": 0.7383083399274252,
+      "within_unweighted": 0.5826773431519692,
+      "between": 0.8248448377119216,
+      "w_within": 0.022872182394144274,
+      "n_targets": 61,
+      "ceiling": 0.9940145406197937,
+      "ceiling_attainable": false
+    },
+    "AlphaFold-pLDDT": {
+      "pooled": 0.8736676491188685,
+      "within": 0.7816348760495394,
+      "within_unweighted": 0.9213909675246785,
+      "between": 0.8758219121886051,
+      "w_within": 0.022872182394144274,
+      "n_targets": 61,
+      "ceiling": 0.9950055130564852,
+      "ceiling_attainable": false
+    }
+  },
+  "conformal": {
+    "multitask_windowed": {
+      "all chains": {
+        "scope": "all chains",
+        "n_chains": 186,
+        "split_alpha_0.1": {
+          "n": 34842,
+          "coverage": 0.8756672980885138,
+          "singleton_rate": 0.8332185293611158,
+          "undetermined_rate": 0.1667814706388841,
+          "empty_rate": 0.0,
+          "mean_set_size": 1.1667814706388842,
+          "coverage_class0": 0.8965970672617151,
+          "singleton_rate_class0": 0.8280204016576347,
+          "n_class0": 25096,
+          "coverage_class1": 0.8217730350913195,
+          "singleton_rate_class1": 0.8466037348655859,
+          "n_class1": 9746,
+          "singleton_accuracy": 0.850780200475354
+        },
+        "split_alpha_0.05": {
+          "n": 34842,
+          "coverage": 0.9352505596693645,
+          "singleton_rate": 0.656076000229608,
+          "undetermined_rate": 0.34392399977039206,
+          "empty_rate": 0.0,
+          "mean_set_size": 1.343923999770392,
+          "coverage_class0": 0.9513468281797897,
+          "singleton_rate_class0": 0.6452024226968441,
+          "n_class0": 25096,
+          "coverage_class1": 0.8938025856761749,
+          "singleton_rate_class1": 0.684075518161297,
+          "n_class1": 9746,
+          "singleton_accuracy": 0.9013080187234788
+        },
+        "risk_alpha_0.1": {
+          "calibrated": {
+            "threshold": 0.10599999999999998,
+            "alpha": 0.1,
+            "n_chains": 93,
+            "curve": [
+              [
+                0.11399999999999999,
+                0.09780956068327898,
+                0.10740733131430794
+              ],
+              [
+                0.11199999999999999,
+                0.09660140174121337,
+                0.10621202512694515
+              ],
+              [
+                0.10999999999999999,
+                0.09334035753650341,
+                0.10298567288185977
+              ],
+              [
+                0.10799999999999998,
+                0.09093516976384787,
+                0.10060607221316864
+              ],
+              [
+                0.10599999999999998,
+                0.0892946389754247,
+                0.09898299387994146
+              ]
+            ]
+          },
+          "realised": {
+            "threshold": 0.10599999999999998,
+            "mean_chain_miss_rate": 0.08572720002190498,
+            "median_chain_miss_rate": 0.0,
+            "mean_fraction_called_disordered": 0.42723931797193704,
+            "n_chains": 93,
+            "n_disordered_residues": 9746
+          }
+        },
+        "risk_alpha_0.05": {
+          "calibrated": {
+            "threshold": 0.05599999999999994,
+            "alpha": 0.05,
+            "n_chains": 93,
+            "curve": [
+              [
+                0.06399999999999995,
+                0.044980651416335664,
+                0.0551404317204172
+              ],
+              [
+                0.061999999999999944,
+                0.043684829560131914,
+                0.05385839520310924
+              ],
+              [
+                0.05999999999999994,
+                0.04213943369835807,
+                0.052329439722843624
+              ],
+              [
+                0.05799999999999994,
+                0.04039092729976669,
+                0.05059953445615215
+              ],
+              [
+                0.05599999999999994,
+                0.039487119538171474,
+                0.04970534167074412
+              ]
+            ]
+          },
+          "realised": {
+            "threshold": 0.05599999999999994,
+            "mean_chain_miss_rate": 0.03878374111557782,
+            "median_chain_miss_rate": 0.0,
+            "mean_fraction_called_disordered": 0.5689216832149304,
+            "n_chains": 93,
+            "n_disordered_residues": 9746
+          }
+        }
+      },
+      "chains with an AlphaFold model": {
+        "scope": "chains with an AlphaFold model",
+        "n_chains": 61,
+        "split_alpha_0.1": {
+          "n": 10339,
+          "coverage": 0.8946706644743205,
+          "singleton_rate": 0.8159396460005803,
+          "undetermined_rate": 0.18406035399941967,
+          "empty_rate": 0.0,
+          "mean_set_size": 1.1840603539994197,
+          "coverage_class0": 0.874251497005988,
+          "singleton_rate_class0": 0.7970580577974485,
+          "n_class0": 7682,
+          "coverage_class1": 0.9537071885585247,
+          "singleton_rate_class1": 0.870530673692134,
+          "n_class1": 2657,
+          "singleton_accuracy": 0.8709103840682788
+        },
+        "split_alpha_0.05": {
+          "n": 10339,
+          "coverage": 0.9331656833349453,
+          "singleton_rate": 0.7018086855595319,
+          "undetermined_rate": 0.29819131444046815,
+          "empty_rate": 0.0,
+          "mean_set_size": 1.2981913144404682,
+          "coverage_class0": 0.923066909658943,
+          "singleton_rate_class0": 0.6800312418640979,
+          "n_class0": 7682,
+          "coverage_class1": 0.9623635679337599,
+          "singleton_rate_class1": 0.7647722995859992,
+          "n_class1": 2657,
+          "singleton_accuracy": 0.9047684674751929
+        },
+        "risk_alpha_0.1": {
+          "calibrated": {
+            "threshold": 0.14200000000000002,
+            "alpha": 0.1,
+            "n_chains": 30,
+            "curve": [
+              [
+                0.15000000000000002,
+                0.07258962903436937,
+                0.10250609261390585
+              ],
+              [
+                0.14800000000000002,
+                0.07254524377027706,
+                0.1024631391325262
+              ],
+              [
+                0.14600000000000002,
+                0.07150970141649235,
+                0.10146100137079905
+              ],
+              [
+                0.14400000000000002,
+                0.07077495458321025,
+                0.10074995604826797
+              ],
+              [
+                0.14200000000000002,
+                0.06864843201727355,
+                0.09869203098445828
+              ]
+            ]
+          },
+          "realised": {
+            "threshold": 0.14200000000000002,
+            "mean_chain_miss_rate": 0.0849343323054626,
+            "median_chain_miss_rate": 0.0,
+            "mean_fraction_called_disordered": 0.38596126079165133,
+            "n_chains": 31,
+            "n_disordered_residues": 2657
+          }
+        },
+        "risk_alpha_0.05": {
+          "calibrated": {
+            "threshold": 0.07399999999999995,
+            "alpha": 0.05,
+            "n_chains": 30,
+            "curve": [
+              [
+                0.08199999999999996,
+                0.02058929973710267,
+                0.05218319329397032
+              ],
+              [
+                0.07999999999999996,
+                0.020145447096179454,
+                0.051753658480173666
+              ],
+              [
+                0.07799999999999996,
+                0.019524053398886954,
+                0.05115230974085834
+              ],
+              [
+                0.07599999999999996,
+                0.018567380245143227,
+                0.05022649701142893
+              ],
+              [
+                0.07399999999999995,
+                0.01786711734780976,
+                0.049548823239815895
+              ]
+            ]
+          },
+          "realised": {
+            "threshold": 0.07399999999999995,
+            "mean_chain_miss_rate": 0.03601688421934602,
+            "median_chain_miss_rate": 0.0,
+            "mean_fraction_called_disordered": 0.47615491640228996,
+            "n_chains": 31,
+            "n_disordered_residues": 2657
+          }
+        }
+      }
+    },
+    "multitask_pbias": {
+      "all chains": {
+        "scope": "all chains",
+        "n_chains": 186,
+        "split_alpha_0.1": {
+          "n": 34842,
+          "coverage": 0.8695826875609897,
+          "singleton_rate": 0.8364043395901498,
+          "undetermined_rate": 0.16359566040985019,
+          "empty_rate": 0.0,
+          "mean_set_size": 1.16359566040985,
+          "coverage_class0": 0.8790245457443417,
+          "singleton_rate_class0": 0.8269445329933057,
+          "n_class0": 25096,
+          "coverage_class1": 0.8452698542991997,
+          "singleton_rate_class1": 0.8607633901087626,
+          "n_class1": 9746,
+          "singleton_accuracy": 0.8440738453091757
+        },
+        "split_alpha_0.05": {
+          "n": 34842,
+          "coverage": 0.9353366626485277,
+          "singleton_rate": 0.6206302738074737,
+          "undetermined_rate": 0.37936972619252624,
+          "empty_rate": 0.0,
+          "mean_set_size": 1.3793697261925262,
+          "coverage_class0": 0.9456885559451705,
+          "singleton_rate_class0": 0.5961906279885241,
+          "n_class0": 25096,
+          "coverage_class1": 0.9086804843012518,
+          "singleton_rate_class1": 0.6835624871742253,
+          "n_class1": 9746,
+          "singleton_accuracy": 0.8958102108768036
+        },
+        "risk_alpha_0.1": {
+          "calibrated": {
+            "threshold": 0.09599999999999997,
+            "alpha": 0.1,
+            "n_chains": 93,
+            "curve": [
+              [
+                0.10399999999999998,
+                0.0963890286743611,
+                0.10600191134803812
+              ],
+              [
+                0.10199999999999998,
+                0.09574895878924389,
+                0.1053686507170179
+              ],
+              [
+                0.09999999999999998,
+                0.09410145720765241,
+                0.10373867574799654
+              ],
+              [
+                0.09799999999999998,
+                0.09300616605135345,
+                0.10265503662527523
+              ],
+              [
+                0.09599999999999997,
+                0.0902940352592324,
+                0.0999717582883895
+              ]
+            ]
+          },
+          "realised": {
+            "threshold": 0.09599999999999997,
+            "mean_chain_miss_rate": 0.08404322153204005,
+            "median_chain_miss_rate": 0.0,
+            "mean_fraction_called_disordered": 0.47813464407161227,
+            "n_chains": 93,
+            "n_disordered_residues": 9746
+          }
+        },
+        "risk_alpha_0.05": {
+          "calibrated": {
+            "threshold": 0.04799999999999993,
+            "alpha": 0.05,
+            "n_chains": 93,
+            "curve": [
+              [
+                0.05599999999999994,
+                0.053529150922112655,
+                0.06359798974209017
+              ],
+              [
+                0.05399999999999994,
+                0.046203068604191246,
+                0.056349844470104105
+              ],
+              [
+                0.051999999999999935,
+                0.04497708861044966,
+                0.055136906816721475
+              ],
+              [
+                0.04999999999999993,
+                0.042220372750230016,
+                0.05240951772097225
+              ],
+              [
+                0.04799999999999993,
+                0.03951791601941433,
+                0.049735810529846096
+              ]
+            ]
+          },
+          "realised": {
+            "threshold": 0.04799999999999993,
+            "mean_chain_miss_rate": 0.03367983663144954,
+            "median_chain_miss_rate": 0.0,
+            "mean_fraction_called_disordered": 0.5925829216591383,
+            "n_chains": 93,
+            "n_disordered_residues": 9746
+          }
+        }
+      },
+      "chains with an AlphaFold model": {
+        "scope": "chains with an AlphaFold model",
+        "n_chains": 61,
+        "split_alpha_0.1": {
+          "n": 10339,
+          "coverage": 0.8939936164039075,
+          "singleton_rate": 0.7254086468710707,
+          "undetermined_rate": 0.2745913531289293,
+          "empty_rate": 0.0,
+          "mean_set_size": 1.2745913531289292,
+          "coverage_class0": 0.8703462639937516,
+          "singleton_rate_class0": 0.6646706586826348,
+          "n_class0": 7682,
+          "coverage_class1": 0.9623635679337599,
+          "singleton_rate_class1": 0.9010161836657885,
+          "n_class1": 2657,
+          "singleton_accuracy": 0.8538666666666667
+        },
+        "split_alpha_0.05": {
+          "n": 10339,
+          "coverage": 0.9469968082019538,
+          "singleton_rate": 0.5279040526163072,
+          "undetermined_rate": 0.4720959473836928,
+          "empty_rate": 0.0,
+          "mean_set_size": 1.4720959473836928,
+          "coverage_class0": 0.9356938297318407,
+          "singleton_rate_class0": 0.4320489455870867,
+          "n_class0": 7682,
+          "coverage_class1": 0.9796763266842303,
+          "singleton_rate_class1": 0.8050432818968761,
+          "n_class1": 2657,
+          "singleton_accuracy": 0.899596921949432
+        },
+        "risk_alpha_0.1": {
+          "calibrated": {
+            "threshold": 0.132,
+            "alpha": 0.1,
+            "n_chains": 30,
+            "curve": [
+              [
+                0.14,
+                0.07123900166121648,
+                0.10119903386569337
+              ],
+              [
+                0.138,
+                0.07085261208541278,
+                0.1008251084697543
+              ],
+              [
+                0.136,
+                0.07076384155722813,
+                0.10073920150699497
+              ],
+              [
+                0.134,
+                0.0700656335332323,
+                0.10006351632248286
+              ],
+              [
+                0.132,
+                0.06940396431852269,
+                0.0994231912759897
+              ]
+            ]
+          },
+          "realised": {
+            "threshold": 0.132,
+            "mean_chain_miss_rate": 0.07908672891907188,
+            "median_chain_miss_rate": 0.0,
+            "mean_fraction_called_disordered": 0.38521700262185943,
+            "n_chains": 31,
+            "n_disordered_residues": 2657
+          }
+        },
+        "risk_alpha_0.05": {
+          "calibrated": {
+            "threshold": 0.04599999999999993,
+            "alpha": 0.05,
+            "n_chains": 30,
+            "curve": [
+              [
+                0.05399999999999994,
+                0.019587097083768188,
+                0.051213319758485344
+              ],
+              [
+                0.051999999999999935,
+                0.019098859178752654,
+                0.050740831463309016
+              ],
+              [
+                0.04999999999999993,
+                0.018832547594198723,
+                0.05048311057503102
+              ],
+              [
+                0.04799999999999993,
+                0.01847746548146016,
+                0.0501394827239937
+              ],
+              [
+                0.04599999999999993,
+                0.018033612840536943,
+                0.04970994791019704
+              ]
+            ]
+          },
+          "realised": {
+            "threshold": 0.04599999999999993,
+            "mean_chain_miss_rate": 0.03524560117302053,
+            "median_chain_miss_rate": 0.0,
+            "mean_fraction_called_disordered": 0.527048389561797,
+            "n_chains": 31,
+            "n_disordered_residues": 2657
+          }
+        }
+      }
+    },
+    "AlphaFold-rsa": {
+      "chains with an AlphaFold model": {
+        "scope": "chains with an AlphaFold model",
+        "n_chains": 61,
+        "split_alpha_0.1": {
+          "n": 10339,
+          "coverage": 0.9175935777154464,
+          "singleton_rate": 0.3742141406325563,
+          "undetermined_rate": 0.6257858593674437,
+          "empty_rate": 0.0,
+          "mean_set_size": 1.6257858593674437,
+          "coverage_class0": 0.8910439989586045,
+          "singleton_rate_class0": 0.27089299661546473,
+          "n_class0": 7682,
+          "coverage_class1": 0.994354535190064,
+          "singleton_rate_class1": 0.6729394053443734,
+          "n_class1": 2657,
+          "singleton_accuracy": 0.7797880589299561
+        },
+        "split_alpha_0.05": {
+          "n": 10339,
+          "coverage": 0.9728213560305639,
+          "singleton_rate": 0.18396363284650352,
+          "undetermined_rate": 0.8160363671534965,
+          "empty_rate": 0.0,
+          "mean_set_size": 1.8160363671534965,
+          "coverage_class0": 0.9636813329862015,
+          "singleton_rate_class0": 0.06847175214787815,
+          "n_class0": 7682,
+          "coverage_class1": 0.9992472713586752,
+          "singleton_rate_class1": 0.517877305231464,
+          "n_class1": 2657,
+          "singleton_accuracy": 0.852260778128286
+        },
+        "risk_alpha_0.1": {
+          "calibrated": {
+            "threshold": 0.09999999999999998,
+            "alpha": 0.1,
+            "n_chains": 30,
+            "curve": [
+              [
+                0.10799999999999998,
+                0.07465601420328451,
+                0.10450582019672694
+              ],
+              [
+                0.10599999999999998,
+                0.07465601420328451,
+                0.10450582019672694
+              ],
+              [
+                0.10399999999999998,
+                0.07465601420328451,
+                0.10450582019672694
+              ],
+              [
+                0.10199999999999998,
+                0.07456724367509987,
+                0.10441991323396761
+              ],
+              [
+                0.09999999999999998,
+                0.057811806480248557,
+                0.08820497401314376
+              ]
+            ]
+          },
+          "realised": {
+            "threshold": 0.09999999999999998,
+            "mean_chain_miss_rate": 0.016935483870967744,
+            "median_chain_miss_rate": 0.0,
+            "mean_fraction_called_disordered": 0.961384146929999,
+            "n_chains": 31,
+            "n_disordered_residues": 2657
+          }
+        },
+        "risk_alpha_0.05": {
+          "calibrated": {
+            "threshold": 0.008000000000000007,
+            "alpha": 0.05,
+            "n_chains": 30,
+            "curve": [
+              [
+                0.016000000000000014,
+                0.035153129161118506,
+                0.06627722176882436
+              ],
+              [
+                0.014000000000000012,
+                0.03506435863293387,
+                0.06619131480606504
+              ],
+              [
+                0.01200000000000001,
+                0.03484243231247226,
+                0.0659765473991667
+              ],
+              [
+                0.010000000000000009,
+                0.03453173546382601,
+                0.06567587302950904
+              ],
+              [
+                0.008000000000000007,
+                0.0011096316023080338,
+                0.03333190155062068
+              ]
+            ]
+          },
+          "realised": {
+            "threshold": 0.008000000000000007,
+            "mean_chain_miss_rate": 0.0,
+            "median_chain_miss_rate": 0.0,
+            "mean_fraction_called_disordered": 0.9990917261075936,
+            "n_chains": 31,
+            "n_disordered_residues": 2657
+          }
+        }
+      }
+    },
+    "AlphaFold-pLDDT": {
+      "chains with an AlphaFold model": {
+        "scope": "chains with an AlphaFold model",
+        "n_chains": 61,
+        "split_alpha_0.1": {
+          "n": 10339,
+          "coverage": 0.9285230679949705,
+          "singleton_rate": 0.6355546958119741,
+          "undetermined_rate": 0.3644453041880259,
+          "empty_rate": 0.0,
+          "mean_set_size": 1.364445304188026,
+          "coverage_class0": 0.9181202811767769,
+          "singleton_rate_class0": 0.5803176256183286,
+          "n_class0": 7682,
+          "coverage_class1": 0.9585999247271358,
+          "singleton_rate_class1": 0.7952578095596537,
+          "n_class1": 2657,
+          "singleton_accuracy": 0.8875361436615431
+        },
+        "split_alpha_0.05": {
+          "n": 10339,
+          "coverage": 0.9659541541735177,
+          "singleton_rate": 0.4726762743011897,
+          "undetermined_rate": 0.5273237256988104,
+          "empty_rate": 0.0,
+          "mean_set_size": 1.5273237256988104,
+          "coverage_class0": 0.9640718562874252,
+          "singleton_rate_class0": 0.40028638375423065,
+          "n_class0": 7682,
+          "coverage_class1": 0.9713963116296576,
+          "singleton_rate_class1": 0.681972149040271,
+          "n_class1": 2657,
+          "singleton_accuracy": 0.9279721710660938
+        },
+        "risk_alpha_0.1": {
+          "calibrated": {
+            "threshold": 0.594,
+            "alpha": 0.1,
+            "n_chains": 30,
+            "curve": [
+              [
+                0.602,
+                0.07175603176436308,
+                0.10169938557841589
+              ],
+              [
+                0.6,
+                0.0714552362438605,
+                0.10140829313921984
+              ],
+              [
+                0.598,
+                0.07071264295577233,
+                0.10068965447332806
+              ],
+              [
+                0.596,
+                0.07053510189940305,
+                0.1005178405478094
+              ],
+              [
+                0.594,
+                0.06942069034557738,
+                0.09943937775378456
+              ]
+            ]
+          },
+          "realised": {
+            "threshold": 0.594,
+            "mean_chain_miss_rate": 0.08131629951605543,
+            "median_chain_miss_rate": 0.0,
+            "mean_fraction_called_disordered": 0.4220060777514157,
+            "n_chains": 31,
+            "n_disordered_residues": 2657
+          }
+        },
+        "risk_alpha_0.05": {
+          "calibrated": {
+            "threshold": 0.32999999999999996,
+            "alpha": 0.05,
+            "n_chains": 30,
+            "curve": [
+              [
+                0.33799999999999997,
+                0.020093751858029727,
+                0.051703630830351344
+              ],
+              [
+                0.33599999999999997,
+                0.020049366593937405,
+                0.05166067734897169
+              ],
+              [
+                0.33399999999999996,
+                0.019439929098126186,
+                0.05107089912721889
+              ],
+              [
+                0.33199999999999996,
+                0.018778259883416578,
+                0.050430574080725724
+              ],
+              [
+                0.32999999999999996,
+                0.017807948693398332,
+                0.04949156325167581
+              ]
+            ]
+          },
+          "realised": {
+            "threshold": 0.32999999999999996,
+            "mean_chain_miss_rate": 0.02064205061558502,
+            "median_chain_miss_rate": 0.0,
+            "mean_fraction_called_disordered": 0.6505067628735147,
+            "n_chains": 31,
+            "n_disordered_residues": 2657
+          }
+        }
+      }
+    }
+  },
+  "reference": "/scratch4/sfried3/jbeale3_disordernet/temporal/disorder_pdb.fasta",
+  "task": "disorder_pdb"
+}

@@ -1,0 +1,295 @@
+{
+  "window": 0.02,
+  "pool": [
+    "multitask_chiral",
+    "multitask_control",
+    "multitask_motif",
+    "multitask_wass",
+    "multitask_rank"
+  ],
+  "tasks": {
+    "disorder_pdb": {
+      "members": [
+        "multitask_chiral",
+        "multitask_control",
+        "multitask_motif",
+        "multitask_rank",
+        "multitask_wass"
+      ],
+      "auc": 0.9613410484691396,
+      "aps": 0.9355116050127474,
+      "coverage": 1.0,
+      "rank": 1,
+      "rank_full": 1,
+      "best_holdout": 0.9147249102621965,
+      "paired": {
+        "AlphaFold-rsa": {
+          "task": "disorder_pdb",
+          "method_a": "Ensemble",
+          "method_b": "AlphaFold-rsa",
+          "auc_a": 0.9613410484691396,
+          "auc_b": 0.9497720505481281,
+          "delta_auc": 0.011568997921011515,
+          "aps_a": 0.9355116050127474,
+          "aps_b": 0.9207925639104091,
+          "delta_aps": 0.014719041102338348,
+          "delta_ci": [
+            0.001845863447598936,
+            0.023739458730157655
+          ],
+          "p_two_sided": 0.012598740125987402,
+          "n_common_targets": 319,
+          "n_residues": 99239,
+          "n_boot_used": 10000
+        },
+        "PUNCH2": {
+          "task": "disorder_pdb",
+          "method_a": "Ensemble",
+          "method_b": "PUNCH2",
+          "auc_a": 0.9613410484691396,
+          "auc_b": 0.955152600039246,
+          "delta_auc": 0.006188448429893634,
+          "aps_a": 0.9355116050127474,
+          "aps_b": 0.9290125139902771,
+          "delta_aps": 0.006499091022470371,
+          "delta_ci": [
+            -0.001421675743450934,
+            0.01590809086156898
+          ],
+          "p_two_sided": 0.11998800119988001,
+          "n_common_targets": 319,
+          "n_residues": 99239,
+          "n_boot_used": 10000
+        }
+      }
+    },
+    "disorder_nox": {
+      "members": [
+        "multitask_control",
+        "multitask_motif",
+        "multitask_wass"
+      ],
+      "auc": 0.8640424588525895,
+      "aps": 0.7010102546841721,
+      "coverage": 1.0,
+      "rank": 6,
+      "rank_full": 1,
+      "best_holdout": 0.8622605905337792,
+      "paired": {
+        "AlphaFold-rsa": {
+          "task": "disorder_nox",
+          "method_a": "Ensemble",
+          "method_b": "AlphaFold-rsa",
+          "auc_a": 0.8640424588525895,
+          "auc_b": 0.8356925093785155,
+          "delta_auc": 0.028349949474073988,
+          "aps_a": 0.7010102546841721,
+          "aps_b": 0.5792827864937271,
+          "delta_aps": 0.121727468190445,
+          "delta_ci": [
+            -0.022138213152839554,
+            0.07867411901256237
+          ],
+          "p_two_sided": 0.26137386261373863,
+          "n_common_targets": 204,
+          "n_residues": 99977,
+          "n_boot_used": 10000
+        },
+        "PUNCH2": {
+          "task": "disorder_nox",
+          "method_a": "Ensemble",
+          "method_b": "PUNCH2",
+          "auc_a": 0.8640424588525895,
+          "auc_b": 0.8422153745027365,
+          "delta_auc": 0.02182708434985292,
+          "aps_a": 0.7010102546841721,
+          "aps_b": 0.5884606061306705,
+          "delta_aps": 0.11254964855350158,
+          "delta_ci": [
+            -0.030799152262771974,
+            0.07319310042829716
+          ],
+          "p_two_sided": 0.396960303969603,
+          "n_common_targets": 204,
+          "n_residues": 99977,
+          "n_boot_used": 10000
+        }
+      }
+    },
+    "binding": {
+      "members": [
+        "multitask_chiral",
+        "multitask_control",
+        "multitask_motif",
+        "multitask_rank",
+        "multitask_wass"
+      ],
+      "auc": 0.7469202148494656,
+      "aps": 0.22364938540259738,
+      "coverage": 1.0,
+      "rank": 23,
+      "rank_full": 14,
+      "best_holdout": 0.8474053857567037,
+      "paired": {
+        "AlphaFold-rsa": {
+          "task": "binding",
+          "method_a": "Ensemble",
+          "method_b": "AlphaFold-rsa",
+          "auc_a": 0.7469202148494656,
+          "auc_b": 0.7049937535514637,
+          "delta_auc": 0.04192646129800193,
+          "aps_a": 0.22364938540259738,
+          "aps_b": 0.15891382070840254,
+          "delta_aps": 0.06473556469419484,
+          "delta_ci": [
+            -0.07086441357670925,
+            0.19610623618354672
+          ],
+          "p_two_sided": 0.45795420457954206,
+          "n_common_targets": 52,
+          "n_residues": 28263,
+          "n_boot_used": 10000
+        },
+        "PUNCH2": {
+          "task": "binding",
+          "method_a": "Ensemble",
+          "method_b": "PUNCH2",
+          "auc_a": 0.7469202148494656,
+          "auc_b": 0.726132629184377,
+          "delta_auc": 0.020787585665088537,
+          "aps_a": 0.22364938540259738,
+          "aps_b": 0.17300614869681225,
+          "delta_aps": 0.05064323670578513,
+          "delta_ci": [
+            -0.10543602339214304,
+            0.18293599528482937
+          ],
+          "p_two_sided": 0.6883311668833116,
+          "n_common_targets": 52,
+          "n_residues": 28263,
+          "n_boot_used": 10000
+        }
+      }
+    },
+    "binding_idr": {
+      "members": [
+        "multitask_rank"
+      ],
+      "auc": 0.5371514895563885,
+      "aps": 0.39270617837232047,
+      "coverage": 1.0,
+      "rank": 18,
+      "rank_full": 13,
+      "best_holdout": 0.7557561237906352,
+      "paired": {
+        "AlphaFold-rsa": {
+          "task": "binding_idr",
+          "method_a": "Ensemble",
+          "method_b": "AlphaFold-rsa",
+          "auc_a": 0.5371514895563885,
+          "auc_b": 0.32204941139207094,
+          "delta_auc": 0.21510207816431753,
+          "aps_a": 0.39270617837232047,
+          "aps_b": 0.29286408974204914,
+          "delta_aps": 0.09984208863027133,
+          "delta_ci": [
+            0.05937182526314582,
+            0.4213772431685398
+          ],
+          "p_two_sided": 0.006799320067993201,
+          "n_common_targets": 52,
+          "n_residues": 7741,
+          "n_boot_used": 10000
+        },
+        "PUNCH2": {
+          "task": "binding_idr",
+          "method_a": "Ensemble",
+          "method_b": "PUNCH2",
+          "auc_a": 0.5371514895563885,
+          "auc_b": 0.38986513927748156,
+          "delta_auc": 0.1472863502789069,
+          "aps_a": 0.39270617837232047,
+          "aps_b": 0.32421613993590653,
+          "delta_aps": 0.06849003843641394,
+          "delta_ci": [
+            0.002458083758569466,
+            0.35823417443706695
+          ],
+          "p_two_sided": 0.046995300469953004,
+          "n_common_targets": 52,
+          "n_residues": 7741,
+          "n_boot_used": 10000
+        }
+      }
+    },
+    "linker": {
+      "members": [
+        "multitask_control",
+        "multitask_motif",
+        "multitask_rank"
+      ],
+      "auc": 0.9137318874674518,
+      "aps": 0.4438118276138467,
+      "coverage": 1.0,
+      "rank": 1,
+      "rank_full": 1,
+      "best_holdout": 0.942250320726758,
+      "paired": {
+        "AlphaFold-rsa": {
+          "task": "linker",
+          "method_a": "Ensemble",
+          "method_b": "AlphaFold-rsa",
+          "auc_a": 0.9137318874674518,
+          "auc_b": 0.8001282263246403,
+          "delta_auc": 0.11360366114281151,
+          "aps_a": 0.4438118276138467,
+          "aps_b": 0.18505519199717374,
+          "delta_aps": 0.25875663561667295,
+          "delta_ci": [
+            0.042749874973874745,
+            0.21088983326756622
+          ],
+          "p_two_sided": 0.00019998000199980003,
+          "n_common_targets": 31,
+          "n_residues": 20498,
+          "n_boot_used": 10000
+        },
+        "PUNCH2": {
+          "task": "linker",
+          "method_a": "Ensemble",
+          "method_b": "PUNCH2",
+          "auc_a": 0.9137318874674518,
+          "auc_b": 0.7880824162213527,
+          "delta_auc": 0.12564947124609915,
+          "aps_a": 0.4438118276138467,
+          "aps_b": 0.15032982377310755,
+          "delta_aps": 0.29348200384073914,
+          "delta_ci": [
+            0.048282219408765426,
+            0.22219697222028328
+          ],
+          "p_two_sided": 0.00019998000199980003,
+          "n_common_targets": 31,
+          "n_residues": 20498,
+          "n_boot_used": 10000
+        }
+      }
+    }
+  },
+  "preregistered": {
+    "AlphaFold-rsa": {
+      "p_raw": 0.012598740125987402,
+      "p_adjusted": 0.025197480251974803,
+      "significant": true,
+      "rank": 1,
+      "n_comparisons": 2
+    },
+    "PUNCH2": {
+      "p_raw": 0.11998800119988001,
+      "p_adjusted": 0.11998800119988001,
+      "significant": false,
+      "rank": 2,
+      "n_comparisons": 2
+    }
+  }
+}

@@ -1,0 +1,1611 @@
+{
+  "n_accessions": 319,
+  "n_usable": 160,
+  "epsilon_pooled": 0.08008129415042696,
+  "epsilon_mean": 0.10225067533901071,
+  "epsilon_median": 0.0,
+  "epsilon_p90": 0.15830933772110234,
+  "n_multi_structure": 139,
+  "proteins": [
+    {
+      "acc": "A0A0B4JDC9",
+      "length": 1844,
+      "n_structures": 14,
+      "n_missing": 21,
+      "n_observed": 364,
+      "n_context_dependent": 0,
+      "n_evidenced": 385,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "A0A0G2KTI4",
+      "length": 1136,
+      "n_structures": 10,
+      "n_missing": 270,
+      "n_observed": 866,
+      "n_context_dependent": 0,
+      "n_evidenced": 1136,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "A0A1L8HGL2",
+      "length": 2905,
+      "n_structures": 19,
+      "n_missing": 2107,
+      "n_observed": 149,
+      "n_context_dependent": 614,
+      "n_evidenced": 2256,
+      "epsilon": 0.2721631205673759
+    },
+    {
+      "acc": "A0A3Q7EK40",
+      "length": 932,
+      "n_structures": 1,
+      "n_missing": 51,
+      "n_observed": 244,
+      "n_context_dependent": 0,
+      "n_evidenced": 295,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "A0A564ZT73",
+      "length": 1397,
+      "n_structures": 2,
+      "n_missing": 112,
+      "n_observed": 87,
+      "n_context_dependent": 0,
+      "n_evidenced": 199,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "A1C3L3",
+      "length": 2587,
+      "n_structures": 6,
+      "n_missing": 43,
+      "n_observed": 200,
+      "n_context_dependent": 88,
+      "n_evidenced": 243,
+      "epsilon": 0.36213991769547327
+    },
+    {
+      "acc": "B0JEU3",
+      "length": 569,
+      "n_structures": 1,
+      "n_missing": 33,
+      "n_observed": 416,
+      "n_context_dependent": 0,
+      "n_evidenced": 449,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "B7UM99",
+      "length": 550,
+      "n_structures": 3,
+      "n_missing": 11,
+      "n_observed": 30,
+      "n_context_dependent": 0,
+      "n_evidenced": 41,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "C0IR59",
+      "length": 606,
+      "n_structures": 1,
+      "n_missing": 74,
+      "n_observed": 339,
+      "n_context_dependent": 0,
+      "n_evidenced": 413,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "C8ZKB3",
+      "length": 99,
+      "n_structures": 1,
+      "n_missing": 17,
+      "n_observed": 82,
+      "n_context_dependent": 0,
+      "n_evidenced": 99,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "D0ZRB2",
+      "length": 765,
+      "n_structures": 2,
+      "n_missing": 19,
+      "n_observed": 597,
+      "n_context_dependent": 0,
+      "n_evidenced": 616,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "L7N667",
+      "length": 275,
+      "n_structures": 1,
+      "n_missing": 15,
+      "n_observed": 78,
+      "n_context_dependent": 0,
+      "n_evidenced": 93,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "O00834",
+      "length": 456,
+      "n_structures": 6,
+      "n_missing": 11,
+      "n_observed": 361,
+      "n_context_dependent": 0,
+      "n_evidenced": 372,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "O14497",
+      "length": 2285,
+      "n_structures": 2,
+      "n_missing": 1699,
+      "n_observed": 466,
+      "n_context_dependent": 120,
+      "n_evidenced": 2165,
+      "epsilon": 0.05542725173210162
+    },
+    {
+      "acc": "O14746",
+      "length": 1132,
+      "n_structures": 10,
+      "n_missing": 121,
+      "n_observed": 888,
+      "n_context_dependent": 99,
+      "n_evidenced": 1009,
+      "epsilon": 0.0981169474727453
+    },
+    {
+      "acc": "O43353",
+      "length": 540,
+      "n_structures": 95,
+      "n_missing": 141,
+      "n_observed": 343,
+      "n_context_dependent": 11,
+      "n_evidenced": 484,
+      "epsilon": 0.022727272727272728
+    },
+    {
+      "acc": "O43665",
+      "length": 181,
+      "n_structures": 1,
+      "n_missing": 20,
+      "n_observed": 111,
+      "n_context_dependent": 11,
+      "n_evidenced": 131,
+      "epsilon": 0.08396946564885496
+    },
+    {
+      "acc": "O60232",
+      "length": 199,
+      "n_structures": 2,
+      "n_missing": 133,
+      "n_observed": 64,
+      "n_context_dependent": 0,
+      "n_evidenced": 197,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "O60832",
+      "length": 514,
+      "n_structures": 10,
+      "n_missing": 115,
+      "n_observed": 339,
+      "n_context_dependent": 54,
+      "n_evidenced": 454,
+      "epsilon": 0.11894273127753303
+    },
+    {
+      "acc": "O67813",
+      "length": 350,
+      "n_structures": 6,
+      "n_missing": 19,
+      "n_observed": 113,
+      "n_context_dependent": 0,
+      "n_evidenced": 132,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "O82882",
+      "length": 898,
+      "n_structures": 2,
+      "n_missing": 146,
+      "n_observed": 594,
+      "n_context_dependent": 108,
+      "n_evidenced": 740,
+      "epsilon": 0.14594594594594595
+    },
+    {
+      "acc": "O93568",
+      "length": 435,
+      "n_structures": 4,
+      "n_missing": 12,
+      "n_observed": 389,
+      "n_context_dependent": 0,
+      "n_evidenced": 401,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P02649",
+      "length": 317,
+      "n_structures": 22,
+      "n_missing": 18,
+      "n_observed": 129,
+      "n_context_dependent": 162,
+      "n_evidenced": 147,
+      "epsilon": 1.1020408163265305
+    },
+    {
+      "acc": "P02710",
+      "length": 461,
+      "n_structures": 31,
+      "n_missing": 38,
+      "n_observed": 373,
+      "n_context_dependent": 0,
+      "n_evidenced": 411,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P04792",
+      "length": 205,
+      "n_structures": 32,
+      "n_missing": 13,
+      "n_observed": 140,
+      "n_context_dependent": 24,
+      "n_evidenced": 153,
+      "epsilon": 0.1568627450980392
+    },
+    {
+      "acc": "P06897",
+      "length": 130,
+      "n_structures": 449,
+      "n_missing": 11,
+      "n_observed": 102,
+      "n_context_dependent": 0,
+      "n_evidenced": 113,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P07206",
+      "length": 1090,
+      "n_structures": 2,
+      "n_missing": 18,
+      "n_observed": 1051,
+      "n_context_dependent": 0,
+      "n_evidenced": 1069,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P07275",
+      "length": 575,
+      "n_structures": 4,
+      "n_missing": 65,
+      "n_observed": 479,
+      "n_context_dependent": 0,
+      "n_evidenced": 544,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P08062",
+      "length": 556,
+      "n_structures": 2,
+      "n_missing": 150,
+      "n_observed": 386,
+      "n_context_dependent": 0,
+      "n_evidenced": 536,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P0A367",
+      "length": 1176,
+      "n_structures": 1,
+      "n_missing": 112,
+      "n_observed": 1011,
+      "n_context_dependent": 0,
+      "n_evidenced": 1123,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P0A6B7",
+      "length": 404,
+      "n_structures": 2,
+      "n_missing": 12,
+      "n_observed": 385,
+      "n_context_dependent": 0,
+      "n_evidenced": 397,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P0A7I7",
+      "length": 196,
+      "n_structures": 3,
+      "n_missing": 22,
+      "n_observed": 169,
+      "n_context_dependent": 0,
+      "n_evidenced": 191,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P0A8P8",
+      "length": 298,
+      "n_structures": 1,
+      "n_missing": 10,
+      "n_observed": 271,
+      "n_context_dependent": 0,
+      "n_evidenced": 281,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P0A8W0",
+      "length": 263,
+      "n_structures": 10,
+      "n_missing": 35,
+      "n_observed": 217,
+      "n_context_dependent": 0,
+      "n_evidenced": 252,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P0AC51",
+      "length": 171,
+      "n_structures": 8,
+      "n_missing": 19,
+      "n_observed": 148,
+      "n_context_dependent": 0,
+      "n_evidenced": 167,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P0AFI0",
+      "length": 564,
+      "n_structures": 6,
+      "n_missing": 10,
+      "n_observed": 545,
+      "n_context_dependent": 0,
+      "n_evidenced": 555,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P0C7U7",
+      "length": 326,
+      "n_structures": 2,
+      "n_missing": 11,
+      "n_observed": 261,
+      "n_context_dependent": 11,
+      "n_evidenced": 272,
+      "epsilon": 0.04044117647058824
+    },
+    {
+      "acc": "P0CAV4",
+      "length": 255,
+      "n_structures": 1,
+      "n_missing": 117,
+      "n_observed": 138,
+      "n_context_dependent": 0,
+      "n_evidenced": 255,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P10949",
+      "length": 227,
+      "n_structures": 1,
+      "n_missing": 46,
+      "n_observed": 172,
+      "n_context_dependent": 0,
+      "n_evidenced": 218,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P15917",
+      "length": 809,
+      "n_structures": 45,
+      "n_missing": 59,
+      "n_observed": 660,
+      "n_context_dependent": 64,
+      "n_evidenced": 719,
+      "epsilon": 0.0890125173852573
+    },
+    {
+      "acc": "P17433",
+      "length": 272,
+      "n_structures": 7,
+      "n_missing": 166,
+      "n_observed": 88,
+      "n_context_dependent": 14,
+      "n_evidenced": 254,
+      "epsilon": 0.05511811023622047
+    },
+    {
+      "acc": "P19632",
+      "length": 245,
+      "n_structures": 1,
+      "n_missing": 57,
+      "n_observed": 188,
+      "n_context_dependent": 0,
+      "n_evidenced": 245,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P21579",
+      "length": 422,
+      "n_structures": 27,
+      "n_missing": 35,
+      "n_observed": 285,
+      "n_context_dependent": 0,
+      "n_evidenced": 320,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P25454",
+      "length": 400,
+      "n_structures": 7,
+      "n_missing": 93,
+      "n_observed": 272,
+      "n_context_dependent": 0,
+      "n_evidenced": 365,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P26926",
+      "length": 258,
+      "n_structures": 19,
+      "n_missing": 11,
+      "n_observed": 166,
+      "n_context_dependent": 20,
+      "n_evidenced": 177,
+      "epsilon": 0.11299435028248588
+    },
+    {
+      "acc": "P26949",
+      "length": 833,
+      "n_structures": 8,
+      "n_missing": 102,
+      "n_observed": 249,
+      "n_context_dependent": 40,
+      "n_evidenced": 351,
+      "epsilon": 0.11396011396011396
+    },
+    {
+      "acc": "P28749",
+      "length": 1068,
+      "n_structures": 13,
+      "n_missing": 226,
+      "n_observed": 352,
+      "n_context_dependent": 0,
+      "n_evidenced": 578,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P29066",
+      "length": 418,
+      "n_structures": 20,
+      "n_missing": 36,
+      "n_observed": 332,
+      "n_context_dependent": 36,
+      "n_evidenced": 368,
+      "epsilon": 0.09782608695652174
+    },
+    {
+      "acc": "P29372",
+      "length": 298,
+      "n_structures": 11,
+      "n_missing": 79,
+      "n_observed": 194,
+      "n_context_dependent": 0,
+      "n_evidenced": 273,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P30519",
+      "length": 316,
+      "n_structures": 18,
+      "n_missing": 44,
+      "n_observed": 209,
+      "n_context_dependent": 0,
+      "n_evidenced": 253,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P31489",
+      "length": 455,
+      "n_structures": 1,
+      "n_missing": 31,
+      "n_observed": 179,
+      "n_context_dependent": 0,
+      "n_evidenced": 210,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P32120-2",
+      "length": 409,
+      "n_structures": 2,
+      "n_missing": 34,
+      "n_observed": 343,
+      "n_context_dependent": 0,
+      "n_evidenced": 377,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P32449",
+      "length": 370,
+      "n_structures": 50,
+      "n_missing": 17,
+      "n_observed": 328,
+      "n_context_dependent": 10,
+      "n_evidenced": 345,
+      "epsilon": 0.028985507246376812
+    },
+    {
+      "acc": "P32833",
+      "length": 620,
+      "n_structures": 12,
+      "n_missing": 254,
+      "n_observed": 224,
+      "n_context_dependent": 123,
+      "n_evidenced": 478,
+      "epsilon": 0.25732217573221755
+    },
+    {
+      "acc": "P34413",
+      "length": 683,
+      "n_structures": 4,
+      "n_missing": 22,
+      "n_observed": 653,
+      "n_context_dependent": 0,
+      "n_evidenced": 675,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P36156",
+      "length": 370,
+      "n_structures": 4,
+      "n_missing": 20,
+      "n_observed": 336,
+      "n_context_dependent": 0,
+      "n_evidenced": 356,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P37093",
+      "length": 503,
+      "n_structures": 13,
+      "n_missing": 42,
+      "n_observed": 433,
+      "n_context_dependent": 10,
+      "n_evidenced": 475,
+      "epsilon": 0.021052631578947368
+    },
+    {
+      "acc": "P37837",
+      "length": 337,
+      "n_structures": 2,
+      "n_missing": 10,
+      "n_observed": 322,
+      "n_context_dependent": 0,
+      "n_evidenced": 332,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P38319",
+      "length": 544,
+      "n_structures": 20,
+      "n_missing": 89,
+      "n_observed": 415,
+      "n_context_dependent": 0,
+      "n_evidenced": 504,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P40399",
+      "length": 335,
+      "n_structures": 7,
+      "n_missing": 24,
+      "n_observed": 78,
+      "n_context_dependent": 0,
+      "n_evidenced": 102,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P40484",
+      "length": 314,
+      "n_structures": 2,
+      "n_missing": 24,
+      "n_observed": 166,
+      "n_context_dependent": 27,
+      "n_evidenced": 190,
+      "epsilon": 0.14210526315789473
+    },
+    {
+      "acc": "P40727",
+      "length": 383,
+      "n_structures": 2,
+      "n_missing": 40,
+      "n_observed": 125,
+      "n_context_dependent": 0,
+      "n_evidenced": 165,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P41743",
+      "length": 596,
+      "n_structures": 17,
+      "n_missing": 15,
+      "n_observed": 376,
+      "n_context_dependent": 19,
+      "n_evidenced": 391,
+      "epsilon": 0.04859335038363171
+    },
+    {
+      "acc": "P42641",
+      "length": 390,
+      "n_structures": 8,
+      "n_missing": 46,
+      "n_observed": 330,
+      "n_context_dependent": 0,
+      "n_evidenced": 376,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P43586",
+      "length": 204,
+      "n_structures": 7,
+      "n_missing": 56,
+      "n_observed": 11,
+      "n_context_dependent": 123,
+      "n_evidenced": 67,
+      "epsilon": 1.835820895522388
+    },
+    {
+      "acc": "P45973",
+      "length": 191,
+      "n_structures": 5,
+      "n_missing": 42,
+      "n_observed": 107,
+      "n_context_dependent": 0,
+      "n_evidenced": 149,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P46097",
+      "length": 422,
+      "n_structures": 3,
+      "n_missing": 34,
+      "n_observed": 15,
+      "n_context_dependent": 0,
+      "n_evidenced": 49,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P49748",
+      "length": 655,
+      "n_structures": 3,
+      "n_missing": 16,
+      "n_observed": 554,
+      "n_context_dependent": 14,
+      "n_evidenced": 570,
+      "epsilon": 0.02456140350877193
+    },
+    {
+      "acc": "P50489",
+      "length": 622,
+      "n_structures": 1,
+      "n_missing": 60,
+      "n_observed": 286,
+      "n_context_dependent": 0,
+      "n_evidenced": 346,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P53228",
+      "length": 333,
+      "n_structures": 2,
+      "n_missing": 11,
+      "n_observed": 317,
+      "n_context_dependent": 0,
+      "n_evidenced": 328,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P53355",
+      "length": 1430,
+      "n_structures": 71,
+      "n_missing": 14,
+      "n_observed": 272,
+      "n_context_dependent": 49,
+      "n_evidenced": 286,
+      "epsilon": 0.17132867132867133
+    },
+    {
+      "acc": "P53847",
+      "length": 754,
+      "n_structures": 7,
+      "n_missing": 102,
+      "n_observed": 589,
+      "n_context_dependent": 41,
+      "n_evidenced": 691,
+      "epsilon": 0.059334298118668596
+    },
+    {
+      "acc": "P54820",
+      "length": 176,
+      "n_structures": 1,
+      "n_missing": 22,
+      "n_observed": 117,
+      "n_context_dependent": 0,
+      "n_evidenced": 139,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P55917",
+      "length": 440,
+      "n_structures": 60,
+      "n_missing": 243,
+      "n_observed": 177,
+      "n_context_dependent": 12,
+      "n_evidenced": 420,
+      "epsilon": 0.02857142857142857
+    },
+    {
+      "acc": "P62368",
+      "length": 240,
+      "n_structures": 2,
+      "n_missing": 16,
+      "n_observed": 156,
+      "n_context_dependent": 0,
+      "n_evidenced": 172,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P68431",
+      "length": 136,
+      "n_structures": 806,
+      "n_missing": 11,
+      "n_observed": 90,
+      "n_context_dependent": 13,
+      "n_evidenced": 101,
+      "epsilon": 0.12871287128712872
+    },
+    {
+      "acc": "P69229",
+      "length": 240,
+      "n_structures": 12,
+      "n_missing": 14,
+      "n_observed": 216,
+      "n_context_dependent": 0,
+      "n_evidenced": 230,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P71875",
+      "length": 386,
+      "n_structures": 2,
+      "n_missing": 24,
+      "n_observed": 352,
+      "n_context_dependent": 0,
+      "n_evidenced": 376,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P75862",
+      "length": 180,
+      "n_structures": 3,
+      "n_missing": 12,
+      "n_observed": 167,
+      "n_context_dependent": 0,
+      "n_evidenced": 179,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P80041",
+      "length": 486,
+      "n_structures": 4,
+      "n_missing": 22,
+      "n_observed": 464,
+      "n_context_dependent": 0,
+      "n_evidenced": 486,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P93343",
+      "length": 260,
+      "n_structures": 20,
+      "n_missing": 17,
+      "n_observed": 225,
+      "n_context_dependent": 0,
+      "n_evidenced": 242,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P9WFG9",
+      "length": 226,
+      "n_structures": 1,
+      "n_missing": 36,
+      "n_observed": 190,
+      "n_context_dependent": 0,
+      "n_evidenced": 226,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P9WGU1",
+      "length": 374,
+      "n_structures": 5,
+      "n_missing": 16,
+      "n_observed": 333,
+      "n_context_dependent": 0,
+      "n_evidenced": 349,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P9WHP7",
+      "length": 298,
+      "n_structures": 2,
+      "n_missing": 25,
+      "n_observed": 259,
+      "n_context_dependent": 0,
+      "n_evidenced": 284,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P9WI79",
+      "length": 664,
+      "n_structures": 3,
+      "n_missing": 10,
+      "n_observed": 246,
+      "n_context_dependent": 0,
+      "n_evidenced": 256,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P9WMI9",
+      "length": 118,
+      "n_structures": 2,
+      "n_missing": 12,
+      "n_observed": 96,
+      "n_context_dependent": 0,
+      "n_evidenced": 108,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "P9WNI7",
+      "length": 94,
+      "n_structures": 4,
+      "n_missing": 25,
+      "n_observed": 47,
+      "n_context_dependent": 0,
+      "n_evidenced": 72,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q02020",
+      "length": 463,
+      "n_structures": 4,
+      "n_missing": 61,
+      "n_observed": 395,
+      "n_context_dependent": 0,
+      "n_evidenced": 456,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q06263",
+      "length": 330,
+      "n_structures": 49,
+      "n_missing": 120,
+      "n_observed": 41,
+      "n_context_dependent": 169,
+      "n_evidenced": 161,
+      "epsilon": 1.049689440993789
+    },
+    {
+      "acc": "Q08647",
+      "length": 676,
+      "n_structures": 1,
+      "n_missing": 73,
+      "n_observed": 580,
+      "n_context_dependent": 0,
+      "n_evidenced": 653,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q09312",
+      "length": 632,
+      "n_structures": 19,
+      "n_missing": 56,
+      "n_observed": 374,
+      "n_context_dependent": 0,
+      "n_evidenced": 430,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q12211",
+      "length": 544,
+      "n_structures": 2,
+      "n_missing": 150,
+      "n_observed": 376,
+      "n_context_dependent": 0,
+      "n_evidenced": 526,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q12285",
+      "length": 212,
+      "n_structures": 23,
+      "n_missing": 35,
+      "n_observed": 166,
+      "n_context_dependent": 0,
+      "n_evidenced": 201,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q12517",
+      "length": 231,
+      "n_structures": 3,
+      "n_missing": 67,
+      "n_observed": 10,
+      "n_context_dependent": 146,
+      "n_evidenced": 77,
+      "epsilon": 1.896103896103896
+    },
+    {
+      "acc": "Q13546",
+      "length": 671,
+      "n_structures": 47,
+      "n_missing": 35,
+      "n_observed": 348,
+      "n_context_dependent": 12,
+      "n_evidenced": 383,
+      "epsilon": 0.031331592689295036
+    },
+    {
+      "acc": "Q13613",
+      "length": 665,
+      "n_structures": 4,
+      "n_missing": 70,
+      "n_observed": 487,
+      "n_context_dependent": 0,
+      "n_evidenced": 557,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q1D3H3",
+      "length": 489,
+      "n_structures": 2,
+      "n_missing": 68,
+      "n_observed": 132,
+      "n_context_dependent": 0,
+      "n_evidenced": 200,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q2WF71",
+      "length": 766,
+      "n_structures": 2,
+      "n_missing": 10,
+      "n_observed": 333,
+      "n_context_dependent": 0,
+      "n_evidenced": 343,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q45914",
+      "length": 1193,
+      "n_structures": 2,
+      "n_missing": 35,
+      "n_observed": 1149,
+      "n_context_dependent": 0,
+      "n_evidenced": 1184,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q4WE50",
+      "length": 272,
+      "n_structures": 2,
+      "n_missing": 27,
+      "n_observed": 45,
+      "n_context_dependent": 0,
+      "n_evidenced": 72,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q51693",
+      "length": 528,
+      "n_structures": 6,
+      "n_missing": 31,
+      "n_observed": 444,
+      "n_context_dependent": 0,
+      "n_evidenced": 475,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q5SWA1",
+      "length": 713,
+      "n_structures": 10,
+      "n_missing": 39,
+      "n_observed": 16,
+      "n_context_dependent": 0,
+      "n_evidenced": 55,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q5TDH0",
+      "length": 399,
+      "n_structures": 2,
+      "n_missing": 18,
+      "n_observed": 329,
+      "n_context_dependent": 10,
+      "n_evidenced": 347,
+      "epsilon": 0.02881844380403458
+    },
+    {
+      "acc": "Q5ZTK4",
+      "length": 1499,
+      "n_structures": 16,
+      "n_missing": 259,
+      "n_observed": 631,
+      "n_context_dependent": 263,
+      "n_evidenced": 890,
+      "epsilon": 0.2955056179775281
+    },
+    {
+      "acc": "Q5ZTK6",
+      "length": 873,
+      "n_structures": 15,
+      "n_missing": 120,
+      "n_observed": 728,
+      "n_context_dependent": 11,
+      "n_evidenced": 848,
+      "epsilon": 0.012971698113207548
+    },
+    {
+      "acc": "Q62768",
+      "length": 1735,
+      "n_structures": 36,
+      "n_missing": 14,
+      "n_observed": 1500,
+      "n_context_dependent": 70,
+      "n_evidenced": 1514,
+      "epsilon": 0.046235138705416116
+    },
+    {
+      "acc": "Q6BDI9",
+      "length": 236,
+      "n_structures": 5,
+      "n_missing": 14,
+      "n_observed": 193,
+      "n_context_dependent": 0,
+      "n_evidenced": 207,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q6ZT98",
+      "length": 887,
+      "n_structures": 2,
+      "n_missing": 135,
+      "n_observed": 325,
+      "n_context_dependent": 0,
+      "n_evidenced": 460,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q75PQ8",
+      "length": 576,
+      "n_structures": 2,
+      "n_missing": 82,
+      "n_observed": 18,
+      "n_context_dependent": 0,
+      "n_evidenced": 100,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q7BCK4",
+      "length": 1102,
+      "n_structures": 3,
+      "n_missing": 18,
+      "n_observed": 319,
+      "n_context_dependent": 0,
+      "n_evidenced": 337,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q7BTX0",
+      "length": 141,
+      "n_structures": 2,
+      "n_missing": 12,
+      "n_observed": 117,
+      "n_context_dependent": 0,
+      "n_evidenced": 129,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q83RJ4",
+      "length": 571,
+      "n_structures": 1,
+      "n_missing": 78,
+      "n_observed": 470,
+      "n_context_dependent": 0,
+      "n_evidenced": 548,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q84T68",
+      "length": 238,
+      "n_structures": 3,
+      "n_missing": 15,
+      "n_observed": 185,
+      "n_context_dependent": 0,
+      "n_evidenced": 200,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q8BPQ7",
+      "length": 1093,
+      "n_structures": 1,
+      "n_missing": 24,
+      "n_observed": 147,
+      "n_context_dependent": 0,
+      "n_evidenced": 171,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q8BXA0",
+      "length": 719,
+      "n_structures": 1,
+      "n_missing": 18,
+      "n_observed": 329,
+      "n_context_dependent": 0,
+      "n_evidenced": 347,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q8I384",
+      "length": 411,
+      "n_structures": 3,
+      "n_missing": 82,
+      "n_observed": 308,
+      "n_context_dependent": 0,
+      "n_evidenced": 390,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q8I639",
+      "length": 3056,
+      "n_structures": 4,
+      "n_missing": 875,
+      "n_observed": 1043,
+      "n_context_dependent": 362,
+      "n_evidenced": 1918,
+      "epsilon": 0.18873826903023982
+    },
+    {
+      "acc": "Q8IJ45",
+      "length": 762,
+      "n_structures": 2,
+      "n_missing": 49,
+      "n_observed": 268,
+      "n_context_dependent": 0,
+      "n_evidenced": 317,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q8IL97",
+      "length": 200,
+      "n_structures": 1,
+      "n_missing": 51,
+      "n_observed": 147,
+      "n_context_dependent": 0,
+      "n_evidenced": 198,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q8IWJ2",
+      "length": 1684,
+      "n_structures": 3,
+      "n_missing": 23,
+      "n_observed": 30,
+      "n_context_dependent": 0,
+      "n_evidenced": 53,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q8LGG8",
+      "length": 175,
+      "n_structures": 6,
+      "n_missing": 10,
+      "n_observed": 145,
+      "n_context_dependent": 0,
+      "n_evidenced": 155,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q8N5K1",
+      "length": 135,
+      "n_structures": 14,
+      "n_missing": 10,
+      "n_observed": 64,
+      "n_context_dependent": 0,
+      "n_evidenced": 74,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q8N6T7",
+      "length": 355,
+      "n_structures": 96,
+      "n_missing": 57,
+      "n_observed": 274,
+      "n_context_dependent": 12,
+      "n_evidenced": 331,
+      "epsilon": 0.03625377643504532
+    },
+    {
+      "acc": "Q8QL46",
+      "length": 56,
+      "n_structures": 2,
+      "n_missing": 10,
+      "n_observed": 46,
+      "n_context_dependent": 0,
+      "n_evidenced": 56,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q8S4P9",
+      "length": 448,
+      "n_structures": 3,
+      "n_missing": 49,
+      "n_observed": 353,
+      "n_context_dependent": 16,
+      "n_evidenced": 402,
+      "epsilon": 0.03980099502487562
+    },
+    {
+      "acc": "Q8TDX7",
+      "length": 302,
+      "n_structures": 29,
+      "n_missing": 29,
+      "n_observed": 255,
+      "n_context_dependent": 0,
+      "n_evidenced": 284,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q8WQM8",
+      "length": 230,
+      "n_structures": 24,
+      "n_missing": 21,
+      "n_observed": 209,
+      "n_context_dependent": 0,
+      "n_evidenced": 230,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q91V14",
+      "length": 1138,
+      "n_structures": 2,
+      "n_missing": 256,
+      "n_observed": 850,
+      "n_context_dependent": 0,
+      "n_evidenced": 1106,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q922S8",
+      "length": 721,
+      "n_structures": 7,
+      "n_missing": 41,
+      "n_observed": 325,
+      "n_context_dependent": 0,
+      "n_evidenced": 366,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q92597",
+      "length": 394,
+      "n_structures": 2,
+      "n_missing": 14,
+      "n_observed": 248,
+      "n_context_dependent": 0,
+      "n_evidenced": 262,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q92871",
+      "length": 262,
+      "n_structures": 7,
+      "n_missing": 11,
+      "n_observed": 244,
+      "n_context_dependent": 0,
+      "n_evidenced": 255,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q93K76",
+      "length": 109,
+      "n_structures": 2,
+      "n_missing": 10,
+      "n_observed": 88,
+      "n_context_dependent": 0,
+      "n_evidenced": 98,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q94A79",
+      "length": 420,
+      "n_structures": 8,
+      "n_missing": 65,
+      "n_observed": 227,
+      "n_context_dependent": 117,
+      "n_evidenced": 292,
+      "epsilon": 0.4006849315068493
+    },
+    {
+      "acc": "Q99PZ6",
+      "length": 196,
+      "n_structures": 1,
+      "n_missing": 25,
+      "n_observed": 171,
+      "n_context_dependent": 0,
+      "n_evidenced": 196,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q9BU02",
+      "length": 230,
+      "n_structures": 4,
+      "n_missing": 16,
+      "n_observed": 193,
+      "n_context_dependent": 0,
+      "n_evidenced": 209,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q9BUR4",
+      "length": 548,
+      "n_structures": 5,
+      "n_missing": 170,
+      "n_observed": 303,
+      "n_context_dependent": 61,
+      "n_evidenced": 473,
+      "epsilon": 0.12896405919661733
+    },
+    {
+      "acc": "Q9BZV1",
+      "length": 441,
+      "n_structures": 15,
+      "n_missing": 75,
+      "n_observed": 20,
+      "n_context_dependent": 340,
+      "n_evidenced": 95,
+      "epsilon": 3.5789473684210527
+    },
+    {
+      "acc": "Q9CA59",
+      "length": 256,
+      "n_structures": 4,
+      "n_missing": 54,
+      "n_observed": 157,
+      "n_context_dependent": 0,
+      "n_evidenced": 211,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q9FN03",
+      "length": 440,
+      "n_structures": 17,
+      "n_missing": 27,
+      "n_observed": 367,
+      "n_context_dependent": 24,
+      "n_evidenced": 394,
+      "epsilon": 0.06091370558375635
+    },
+    {
+      "acc": "Q9H9Q4",
+      "length": 299,
+      "n_structures": 39,
+      "n_missing": 63,
+      "n_observed": 180,
+      "n_context_dependent": 13,
+      "n_evidenced": 243,
+      "epsilon": 0.053497942386831275
+    },
+    {
+      "acc": "Q9I0F4",
+      "length": 1317,
+      "n_structures": 3,
+      "n_missing": 188,
+      "n_observed": 1129,
+      "n_context_dependent": 0,
+      "n_evidenced": 1317,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q9JK62",
+      "length": 502,
+      "n_structures": 4,
+      "n_missing": 75,
+      "n_observed": 255,
+      "n_context_dependent": 0,
+      "n_evidenced": 330,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q9LYG9",
+      "length": 734,
+      "n_structures": 35,
+      "n_missing": 252,
+      "n_observed": 225,
+      "n_context_dependent": 251,
+      "n_evidenced": 477,
+      "epsilon": 0.5262054507337526
+    },
+    {
+      "acc": "Q9NPD8",
+      "length": 197,
+      "n_structures": 19,
+      "n_missing": 43,
+      "n_observed": 149,
+      "n_context_dependent": 0,
+      "n_evidenced": 192,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q9NPJ4",
+      "length": 139,
+      "n_structures": 6,
+      "n_missing": 98,
+      "n_observed": 12,
+      "n_context_dependent": 0,
+      "n_evidenced": 110,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q9NX24",
+      "length": 153,
+      "n_structures": 10,
+      "n_missing": 21,
+      "n_observed": 128,
+      "n_context_dependent": 0,
+      "n_evidenced": 149,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q9NY12",
+      "length": 217,
+      "n_structures": 10,
+      "n_missing": 119,
+      "n_observed": 91,
+      "n_context_dependent": 0,
+      "n_evidenced": 210,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q9NZC2",
+      "length": 230,
+      "n_structures": 27,
+      "n_missing": 11,
+      "n_observed": 137,
+      "n_context_dependent": 26,
+      "n_evidenced": 148,
+      "epsilon": 0.17567567567567569
+    },
+    {
+      "acc": "Q9NZI8",
+      "length": 577,
+      "n_structures": 4,
+      "n_missing": 42,
+      "n_observed": 323,
+      "n_context_dependent": 0,
+      "n_evidenced": 365,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q9R0M6",
+      "length": 201,
+      "n_structures": 2,
+      "n_missing": 22,
+      "n_observed": 172,
+      "n_context_dependent": 0,
+      "n_evidenced": 194,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q9TU17",
+      "length": 413,
+      "n_structures": 60,
+      "n_missing": 216,
+      "n_observed": 177,
+      "n_context_dependent": 12,
+      "n_evidenced": 393,
+      "epsilon": 0.030534351145038167
+    },
+    {
+      "acc": "Q9TZX2",
+      "length": 188,
+      "n_structures": 10,
+      "n_missing": 12,
+      "n_observed": 165,
+      "n_context_dependent": 0,
+      "n_evidenced": 177,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q9UII6",
+      "length": 198,
+      "n_structures": 8,
+      "n_missing": 23,
+      "n_observed": 168,
+      "n_context_dependent": 0,
+      "n_evidenced": 191,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q9UMY1",
+      "length": 257,
+      "n_structures": 3,
+      "n_missing": 167,
+      "n_observed": 82,
+      "n_context_dependent": 0,
+      "n_evidenced": 249,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q9V6Q2",
+      "length": 225,
+      "n_structures": 3,
+      "n_missing": 146,
+      "n_observed": 69,
+      "n_context_dependent": 0,
+      "n_evidenced": 215,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q9Y2G2",
+      "length": 537,
+      "n_structures": 20,
+      "n_missing": 165,
+      "n_observed": 126,
+      "n_context_dependent": 233,
+      "n_evidenced": 291,
+      "epsilon": 0.8006872852233677
+    },
+    {
+      "acc": "Q9Y4B6",
+      "length": 1507,
+      "n_structures": 44,
+      "n_missing": 378,
+      "n_observed": 290,
+      "n_context_dependent": 808,
+      "n_evidenced": 668,
+      "epsilon": 1.2095808383233533
+    },
+    {
+      "acc": "Q9Y572",
+      "length": 518,
+      "n_structures": 13,
+      "n_missing": 175,
+      "n_observed": 251,
+      "n_context_dependent": 0,
+      "n_evidenced": 426,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "Q9ZKJ5",
+      "length": 325,
+      "n_structures": 10,
+      "n_missing": 28,
+      "n_observed": 268,
+      "n_context_dependent": 0,
+      "n_evidenced": 296,
+      "epsilon": 0.0
+    },
+    {
+      "acc": "T2B9R0",
+      "length": 274,
+      "n_structures": 5,
+      "n_missing": 30,
+      "n_observed": 107,
+      "n_context_dependent": 13,
+      "n_evidenced": 137,
+      "epsilon": 0.0948905109489051
+    }
+  ]
+}

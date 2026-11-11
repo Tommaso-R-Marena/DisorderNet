@@ -126,6 +126,7 @@ def apply_sota_stack(
     seed: int = 42,
     use_v6_pro: bool = False,
     use_meta_ensemble: bool = False,
+    cfg=None,
 ) -> tuple[dict, list, dict[str, np.ndarray]]:
     """
     GPU → optional v6 blend → three-way stack with physics prior.
@@ -144,9 +145,13 @@ def apply_sota_stack(
             pro_cache = v6_cache_path.replace(".json", "_pro.json")
             v6_probs_by_id = get_v6_pro_oof_probs(
                 proteins, n_folds=n_folds, seed=seed, cache_path=pro_cache,
+                cfg=cfg, fold_results=fold_results,
             )
         else:
-            oof_probs, oof_labels, _ = run_v6_lite_oof(proteins, n_folds=n_folds, seed=seed)
+            oof_probs, oof_labels, _ = run_v6_lite_oof(
+                proteins, n_folds=n_folds, seed=seed,
+                cfg=cfg, fold_results=fold_results,
+            )
             v6_probs_by_id = aligned_probs_from_oof(proteins, oof_probs)
             save_v6_probs_cache(v6_probs_by_id, v6_cache_path)
 
@@ -167,8 +172,9 @@ def apply_sota_stack(
                 "after": meta_report["after"],
                 "delta_auc_pooled": meta_report["delta_auc_pooled"],
                 "delta_ap_pooled": meta_report["delta_ap_pooled"],
-                "target_sota_auc": 0.895,
-                "gap_to_esmdispred": 0.895 - after["auc"],
+                "benchmark_comparability": (
+                    "DisProt homology-CV pooled AUC. NOT comparable to CAID3 figures such as ESMDisPred 0.895: different label definition (curator-annotated functional disorder vs missing residues in crystal structures), different proteins, different protocol. The comparable measurement is caid3_eval_report.json."
+                ),
                 "method": "meta_ensemble",
             }
             return report, fold_results_stacked, v6_probs_by_id
@@ -183,10 +189,17 @@ def apply_sota_stack(
         phys_p = np.asarray(physics_by_id[pid], dtype=np.float32)
         if len(v6_p) != len(gpu_p) or len(phys_p) != len(gpu_p):
             continue
-        gpu_chunks.append(gpu_p)
-        v6_chunks.append(v6_p)
-        phys_chunks.append(phys_p)
-        label_chunks.append(item["labels"])
+        # Aligned items are full-length with sentinels at residues the label
+        # source never evaluated; the stacker must not fit on fabricated calls.
+        from colab.biological_utility import evidenced
+
+        keep = evidenced(item)
+        if not keep.any():
+            continue
+        gpu_chunks.append(gpu_p[keep])
+        v6_chunks.append(v6_p[keep])
+        phys_chunks.append(phys_p[keep])
+        label_chunks.append(np.asarray(item["labels"], dtype=np.float32)[keep])
 
     if gpu_chunks:
         gpu_all = np.concatenate(gpu_chunks)
@@ -221,8 +234,9 @@ def apply_sota_stack(
         "after": {"pooled": {k: after[k] for k in ("auc", "ap", "n_residues")}},
         "delta_auc_pooled": after["auc"] - before["auc"],
         "delta_ap_pooled": after["ap"] - before["ap"],
-        "target_sota_auc": 0.895,
-        "gap_to_esmdispred": 0.895 - after["auc"],
+        "benchmark_comparability": (
+            "DisProt homology-CV pooled AUC. NOT comparable to CAID3 figures such as ESMDisPred 0.895: different label definition (curator-annotated functional disorder vs missing residues in crystal structures), different proteins, different protocol. The comparable measurement is caid3_eval_report.json."
+        ),
     }
     return report, fold_results_stacked, v6_probs_by_id
 
@@ -237,8 +251,8 @@ def print_sota_stack_report(report: dict) -> None:
     print(f"  Before   : AUC={b['pooled']['auc']:.4f}  AP={b['pooled']['ap']:.4f}")
     print(f"  After    : AUC={a['pooled']['auc']:.4f}  AP={a['pooled']['ap']:.4f}")
     print(f"  Δ AUC    : {report['delta_auc_pooled']:+.4f}")
-    gap = report.get("gap_to_esmdispred", 0)
-    print(f"  Gap→ESMDisPred (0.895): {gap:+.4f}")
+    print("  (CAID3 comparison lives in caid3_eval_report.json — "
+          "DisProt CV AUC is a different benchmark)")
     print(f"{'═' * 64}")
 
 

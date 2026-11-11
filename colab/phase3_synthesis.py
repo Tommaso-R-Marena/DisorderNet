@@ -65,9 +65,33 @@ def calibrate_plddt(
     return np.clip(plddt * (1.0 - strength * dn), 0.0, 100.0)
 
 
+def _reject_evidence_sentinels(labels: np.ndarray, scores: np.ndarray) -> None:
+    """Fail loudly, and legibly, if unevaluated residues reached a metric.
+
+    ``align_fold_predictions`` marks residues with no evidence as label ``-1``
+    and probability ``NaN`` so that forgetting to mask cannot be mistaken for a
+    real score. Every caller is supposed to drop them via ``evidenced(item)``.
+    When one does not, sklearn raises "Input contains NaN" from four frames deep
+    with no hint of which array or which caller — a message that has twice cost
+    a multi-hour GPU run to diagnose. Name the actual problem instead.
+    """
+    n_lab = int(np.count_nonzero(labels < 0))
+    n_scr = int(np.count_nonzero(~np.isfinite(scores)))
+    if not (n_lab or n_scr):
+        return
+    raise ValueError(
+        f"unevaluated residues reached a metric: {n_lab} label==-1 and "
+        f"{n_scr} non-finite score(s) out of {len(labels)}. These are evidence "
+        f"sentinels, not data. The caller must drop them with "
+        f"colab.biological_utility.evidenced(item) before scoring; masking here "
+        f"would silently change the denominator and inflate the metric."
+    )
+
+
 def _safe_auc_ap(labels: np.ndarray, scores: np.ndarray) -> tuple[Optional[float], Optional[float]]:
     labels = np.asarray(labels, dtype=np.int8)
     scores = np.asarray(scores, dtype=np.float32)
+    _reject_evidence_sentinels(labels, scores)
     if len(labels) < 5 or len(np.unique(labels)) < 2:
         return None, None
     return float(roc_auc_score(labels, scores)), float(average_precision_score(labels, scores))
@@ -277,13 +301,16 @@ def run_structure_calibration_report(
         plddt = plddt_by_protein[pid]
         if len(plddt) != item["protein"]["length"]:
             continue
-        valid = ~np.isnan(plddt)
+        # One combined mask — pLDDT present AND a real label.
+        from colab.biological_utility import evidenced
+
+        valid = ~np.isnan(plddt) & evidenced(item)
         if valid.sum() == 0:
             continue
         proteins_used += 1
-        all_labels.append(item["labels"][valid])
-        all_probs.append(item["probs"][valid])
-        all_plddt.append(plddt[valid])
+        all_labels.append(np.asarray(item["labels"], dtype=np.float32)[valid])
+        all_probs.append(np.asarray(item["probs"], dtype=np.float32)[valid])
+        all_plddt.append(np.asarray(plddt, dtype=np.float32)[valid])
 
     if not all_labels:
         return {
@@ -350,7 +377,9 @@ def build_benchmark_ranking(our_auc: float, benchmarks: Optional[list[dict]] = N
         "delta_vs_af3": float(our_auc - 0.747),
         "delta_vs_af2": float(our_auc - 0.770),
         "delta_vs_v6": float(our_auc - 0.831),
-        "delta_vs_sota_esmdispred": float(our_auc - 0.895),
+        "benchmark_comparability": (
+            "DisProt homology-CV pooled AUC. NOT comparable to CAID3 figures such as ESMDisPred 0.895: different label definition (curator-annotated functional disorder vs missing residues in crystal structures), different proteins, different protocol. The comparable measurement is caid3_eval_report.json."
+        ),
         "table": rows,
     }
 
@@ -425,9 +454,13 @@ def run_phase3_integrated_report(
 
 
 def _build_headline(benchmark: dict, phases: dict, calibration: dict) -> str:
+    # "GPU AUC" was a misattribution: this figure is the final pipeline output
+    # after the v6 physics GBDT and meta-stack are ensembled in, not the neural
+    # model's own cross-validated score. In the 650M run it read "GPU AUC 0.788"
+    # while the GPU model's pooled OOF AUC was 0.7203 and the GBDT alone 0.7804.
     parts = [
-        f"GPU AUC {benchmark['our_auc']:.3f} "
-        f"(contextual lit. rank #{benchmark['rank_among_published']}/{benchmark['n_methods']}, not head-to-head)",
+        f"Final stacked AUC {benchmark['our_auc']:.3f} (GPU + physics GBDT + meta-stack; "
+        f"contextual lit. rank #{benchmark['rank_among_published']}/{benchmark['n_methods']}, not head-to-head)",
     ]
     if benchmark["beats_af3_plddt"]:
         parts.append(f"+{benchmark['delta_vs_af3']:.1%} vs AF3-pLDDT")
@@ -463,7 +496,8 @@ def print_phase3_report(report: dict) -> None:
     print(f"  vs AF3-pLDDT: {bench['delta_vs_af3']:+.4f}")
     print(f"  vs AF2-pLDDT: {bench['delta_vs_af2']:+.4f}")
     print(f"  vs v6 CPU   : {bench['delta_vs_v6']:+.4f}")
-    print(f"  vs SOTA     : {bench['delta_vs_sota_esmdispred']:+.4f}")
+    # No CAID3 delta here: this block reports DisProt CV, a different
+    # benchmark. See caid3_eval_report.json for the comparable number.
 
     cal_rep = report.get("structure_calibration", {})
     if not cal_rep.get("insufficient_data"):

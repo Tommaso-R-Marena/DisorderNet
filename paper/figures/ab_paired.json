@@ -1,0 +1,97 @@
+{
+  "disorder_pdb": {
+    "task": "disorder_pdb",
+    "method_a": "CHIRAL",
+    "method_b": "CONTROL",
+    "auc_a": 0.9614140631553214,
+    "auc_b": 0.9586616733840252,
+    "delta_auc": 0.0027523897712962153,
+    "aps_a": 0.9369742431396417,
+    "aps_b": 0.9326490590041807,
+    "delta_aps": 0.004325184135461013,
+    "delta_ci": [
+      -0.0003572619025049628,
+      0.0060353878802026075
+    ],
+    "p_two_sided": 0.08659134086591341,
+    "n_common_targets": 319,
+    "n_residues": 99239,
+    "n_boot_used": 10000
+  },
+  "disorder_nox": {
+    "task": "disorder_nox",
+    "method_a": "CHIRAL",
+    "method_b": "CONTROL",
+    "auc_a": 0.8575738422024084,
+    "auc_b": 0.8557182720388359,
+    "delta_auc": 0.0018555701635725175,
+    "aps_a": 0.6688416344224704,
+    "aps_b": 0.6861508897098147,
+    "delta_aps": -0.017309255287344394,
+    "delta_ci": [
+      -0.011444791326582425,
+      0.017339559805607765
+    ],
+    "p_two_sided": 0.8929107089291071,
+    "n_common_targets": 204,
+    "n_residues": 99977,
+    "n_boot_used": 10000
+  },
+  "binding": {
+    "task": "binding",
+    "method_a": "CHIRAL",
+    "method_b": "CONTROL",
+    "auc_a": 0.7742284241666648,
+    "auc_b": 0.724668683956269,
+    "delta_auc": 0.049559740210395775,
+    "aps_a": 0.24986875564828662,
+    "aps_b": 0.20976744038902775,
+    "delta_aps": 0.04010131525925886,
+    "delta_ci": [
+      -0.012106385921910231,
+      0.10024313337397055
+    ],
+    "p_two_sided": 0.19978002199780023,
+    "n_common_targets": 52,
+    "n_residues": 28263,
+    "n_boot_used": 10000
+  },
+  "binding_idr": {
+    "task": "binding_idr",
+    "method_a": "CHIRAL",
+    "method_b": "CONTROL",
+    "auc_a": 0.6018209716869908,
+    "auc_b": 0.5422368860968871,
+    "delta_auc": 0.05958408559010364,
+    "aps_a": 0.436484379336848,
+    "aps_b": 0.3951564138410483,
+    "delta_aps": 0.0413279654957997,
+    "delta_ci": [
+      -7.332283419870976e-05,
+      0.10333614386516228
+    ],
+    "p_two_sided": 0.05119488051194881,
+    "n_common_targets": 52,
+    "n_residues": 7741,
+    "n_boot_used": 10000
+  },
+  "linker": {
+    "task": "linker",
+    "method_a": "CHIRAL",
+    "method_b": "CONTROL",
+    "auc_a": 0.9112132170477937,
+    "auc_b": 0.9009149253780595,
+    "delta_auc": 0.010298291669734172,
+    "aps_a": 0.4555721510673231,
+    "aps_b": 0.42751411226166025,
+    "delta_aps": 0.02805803880566282,
+    "delta_ci": [
+      -0.004834383406628675,
+      0.030535233870056074
+    ],
+    "p_two_sided": 0.1743825617438256,
+    "n_common_targets": 31,
+    "n_residues": 20498,
+    "n_boot_used": 10000
+  }
+}

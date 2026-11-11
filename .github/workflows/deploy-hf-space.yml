@@ -1,0 +1,29 @@
+name: Deploy Hugging Face Space
+
+on:
+  push:
+    branches: [master, main]
+    paths: ["hf_space/**", "disordernet/**", ".github/workflows/deploy-hf-space.yml"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install huggingface_hub
+      - name: The app imports before it is shipped
+        run: |
+          pip install -e ".[web]"
+          python -c "import hf_space.app as a; print('app builds:', bool(a.build()))"
+      - name: Push to the Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE || 'The-Philosopher/DisorderNet-Capacity' }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::warning::HF_TOKEN not set; skipping deploy"; exit 0
+          fi
+          python scripts/deploy_hf_space.py --space "$HF_SPACE"

@@ -185,6 +185,102 @@ def query_jobs(
     return parse_sacct(proc.stdout or "")
 
 
+def pending_reasons(
+    job_ids: list[str],
+    *,
+    runner: Optional[Callable[[list[str]], str]] = None,
+) -> dict[str, str]:
+    """Map job id -> squeue pending reason (empty when not pending/queued).
+
+    ``sacct`` does not expose why a job is pending, and the distinction matters:
+    a job held by ``DependencyNeverSatisfied`` is dead, not progressing.
+    """
+    ids = [str(j) for j in job_ids if j and not str(j).startswith("DRYRUN")]
+    if not ids:
+        return {}
+    if runner is not None:
+        text = runner(ids)
+    else:
+        cmd = ["squeue", "-h", "-j", ",".join(ids), "-o", "%i|%T|%r"]
+        try:
+            proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        except FileNotFoundError:
+            return {}
+        text = proc.stdout or ""
+    out: dict[str, str] = {}
+    for line in (text or "").strip().splitlines():
+        parts = line.strip().split("|")
+        if len(parts) >= 3:
+            out[parts[0].strip()] = parts[2].strip()
+    return out
+
+
+# squeue reasons that mean the job will never start on its own.
+DEAD_PENDING_REASONS = {
+    "DependencyNeverSatisfied",
+    "JobHeldAdmin",
+    "JobHeldUser",
+    "InvalidQOS",
+    "InvalidAccount",
+    "PartitionConfig",
+    "QOSGrpBillingMinutes",
+}
+
+
+def phase_is_stalled(
+    phase: dict,
+    states: dict[str, JobState],
+    reasons: Optional[dict[str, str]] = None,
+) -> bool:
+    """True when a phase cannot progress even though jobs still look ACTIVE.
+
+    Two cases the plain ``any(st.active)`` check got wrong, both of which left
+    the watchdog reporting ``status=running folds=0/10`` indefinitely after the
+    GPU job had already failed:
+
+    * the main job reached a terminal-bad state while its dependents stayed
+      PENDING (Slurm keeps them queued as DependencyNeverSatisfied), and
+    * every remaining active job is pending for a reason that never clears.
+    """
+    reasons = reasons or {}
+    jids = [str(j) for j in phase.get("job_ids", {}).values()]
+    if not jids:
+        return False
+
+    known = [states[j] for j in jids if j in states]
+    if not known:
+        return False
+
+    if any(st.bad for st in known):
+        return True
+
+    active = [st for st in known if st.active]
+    if active and all(
+        st.state == "PENDING" and reasons.get(st.job_id, "") in DEAD_PENDING_REASONS
+        for st in active
+    ):
+        return True
+    return False
+
+
+def cancel_jobs(job_ids: list[str], *, runner: Optional[Callable[[list[str]], None]] = None) -> None:
+    """Cancel this campaign's own orphaned jobs before resubmitting a phase.
+
+    Without this, dependents held by DependencyNeverSatisfied stay queued
+    forever, keep looking ACTIVE to the next poll, and waste a scheduler slot.
+    """
+    ids = [str(j) for j in job_ids if j and not str(j).startswith("DRYRUN")]
+    if not ids:
+        return
+    if runner is not None:
+        runner(ids)
+        return
+    try:
+        subprocess.run(["scancel", *ids], check=False, capture_output=True, text=True)
+    except FileNotFoundError:
+        pass
+
+
 def user_has_active_jobs(
     user: Optional[str] = None,
     *,
@@ -385,6 +481,7 @@ def advance_campaign(
     *,
     dry_run: bool = False,
     job_query: Optional[Callable[[list[str]], dict[str, JobState]]] = None,
+    reason_query: Optional[Callable[[list[str]], dict[str, str]]] = None,
 ) -> dict:
     """One decision step: start / resubmit / mark done. Mutates campaign."""
     for phase in campaign["phases"]:
@@ -397,13 +494,30 @@ def advance_campaign(
 
         jids = [str(j) for j in phase.get("job_ids", {}).values()]
         states = (job_query(jids) if job_query else query_jobs(jids)) if jids else {}
+        reasons = (
+            (reason_query(jids) if reason_query else pending_reasons(jids)) if jids else {}
+        )
 
-        if any(st.active for st in states.values()):
+        stalled = phase_is_stalled(phase, states, reasons)
+
+        # A PENDING dependent of a failed job is not progress. Checking this
+        # before the ACTIVE short-circuit is what stops the campaign reporting
+        # "running" forever after the GPU job has already died.
+        if not stalled and any(st.active for st in states.values()):
             phase["status"] = "running"
             campaign["status"] = "running"
             return campaign
 
-        if phase["status"] == "pending" or needs_resubmit(phase, states):
+        if stalled and phase.get("job_ids"):
+            orphans = [
+                str(j) for j in phase["job_ids"].values()
+                if str(j) in states and states[str(j)].active
+            ]
+            if orphans and not dry_run:
+                print(f"[stalled] phase={phase['kind']} cancelling orphaned jobs: {orphans}")
+                cancel_jobs(orphans)
+
+        if phase["status"] == "pending" or stalled or needs_resubmit(phase, states):
             if campaign["resubmit_count"] >= campaign.get("max_resubmits", 128):
                 phase["status"] = "failed"
                 campaign["status"] = "failed"

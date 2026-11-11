@@ -1,0 +1,10 @@
+round,benchmark,n_targets,n_residues,eps,delta,noise_budget_residues,k_from_target_grid,k_from_residues,k_noise_only,n_entrants
+CAID3,Disorder-PDB,233,99239,0.080081,0.0,7947,7,7,7,117
+CAID3,Disorder-NOX,178,99977,0.080081,0.0,8006,7,7,7,117
+CAID3,Binding,49,28263,0.080081,0.0,2263,7,7,7,117
+CAID3,Binding-IDR,42,7741,0.080081,0.0,620,7,7,7,117
+CAID3,Linker,31,20498,0.080081,0.0,1642,7,7,7,117
+CAID2,Disorder-PDB,256,130877,0.080081,0.0,10481,7,7,7,
+CAID2,Disorder-NOX,181,160802,0.080081,0.0,12877,7,7,7,
+CAID2,Binding,71,67169,0.080081,0.0,5379,6,7,7,
+CAID2,Linker,40,37150,0.080081,0.0,2975,6,7,7,

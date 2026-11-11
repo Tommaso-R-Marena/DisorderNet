@@ -147,14 +147,25 @@ def composite_disorder_loss(
         base_loss = (per_residue * sw).sum() / sw.sum().clamp(min=1.0)
 
     total = base_loss
+
+    # Dice/Tversky are set-overlap losses and take a mask rather than weights, so
+    # they would otherwise score residues the labels say nothing about. Zero
+    # sample weight marks an UNKNOWN position under PDB-derived labels (see
+    # colab/label_sources.py); counting those as "ordered" would let the overlap
+    # terms optimise against a labelling artefact. Restrict them to evidenced
+    # residues. With curated labels every residue is evidenced and this is a no-op.
+    region_mask = mask
+    if sample_weight is not None:
+        region_mask = mask & (sample_weight > 0)
+
     if getattr(cfg, "use_dice_loss", False) and logits.dim() == 2:
-        dice = batch_mean_dice_loss(logits, labels, mask)
+        dice = batch_mean_dice_loss(logits, labels, region_mask)
         w = getattr(cfg, "dice_loss_weight", 0.25)
         total = total + w * dice
 
     if getattr(cfg, "use_tversky_loss", False) and logits.dim() == 2:
         tversky = batch_mean_tversky_loss(
-            logits, labels, mask,
+            logits, labels, region_mask,
             alpha=getattr(cfg, "tversky_alpha", 0.3),
             beta=getattr(cfg, "tversky_beta", 0.7),
         )

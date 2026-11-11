@@ -17,8 +17,8 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from colab.compact_checkpoint import load_compact_checkpoint
-from colab.cv_splits import get_cv_splits
+from colab.compact_checkpoint import is_trainable_key, load_compact_checkpoint
+from colab.cv_splits import resolve_cv_splits
 from colab.disordernet_gpu import (
     DisorderNetGPU,
     DisProtDataset,
@@ -107,7 +107,11 @@ def _predict_proteins_multitask(
                 )
                 fn_probs = None
             else:
-                with torch.inference_mode():
+                # no_grad, not inference_mode: fair-esm caches rotary cos/sin
+                # tables per sequence length, and a table created under
+                # inference_mode poisons any later training step that reuses it.
+                # See the note on eval_epoch in colab/disordernet_gpu.py.
+                with torch.no_grad():
                     out = _forward_multitask(
                         model, tokens, aa, mask, rich_feats=rich_t, plddt_feats=plddt_t,
                     )
@@ -119,9 +123,13 @@ def _predict_proteins_multitask(
                     dis_probs = torch.sigmoid(out).float()
                     fn_probs = None
 
+        # .float() before .numpy(): autocast can hand back bfloat16, which numpy
+        # cannot represent. Belt-and-braces alongside the cast in
+        # mc_dropout_predict_probs — this conversion sits after every inference
+        # branch, so it is the last place a stray low-precision dtype can leak out.
         mask_np = mask.cpu().numpy()
-        dis_np = dis_probs.cpu().numpy()
-        fn_np = fn_probs.cpu().numpy() if fn_probs is not None else None
+        dis_np = dis_probs.float().cpu().numpy()
+        fn_np = fn_probs.float().cpu().numpy() if fn_probs is not None else None
         for i, pid in enumerate(ids):
             m = mask_np[i]
             disorder_out[pid] = dis_np[i][m].astype(np.float32)
@@ -139,12 +147,24 @@ def _load_fold_model(
     fold_model = DisorderNetGPU(esm_backbone, cfg, verbose=False).to(device)
     try:
         load_compact_checkpoint(ckpt_path, fold_model, device=device)
-    except Exception:
+    except Exception as exc:
+        # The old bare `except: ... strict=False` turned any load problem into a
+        # partially-restored model that still produced plausible predictions.
+        # Retry the legacy layout explicitly, then verify the trainable weights
+        # actually landed rather than assuming they did.
         payload = torch.load(ckpt_path, map_location=device, weights_only=False)
-        if isinstance(payload, dict) and "trainable" in payload:
-            fold_model.load_state_dict(payload["trainable"], strict=False)
-        else:
-            fold_model.load_state_dict(payload, strict=False)
+        state = payload["trainable"] if isinstance(payload, dict) and "trainable" in payload \
+            else payload
+        missing, unexpected = fold_model.load_state_dict(state, strict=False)
+        trained_missing = [k for k in missing if is_trainable_key(k)]
+        if trained_missing or unexpected:
+            raise RuntimeError(
+                f"Could not fully restore {os.path.basename(ckpt_path)}: "
+                f"{len(trained_missing)} trainable tensors unmatched, "
+                f"{len(unexpected)} unexpected. Scoring a partially-restored "
+                f"model would quietly degrade every downstream metric. "
+                f"Original error: {exc}"
+            ) from exc
     fold_model.eval()
     return fold_model
 
@@ -169,7 +189,10 @@ def run_fold_model_soup(
 
     ckpt_dir = checkpoint_dir or cfg.checkpoint_dir
     n_folds = cfg.n_folds
-    splits = get_cv_splits(proteins, n_folds)
+    # Must match the partition the fold checkpoints were trained under. Re-deriving
+    # with the default "protein" method while training used "homology" makes
+    # mode="held_out" evaluate each fold model on proteins it was trained on.
+    splits = resolve_cv_splits(proteins, n_folds, cfg=cfg, fold_results=fold_results)
     device = cfg.device
 
     prob_sum: dict[str, np.ndarray] = {

@@ -1,0 +1,271 @@
+{
+ "task": "disorder_pdb",
+ "method": "/scratch4/sfried3/jbeale3_disordernet/multitask_windowed/caid_submissions:DisorderNet",
+ "n_splits": 50,
+ "results": {
+  "b10_alpha0.1": {
+   "region_BY": {
+    "residues_reported": 561.5,
+    "realised_residue_fdp": 0.0,
+    "power": 0.09773226560839063
+   },
+   "residue_BY": {
+    "residues_reported": 204.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.033562316123807306
+   },
+   "region_BH": {
+    "residues_reported": 5180.5,
+    "realised_residue_fdp": 0.06786888892248091,
+    "power": 0.7866465064459653
+   },
+   "region_Bonf": {
+    "residues_reported": 0.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.0
+   },
+   "calibration": {
+    "region_have": 5418.5,
+    "region_need": 166000.34152712574,
+    "residue_have": 53945.0,
+    "residue_need": 2123426.040637339,
+    "region_shortfall": 30.621781906254228,
+    "residue_shortfall": 39.28158658667385,
+    "budget_ratio": 12.795853666830384
+   },
+   "region_over_residue": 2.752450980392157,
+   "fdp_lift_max_gap": 0.005928375268839249
+  },
+  "b10_alpha0.05": {
+   "region_BY": {
+    "residues_reported": 0.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.0
+   },
+   "residue_BY": {
+    "residues_reported": 0.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.0
+   },
+   "region_BH": {
+    "residues_reported": 4207.0,
+    "realised_residue_fdp": 0.030305839299031606,
+    "power": 0.6305291005291005
+   },
+   "region_Bonf": {
+    "residues_reported": 0.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.0
+   },
+   "calibration": {
+    "region_have": 5468.0,
+    "region_need": 328694.36621311726,
+    "residue_have": 54452.0,
+    "residue_need": 4207332.160985861,
+    "region_shortfall": 60.1060418126515,
+    "residue_shortfall": 77.23791357485715,
+    "budget_ratio": 12.799847486608847
+   },
+   "region_over_residue": 0.0,
+   "fdp_lift_max_gap": 0.006741573033707864
+  },
+  "b25_alpha0.1": {
+   "region_BY": {
+    "residues_reported": 603.5,
+    "realised_residue_fdp": 0.0,
+    "power": 0.12236286919831224
+   },
+   "residue_BY": {
+    "residues_reported": 201.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.02675403642513442
+   },
+   "region_BH": {
+    "residues_reported": 4916.5,
+    "realised_residue_fdp": 0.07421522566384486,
+    "power": 0.7946636882601141
+   },
+   "region_Bonf": {
+    "residues_reported": 0.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.0
+   },
+   "calibration": {
+    "region_have": 2177.5,
+    "region_need": 57396.893314612986,
+    "residue_have": 54161.5,
+    "residue_need": 2066598.9600585476,
+    "region_shortfall": 26.37581662078781,
+    "residue_shortfall": 38.149128905658756,
+    "budget_ratio": 35.977989662718215
+   },
+   "region_over_residue": 3.0024875621890548,
+   "fdp_lift_max_gap": 0.026177341642519072
+  },
+  "b25_alpha0.05": {
+   "region_BY": {
+    "residues_reported": 0.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.0
+   },
+   "residue_BY": {
+    "residues_reported": 118.5,
+    "realised_residue_fdp": 0.0,
+    "power": 0.017654925024953194
+   },
+   "region_BH": {
+    "residues_reported": 4034.5,
+    "realised_residue_fdp": 0.03901222139354771,
+    "power": 0.659726581572156
+   },
+   "region_Bonf": {
+    "residues_reported": 0.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.0
+   },
+   "calibration": {
+    "region_have": 2179.5,
+    "region_need": 115289.84248440844,
+    "residue_have": 54194.0,
+    "residue_need": 4139276.234489533,
+    "region_shortfall": 52.83852584957888,
+    "residue_shortfall": 76.55181886146558,
+    "budget_ratio": 35.9819343091507
+   },
+   "region_over_residue": 0.0,
+   "fdp_lift_max_gap": 0.021842462156068998
+  },
+  "b50_alpha0.1": {
+   "region_BY": {
+    "residues_reported": 0.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.0
+   },
+   "residue_BY": {
+    "residues_reported": 246.5,
+    "realised_residue_fdp": 0.0,
+    "power": 0.037312689775434615
+   },
+   "region_BH": {
+    "residues_reported": 4811.5,
+    "realised_residue_fdp": 0.09058889686993651,
+    "power": 0.8239018087855297
+   },
+   "region_Bonf": {
+    "residues_reported": 0.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.0
+   },
+   "calibration": {
+    "region_have": 1128.0,
+    "region_need": 25485.40083992335,
+    "residue_have": 54407.0,
+    "residue_need": 2042299.0743273431,
+    "region_shortfall": 22.85929842037541,
+    "residue_shortfall": 37.84251434828096,
+    "budget_ratio": 79.98754615005875
+   },
+   "region_over_residue": 0.0,
+   "fdp_lift_max_gap": 0.04495026250345399
+  },
+  "b50_alpha0.05": {
+   "region_BY": {
+    "residues_reported": 0.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.0
+   },
+   "residue_BY": {
+    "residues_reported": 37.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.007258573532505786
+   },
+   "region_BH": {
+    "residues_reported": 4202.0,
+    "realised_residue_fdp": 0.04256021135470186,
+    "power": 0.7037270341207349
+   },
+   "region_Bonf": {
+    "residues_reported": 0.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.0
+   },
+   "calibration": {
+    "region_have": 1124.5,
+    "region_need": 52558.43752941206,
+    "residue_have": 54282.5,
+    "residue_need": 4201705.465125048,
+    "region_shortfall": 46.80802686555553,
+    "residue_shortfall": 77.08013383197803,
+    "budget_ratio": 79.81694658399954
+   },
+   "region_over_residue": 0.0,
+   "fdp_lift_max_gap": 0.03721112416764591
+  },
+  "b100_alpha0.1": {
+   "region_BY": {
+    "residues_reported": 2942.5,
+    "realised_residue_fdp": 0.02410071377873731,
+    "power": 0.5675324675324676
+   },
+   "residue_BY": {
+    "residues_reported": 203.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.03575379513233227
+   },
+   "region_BH": {
+    "residues_reported": 4225.0,
+    "realised_residue_fdp": 0.09907836010825348,
+    "power": 0.7828571428571429
+   },
+   "region_Bonf": {
+    "residues_reported": 0.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.0
+   },
+   "calibration": {
+    "region_have": 567.0,
+    "region_need": 12168.485132105785,
+    "residue_have": 53668.0,
+    "residue_need": 2160457.0077403653,
+    "region_shortfall": 21.400354587504133,
+    "residue_shortfall": 39.87871192520191,
+    "budget_ratio": 176.9012782830428
+   },
+   "region_over_residue": 14.495073891625616,
+   "fdp_lift_max_gap": 0.07664424138969776
+  },
+  "b100_alpha0.05": {
+   "region_BY": {
+    "residues_reported": 0.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.0
+   },
+   "residue_BY": {
+    "residues_reported": 95.5,
+    "realised_residue_fdp": 0.0,
+    "power": 0.014805797143127415
+   },
+   "region_BH": {
+    "residues_reported": 3551.0,
+    "realised_residue_fdp": 0.05882400679840428,
+    "power": 0.728219696969697
+   },
+   "region_Bonf": {
+    "residues_reported": 0.0,
+    "realised_residue_fdp": 0.0,
+    "power": 0.0
+   },
+   "calibration": {
+    "region_have": 571.5,
+    "region_need": 23373.66317352335,
+    "residue_have": 54148.0,
+    "residue_need": 4156024.397101284,
+    "region_shortfall": 41.06631336061571,
+    "residue_shortfall": 77.1825278747839,
+    "budget_ratio": 178.27451091489584
+   },
+   "region_over_residue": 0.0,
+   "fdp_lift_max_gap": 0.06172446706967865
+  }
+ }
+}

@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict
-from typing import Any, Optional
+from typing import Any, Optional  # noqa: F401
 
 import numpy as np
 from sklearn.model_selection import GroupKFold
@@ -97,6 +97,74 @@ def get_cv_splits(
     groups = np.arange(len(proteins))
     gkf = GroupKFold(n_splits=n_folds)
     return list(gkf.split(groups, groups=groups))
+
+
+def splits_from_val_ids(
+    proteins: list,
+    fold_val_ids: list,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Rebuild (train_idx, val_idx) from validation protein IDs recorded at training time.
+
+    IDs absent from ``proteins`` are dropped; every protein not in a fold's
+    validation set becomes part of that fold's training set.
+    """
+    index_by_id = {p["id"]: i for i, p in enumerate(proteins)}
+    n = len(proteins)
+    splits: list[tuple[np.ndarray, np.ndarray]] = []
+    for val_ids in fold_val_ids:
+        val_idx = np.array(
+            sorted({index_by_id[pid] for pid in val_ids if pid in index_by_id}),
+            dtype=int,
+        )
+        mask = np.ones(n, dtype=bool)
+        mask[val_idx] = False
+        splits.append((np.flatnonzero(mask), val_idx))
+    return splits
+
+
+def resolve_cv_splits(
+    proteins: list,
+    n_folds: int,
+    *,
+    cfg: Any = None,
+    split_method: Optional[str] = None,
+    homology_min_identity: Optional[float] = None,
+    fold_results: Optional[list] = None,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Authoritative CV splits for any post-training analysis.
+
+    Post-training consumers (fold soup, v6/v6-pro OOF, fusion, stacking, stats)
+    must partition proteins exactly the way training did. Calling
+    ``get_cv_splits(proteins, n_folds)`` instead re-derives them with the
+    *default* ``split_method="protein"``, which silently disagrees with the
+    ``"homology"`` splits used by the ultra / ultra3b / screen_plus profiles.
+    The consequences are not cosmetic: a fold checkpoint gets evaluated on
+    proteins it was trained on ("held-out" soup), and the v6 stream is trained
+    on homologues of the proteins it then scores — both inflate the reported
+    pooled AUC.
+
+    Resolution order:
+      1. ``fold_results[i]["val_ids"]`` — recorded at training time, so it is
+         ground truth even if the protein list or split logic later changes.
+      2. ``split_method`` / ``homology_min_identity`` (explicit, else from ``cfg``).
+    """
+    if fold_results:
+        val_ids = [fr.get("val_ids") for fr in fold_results]
+        if all(v for v in val_ids):
+            return splits_from_val_ids(proteins, val_ids)
+
+    if split_method is None:
+        split_method = getattr(cfg, "split_method", "protein") if cfg is not None else "protein"
+    if homology_min_identity is None:
+        homology_min_identity = (
+            getattr(cfg, "homology_min_identity", 0.40) if cfg is not None else 0.40
+        )
+    return get_cv_splits(
+        proteins,
+        n_folds,
+        split_method=split_method,
+        homology_min_identity=homology_min_identity,
+    )
 
 
 def get_fold_val_protein_ids(

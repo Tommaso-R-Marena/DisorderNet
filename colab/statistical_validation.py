@@ -73,8 +73,15 @@ def sign_test_two_sided(n_positive: int, n_negative: int) -> dict:
     k = min(n_positive, n_negative)
     p_one_sided = sum(comb(n, i) for i in range(0, k + 1)) / (2 ** n)
     p_two_sided = min(1.0, 2.0 * p_one_sided)
+    # With 5 CV folds the most extreme outcome (5-0) gives p = 2/32 = 0.0625, so
+    # this test cannot reach p<0.05 no matter how large the effect. Surface that
+    # floor so "not significant" is not misread as evidence of no effect.
+    min_attainable = min(1.0, 2.0 / (2 ** n)) if n else 1.0
     return {
         "p_value": float(p_two_sided),
+        "alternative": "two-sided",
+        "min_attainable_p": float(min_attainable),
+        "underpowered": bool(min_attainable > 0.05),
         "n_discordant": n,
         "n_positive": n_positive,
         "n_negative": n_negative,
@@ -88,6 +95,12 @@ def wilcoxon_signed_rank_test(deltas: list[float]) -> dict:
     Wilcoxon signed-rank test on paired per-fold AUC deltas (DisorderNet − baseline).
 
     More powerful than the sign test when fold deltas vary in magnitude.
+
+    ``p_value`` is **two-sided**, matching ``sign_test_two_sided`` so the two
+    appear on comparable footing in the report. The one-sided
+    (DisorderNet > baseline) alternative is reported separately as
+    ``p_value_greater``; quoting it as the headline result would halve the
+    p-value in the favourable direction without pre-registration.
     """
     deltas = [d for d in deltas if d != 0]
     n = len(deltas)
@@ -96,9 +109,12 @@ def wilcoxon_signed_rank_test(deltas: list[float]) -> dict:
     try:
         from scipy.stats import wilcoxon
 
-        stat, p = wilcoxon(deltas, alternative="greater", zero_method="wilcox")
+        stat, p_two = wilcoxon(deltas, alternative="two-sided", zero_method="wilcox")
+        _, p_greater = wilcoxon(deltas, alternative="greater", zero_method="wilcox")
         return {
-            "p_value": float(p),
+            "p_value": float(p_two),
+            "alternative": "two-sided",
+            "p_value_greater": float(p_greater),
             "statistic": float(stat),
             "n_nonzero": n,
             "insufficient_data": False,
@@ -299,12 +315,20 @@ def print_statistical_validation(report: dict) -> None:
         print(f"  Mean Δ AUC: {s.get('mean_delta_auc', 0):+.4f} ± {s.get('std_delta_auc', 0):.4f}")
         sign = paired.get("sign_test_disordernet_vs_plddt", {})
         if not sign.get("insufficient_data"):
-            print(f"  Sign test : p={sign['p_value']:.4f}  "
+            print(f"  Sign test : p={sign['p_value']:.4f} (two-sided)  "
                   f"({sign['n_positive']} folds DN wins, {sign['n_negative']} baseline wins, "
                   f"{s.get('n_ties', 0)} ties)")
+            if sign.get("underpowered"):
+                print(f"              note: with {sign['n_discordant']} discordant folds the "
+                      f"smallest attainable p is {sign['min_attainable_p']:.4f} — "
+                      f"this test cannot reach 0.05")
         wilcox = paired.get("wilcoxon_disordernet_vs_plddt", {})
         if wilcox and not wilcox.get("insufficient_data") and wilcox.get("p_value") is not None:
-            print(f"  Wilcoxon  : p={wilcox['p_value']:.4f}  (n={wilcox['n_nonzero']} non-zero deltas)")
+            print(f"  Wilcoxon  : p={wilcox['p_value']:.4f} (two-sided)  "
+                  f"(n={wilcox['n_nonzero']} non-zero deltas)")
+            if wilcox.get("p_value_greater") is not None:
+                print(f"              one-sided (DN > baseline): "
+                      f"p={wilcox['p_value_greater']:.4f}")
         boot = paired.get("bootstrap_mean_delta_auc", {})
         if boot and boot.get("ci_low") is not None:
             print(f"  Δ AUC 95% CI: [{boot['ci_low']:+.4f}, {boot['ci_high']:+.4f}]")

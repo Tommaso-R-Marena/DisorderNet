@@ -13,7 +13,7 @@ from typing import Optional
 
 import numpy as np
 from sklearn.metrics import average_precision_score, roc_auc_score
-from colab.cv_splits import get_cv_splits
+from colab.cv_splits import get_cv_splits, resolve_cv_splits
 
 from colab.biological_utility import align_fold_predictions
 from colab.phase3_synthesis import find_optimal_fusion_alpha, fuse_disorder_score
@@ -172,10 +172,19 @@ def write_fused_probs_to_fold_results(
     n_folds: int = 5,
 ) -> list:
     """Write per-protein fused probs back into fold_results val_probs arrays."""
-    by_id = {item["id"]: item["probs"] for item in aligned}
+    # val_probs holds one value per *evidenced* residue — the contract
+    # eval_epoch writes and compute_pooled_metrics reads. Aligned items are
+    # full-length with sentinels, so write back only the evidenced positions or
+    # val_probs desyncs from val_labels the moment evidence is partial.
+    from colab.biological_utility import evidenced
+
+    by_id = {item["id"]: item for item in aligned}
     updated = []
 
-    splits = get_cv_splits(proteins, n_folds)
+    # Use the partition recorded at training time. Re-deriving with the default
+    # "protein" method under a homology-split run writes each protein's fused
+    # probabilities into the wrong fold, desyncing val_probs from val_labels.
+    splits = resolve_cv_splits(proteins, n_folds, fold_results=fold_results)
 
     for fold_idx, (_, val_idx) in enumerate(splits):
         if fold_idx >= len(fold_results):
@@ -185,7 +194,9 @@ def write_fused_probs_to_fold_results(
         chunks = []
         for p in val_proteins:
             if p["id"] in by_id:
-                chunks.append(np.asarray(by_id[p["id"]], dtype=np.float32))
+                item = by_id[p["id"]]
+                probs = np.asarray(item["probs"], dtype=np.float32)
+                chunks.append(probs[evidenced(item)])
             else:
                 # fallback: slice original val_probs
                 raise KeyError(f"Missing aligned predictions for {p['id']}")
@@ -226,11 +237,17 @@ def compute_af_subset_metrics(
         plddt = np.asarray(plddt_by_protein[pid], dtype=np.float32)
         if len(plddt) != len(item["probs"]):
             continue
-        valid = ~np.isnan(plddt)
+        # One combined mask: pLDDT present AND the residue carries a real
+        # label. Masking on pLDDT alone let the alignment sentinels through
+        # (NaN prob, -1 label) once evidence became partial under PDB-derived
+        # sources, and sklearn rejected the NaN 27 minutes into a recovery run.
+        from colab.biological_utility import evidenced
+
+        valid = ~np.isnan(plddt) & evidenced(item)
         if valid.sum() < 5:
             continue
-        probs_list.append(item["probs"][valid])
-        labels_list.append(item["labels"][valid])
+        probs_list.append(np.asarray(item["probs"], dtype=np.float32)[valid])
+        labels_list.append(np.asarray(item["labels"], dtype=np.float32)[valid])
 
     if not probs_list:
         return {"auc": None, "ap": None, "n_residues": 0}
@@ -261,6 +278,8 @@ def apply_plddt_fusion_to_cv(
 
     # Optimize α on AF-covered OOF residues
     if alpha is None:
+        from colab.biological_utility import evidenced
+
         af_probs, af_labels, af_plddt = [], [], []
         for item in aligned:
             pid = item["id"]
@@ -269,7 +288,7 @@ def apply_plddt_fusion_to_cv(
             plddt = np.asarray(plddt_by_protein[pid], dtype=np.float32)
             if len(plddt) != len(item["probs"]):
                 continue
-            valid = ~np.isnan(plddt)
+            valid = ~np.isnan(plddt) & evidenced(item)
             if valid.sum() < 10:
                 continue
             af_probs.append(item["probs"][valid])

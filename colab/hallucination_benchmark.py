@@ -11,6 +11,7 @@ This module is the evaluation spine for the claim:
 
 from __future__ import annotations
 
+import os
 import json
 from typing import Optional
 
@@ -198,6 +199,156 @@ def finalize_distrust_benchmark_with_caid3(
     return bench
 
 
+def compare_rescue_baselines(
+    labels: np.ndarray,
+    plddt: np.ndarray,
+    scores_by_method: dict,
+    *,
+    high_plddt_threshold: float = 70.0,
+    reference_method: str = "disordernet",
+) -> dict:
+    """Rescue rate per method at a *matched prediction budget*.
+
+    A bare rescue rate is not a result. Rescue is recall restricted to
+    hallucinated residues (disordered AND high pLDDT), so a method that simply
+    calls more residues disordered rescues more of them — a model predicting
+    everything disordered scores 1.0. Reporting 0.465 without a control says
+    nothing about whether the model is finding hallucinations or merely
+    predicting liberally.
+
+    Every method is therefore thresholded to flag the *same number* of residues
+    as the reference method, so rescue rates are directly comparable. Precision
+    on the flagged set is reported alongside, since a method could match the
+    budget while spending it on ordered residues.
+
+    The inverse-pLDDT row is the load-bearing control: hallucinations are
+    high-pLDDT by definition, so a structure-confidence baseline cannot rank
+    them highly. Its rescue rate near zero is what makes the task non-trivial —
+    and it means the real question is whether DisorderNet beats a *sequence*
+    baseline, not whether it beats pLDDT.
+    """
+    labels = np.asarray(labels, dtype=np.int8).ravel()
+    plddt = np.asarray(plddt, dtype=np.float32).ravel()
+    valid = ~np.isnan(plddt)
+    if int(valid.sum()) < 10:
+        return {"enabled": False, "insufficient_data": True}
+
+    y = labels[valid]
+    pld = plddt[valid]
+    hallucinated = (y == 1) & (pld >= high_plddt_threshold)
+    n_halluc = int(hallucinated.sum())
+    if n_halluc == 0:
+        return {"enabled": False, "no_hallucinations": True}
+
+    prepared: dict = {}
+    for name, raw in scores_by_method.items():
+        s = np.asarray(raw, dtype=np.float32).ravel()
+        if len(s) < len(valid):
+            continue
+        prepared[name] = s[: len(valid)][valid]
+    if reference_method not in prepared:
+        return {"enabled": False, "missing_reference": reference_method}
+
+    # Budget = number of residues the reference flags at its own 0.5 threshold.
+    budget = int((prepared[reference_method] >= 0.5).sum())
+    budget = max(1, min(budget, len(y) - 1))
+
+    rows: dict = {}
+    rng = np.random.default_rng(0)
+    for name, s in prepared.items():
+        # Take exactly `budget` residues by this method's own ranking. A
+        # threshold cutoff cannot do this when scores tie: a constant scorer
+        # ("everything is disordered") would clear any cutoff and flag the whole
+        # set, scoring a perfect 1.0 rescue rate for no skill. Rank with a
+        # deterministic random tiebreak so ties are broken arbitrarily rather
+        # than in favour of the method.
+        order = np.lexsort((rng.random(len(s)), -s))
+        flagged = np.zeros(len(s), dtype=bool)
+        flagged[order[:budget]] = True
+        n_flagged = int(flagged.sum())
+        cutoff = float(s[order[budget - 1]])
+        rescued = int((flagged & hallucinated).sum())
+        rows[name] = {
+            "rescue_rate": round(rescued / n_halluc, 4),
+            "n_rescued": rescued,
+            "n_flagged": n_flagged,
+            "precision_on_flagged": round(
+                float((flagged & (y == 1)).sum()) / max(n_flagged, 1), 4
+            ),
+            "score_cutoff": float(cutoff),
+        }
+
+    ref = rows[reference_method]["rescue_rate"]
+    floor = (rows.get("random_floor") or {}).get("rescue_rate")
+    below_chance = None if floor is None else bool(ref < floor)
+    best_other = max(
+        ((n, r["rescue_rate"]) for n, r in rows.items() if n != reference_method),
+        key=lambda kv: kv[1],
+        default=(None, None),
+    )
+    return {
+        "enabled": True,
+        "definition": (
+            "rescue = fraction of hallucinated residues (labelled disordered AND "
+            "pLDDT >= threshold) flagged, at a prediction budget matched to the "
+            "reference method"
+        ),
+        "high_plddt_threshold": high_plddt_threshold,
+        "n_hallucinated": n_halluc,
+        "matched_budget_residues": budget,
+        "reference_method": reference_method,
+        "methods": rows,
+        "below_random_floor": below_chance,
+        "verdict": (
+            "REFUTED: the model finds fewer hallucinations than random selection "
+            "at the same budget. It does not act as a distrust layer — its "
+            "confident disorder calls avoid exactly the high-pLDDT residues "
+            "where the structure prediction is wrong."
+            if below_chance
+            else "supported: rescue exceeds the random floor"
+        ) if below_chance is not None else None,
+        "best_competing_method": best_other[0],
+        "delta_vs_best_competing": (
+            None if best_other[1] is None else round(ref - best_other[1], 4)
+        ),
+        "interpretation": (
+            "A rescue rate is only meaningful against these controls. If "
+            "delta_vs_best_competing is near zero, the model is not detecting "
+            "hallucinations better than the alternative — it is predicting "
+            "disorder, which the alternative also does."
+        ),
+    }
+
+
+def _bootstrap_distrust_delta(
+    labels_by_protein: list,
+    dn_by_protein: list,
+    plddt_by_protein: list,
+    *,
+    n_boot: int = 1000,
+) -> dict:
+    """Protein-clustered CI for DisorderNet minus inverse-pLDDT on matched residues.
+
+    Applies the same validity filter ``compare_distrust_baselines`` uses (finite
+    pLDDT), per protein, so the interval describes exactly the comparison the
+    point estimate reports.
+    """
+    from colab.bootstrap_ci import paired_protein_bootstrap_delta
+
+    ys, dns, invs = [], [], []
+    for y, p, pld in zip(labels_by_protein, dn_by_protein, plddt_by_protein):
+        valid = ~np.isnan(pld)
+        if int(valid.sum()) < 2 or len(np.unique(y[valid])) < 2:
+            continue
+        ys.append(y[valid])
+        dns.append(p[valid])
+        invs.append(plddt_to_disorder_score(pld[valid]))
+
+    if len(ys) < 2:
+        return {"insufficient_data": True, "n_proteins": len(ys)}
+    return paired_protein_bootstrap_delta(ys, dns, invs, metric="auc", n_boot=n_boot)
+
+
 def run_labeled_distrust_benchmark(
     proteins: list,
     fold_results: list,
@@ -209,6 +360,7 @@ def run_labeled_distrust_benchmark(
     structure_source: str = "af2",
     cfg=None,
     caid3_report: Optional[dict] = None,
+    extra_scores_by_id: Optional[dict] = None,
 ) -> dict:
     """
     Full labeled benchmark: Phase-2 style rescue report + matched baselines.
@@ -239,9 +391,16 @@ def run_labeled_distrust_benchmark(
         pld = np.asarray(plddt_by_id[pid], dtype=np.float32).ravel()
         if len(pld) < L:
             continue
-        all_y.append(np.asarray(item["labels"], dtype=np.int8).ravel()[:L])
-        all_p.append(np.asarray(item["probs"], dtype=np.float32).ravel()[:L])
-        all_plddt.append(pld[:L])
+        # Drop residues the label source never evaluated; aligned items carry
+        # NaN probs and -1 labels there.
+        from colab.biological_utility import evidenced
+
+        keep = evidenced(item)[:L]
+        if keep.sum() < 5:
+            continue
+        all_y.append(np.asarray(item["labels"], dtype=np.int8).ravel()[:L][keep])
+        all_p.append(np.asarray(item["probs"], dtype=np.float32).ravel()[:L][keep])
+        all_plddt.append(pld[:L][keep])
 
     if not all_y:
         baselines = {"enabled": False, "insufficient_data": True}
@@ -251,6 +410,47 @@ def run_labeled_distrust_benchmark(
             np.concatenate(all_p),
             np.concatenate(all_plddt),
             disorder_threshold=disorder_threshold,
+            high_plddt_threshold=high_plddt_threshold,
+        )
+        # delta_auc_dn_minus_plddt is go/no-go criterion #1 and came out at
+        # +0.0088 in the 650M run. A difference that small is uninterpretable
+        # without an interval, and the interval has to resample *proteins*:
+        # residues within a protein are strongly correlated, so treating ~10^6
+        # of them as independent draws would make almost any gap look decisive.
+        baselines["delta_auc_ci"] = _bootstrap_distrust_delta(
+            all_y, all_p, all_plddt,
+            n_boot=int(os.environ.get("DISORDERNET_CI_BOOT", "1000")),
+        )
+
+        # Rescue rate is meaningless without controls at a matched prediction
+        # budget — see compare_rescue_baselines. Always include the inverse-pLDDT
+        # baseline (which by construction cannot rank high-pLDDT hallucinations)
+        # and a random floor, plus any extra stream the caller supplies.
+        flat_y = np.concatenate(all_y)
+        flat_p = np.concatenate(all_p)
+        flat_pl = np.concatenate(all_plddt)
+        streams = {
+            "disordernet": flat_p,
+            "inverse_plddt": plddt_to_disorder_score(np.nan_to_num(flat_pl, nan=50.0)),
+            "random_floor": np.random.default_rng(0).random(len(flat_y)).astype(np.float32),
+        }
+        if extra_scores_by_id:
+            extra = []
+            for item in aligned:
+                pid = item["id"]
+                if pid not in plddt_by_id:
+                    continue
+                L = len(item["probs"])
+                arr = extra_scores_by_id.get(pid)
+                extra.append(
+                    np.asarray(arr, dtype=np.float32).ravel()[:L]
+                    if arr is not None and len(np.asarray(arr).ravel()) >= L
+                    else np.full(L, 0.5, dtype=np.float32)
+                )
+            if extra:
+                streams["v6_physics"] = np.concatenate(extra)
+        baselines["rescue_baselines"] = compare_rescue_baselines(
+            flat_y, flat_pl, streams,
             high_plddt_threshold=high_plddt_threshold,
         )
 
@@ -301,4 +501,26 @@ def print_distrust_benchmark(report: dict) -> None:
             f"  matched AUC  DN={dn.get('auc')}  inv-pLDDT={pl.get('auc')}  "
             f"Δ={base.get('delta_auc_dn_minus_plddt')}"
         )
+        # The interval, not just the point estimate: go/no-go criterion #1 turns
+        # on a difference of a few thousandths of AUC.
+        rb = base.get("rescue_baselines") or {}
+        if rb.get("enabled"):
+            print("\n  -- rescue at matched prediction budget --")
+            for name, m in (rb.get("methods") or {}).items():
+                print(f"    {name:<16s} rescue={m['rescue_rate']:.4f}  "
+                      f"precision={m['precision_on_flagged']:.4f}")
+            if rb.get("below_random_floor"):
+                print(f"\n  *** {rb.get('verdict')} ***\n")
+        ci = base.get("delta_auc_ci") or {}
+        if ci.get("ci_low") is not None:
+            verdict = (
+                "within protein-level sampling noise"
+                if ci.get("crosses_zero") else "excludes zero"
+            )
+            print(
+                f"    95% CI [{ci['ci_low']:+.4f}, {ci['ci_high']:+.4f}] "
+                f"over {ci.get('n_proteins')} proteins (cluster bootstrap) — {verdict}"
+            )
+            if ci.get("p_value_bootstrap") is not None:
+                print(f"    bootstrap p = {ci['p_value_bootstrap']:.4f}")
     print("  non-claims:", ", ".join(report.get("non_claims") or []))

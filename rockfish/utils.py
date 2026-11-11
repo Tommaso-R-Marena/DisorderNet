@@ -62,7 +62,12 @@ ARTIFACT_REPORT_GLOBS: tuple[str, ...] = (
 
 # Large weight globs — mirrored for resume, not copied into publish packages
 ARTIFACT_WEIGHT_GLOBS: tuple[str, ...] = (
+    # Both spellings: training writes fold{N}_best.pt while the compact-checkpoint
+    # path writes fold_{N}_compact.pt. Matching only one silently mirrored no
+    # weights at all, so a resumed run had nothing to restore from.
     "fold_*_compact.pt",
+    "fold*_best.pt",
+    "fold*_compact.pt",
 )
 
 # All basename-level globs (reports + weights)
@@ -237,6 +242,15 @@ def sbatch_export_keys(extra: Sequence[str] = ()) -> str:
         "DISORDERNET_BOLTZ_ROOT",
         "BOLTZ_CACHE",
         "DISORDERNET_MAIL_USER",
+        # Without this each job re-downloads DisProt: ~7 minutes and 34 paged
+        # REST requests, on GPU walltime.
+        "DISORDERNET_DISPROT_CACHE",
+        # Absolute shared pLDDT cache; without it each run re-fetches ~2.5k
+        # AlphaFold entries over HTTP on GPU walltime.
+        "DISORDERNET_PLDDT_CACHE",
+        "DISORDERNET_HOMOLOGY_JOBS",
+        "TORCH_HOME",
+        "HF_HOME",
     )
     for k in optional:
         if os.environ.get(k):
@@ -380,8 +394,11 @@ def submit_sbatch(
     Submit a Slurm script. Returns job id (or DRY_RUN placeholder).
     Raises RuntimeError / CalledProcessError on failure.
 
-    ``mem`` overrides ``#SBATCH --mem`` when set (use e.g. ``180G`` for a100 GPU
-    jobs — full 192G often aborts at start). Leave None for CPU package jobs.
+    ``mem`` overrides ``#SBATCH --mem`` when set. Keep it equal to
+    ``cpus-per-task * 4000M`` on Rockfish: the a100/ica100/shared partitions set
+    MaxMemPerCPU=4000MB, and Slurm silently raises AllocCPUS to
+    ``ceil(mem_MB / 4000)`` when the request exceeds that ratio. Leave None to
+    use the value baked into the sbatch file.
     """
     script = Path(script)
     if not script.is_file() and not dry_run:
