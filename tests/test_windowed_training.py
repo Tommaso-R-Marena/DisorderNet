@@ -264,3 +264,64 @@ class TestLeakFilterAcceptsSeveralBenchmarks:
         kept, meta = drop_caid_targets(self._rows(), [], 0.4)
         assert len(kept) == 6
         assert "no benchmark reference" in meta["reason"]
+
+
+class TestLeakFilterMatchesAcrossIdNamespaces:
+    """A MobiDB row is the benchmark protein when its accession says so.
+
+    References are keyed by DisProt id; MobiDB rows by ``MB:``-prefixed id and
+    UniProt accession. The exact-id step compared ``row["id"]`` with the
+    DisProt ids, which cannot match a MobiDB row, so for 21,966 of 22,914
+    proteins the only defence was BLAST. ``verify_soft_label_leak.py`` found a
+    benchmark protein (``A1C3L3``) that BLAST let through. Here the homology
+    pass is waived and the sequences differ, so only an accession match can
+    remove the row — which is the case that leaked.
+    """
+
+    @staticmethod
+    def _ref(tmp_path, records):
+        p = tmp_path / "ref.fasta"
+        p.write_text("".join(f">{i}\n{s}\n{'0' * len(s)}\n" for i, s in records))
+        return str(p)
+
+    @staticmethod
+    def _rows():
+        return [
+            {"id": "MB:A1C3L3", "uniprot_acc": "A1C3L3",
+             "sequence": "ACDEFGHIKL" * 6, "length": 60},
+            {"id": "MB:A1C3L3#w1", "uniprot_acc": "A1C3L3",
+             "sequence": "KLMNPQRSTV" * 6, "length": 60},
+            {"id": "MB:P99999", "uniprot_acc": "P99999",
+             "sequence": "WYWYWYWYWY" * 6, "length": 60},
+        ]
+
+    def test_without_the_map_the_benchmark_protein_survives(self, tmp_path):
+        """The behaviour that leaked, pinned so the map's effect is visible."""
+        from rockfish.train_multitask import drop_caid_targets
+
+        ref = self._ref(tmp_path, [("DP09999", "MMMMMMMMMMMMMMMMMMMM")])
+        kept, _ = drop_caid_targets(self._rows(), ref, 0.4,
+                                    allow_missing_homology=True)
+        assert "A1C3L3" in {r["uniprot_acc"] for r in kept}
+
+    def test_with_the_map_every_row_of_it_is_removed(self, tmp_path):
+        from rockfish.train_multitask import drop_caid_targets
+
+        ref = self._ref(tmp_path, [("DP09999", "MMMMMMMMMMMMMMMMMMMM")])
+        kept, meta = drop_caid_targets(
+            self._rows(), ref, 0.4, allow_missing_homology=True,
+            accession_map={"DP09999": "A1C3L3"})
+        assert {r["uniprot_acc"] for r in kept} == {"P99999"}, (
+            "a window of the benchmark protein survived")
+        assert meta["n_accession_removed"] == 2
+        assert meta["accession_map_used"]
+
+    def test_the_map_is_built_from_disprot(self):
+        from rockfish.train_multitask import disprot_accession_map
+
+        m = disprot_accession_map([
+            {"disprot_id": "DP00001", "acc": " P11111 "},
+            {"disprot_id": "DP00002", "acc": ""},
+            {"acc": "P33333"},
+        ])
+        assert m == {"DP00001": "P11111"}

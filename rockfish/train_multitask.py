@@ -433,6 +433,23 @@ def structure_batch(batch, L, device):
     return rsa, pl, av, ct, hd
 
 
+def disprot_accession_map(entries) -> dict:
+    """DisProt id -> UniProt accession, from the DisProt dump the run loaded.
+
+    Benchmark references are keyed by DisProt id (``DP02732``); MobiDB rows by
+    UniProt accession and an ``MB:`` id. Every comparison between the two has to
+    go through this map, and two of them did not: the soft-label leak check and
+    the exact-id step of ``drop_caid_targets`` both compared ids across the two
+    namespaces, which is empty by construction.
+    """
+    out = {}
+    for e in entries or []:
+        dp, acc = e.get("disprot_id"), (e.get("acc") or "").strip()
+        if dp and acc:
+            out[dp] = acc
+    return out
+
+
 def soft_label_leak_report(rows, entries, reference_fastas, soft_accs) -> dict:
     """Which benchmark proteins carry a soft target, before and after filtering.
 
@@ -455,11 +472,7 @@ def soft_label_leak_report(rows, entries, reference_fastas, soft_accs) -> dict:
     """
     from colab.caid3_eval import parse_caid_reference_fasta
 
-    dp_to_acc = {}
-    for e in entries:
-        dp, acc = e.get("disprot_id"), (e.get("acc") or "").strip()
-        if dp and acc:
-            dp_to_acc[dp] = acc
+    dp_to_acc = disprot_accession_map(entries)
 
     paths = ([reference_fastas] if isinstance(reference_fastas, (str, bytes))
              else list(reference_fastas or []))
@@ -494,6 +507,7 @@ def soft_label_leak_report(rows, entries, reference_fastas, soft_accs) -> dict:
 def drop_caid_targets(
     rows: list[dict], reference_fasta, min_identity: float,
     allow_missing_homology: bool = False,
+    accession_map: Optional[dict] = None,
 ) -> tuple[list[dict], dict]:
     """Remove benchmark targets and their homologues from the training union.
 
@@ -507,6 +521,16 @@ def drop_caid_targets(
     the two rounds share exactly one protein. A model filtered only against
     CAID3 therefore cannot be evaluated on CAID2 at all, and a held-out
     benchmark is the difference between one result and a replicated one.
+
+    ``accession_map`` (DisProt id -> UniProt accession, from
+    ``disprot_accession_map``) adds an exact exclusion by accession. Without it
+    the exact step only compares ``row["id"]`` with the references' DisProt
+    ids, and every MobiDB row is ``MB:``-prefixed, so for 21,966 of the 22,914
+    proteins that step cannot fire and the benchmark protein survives unless
+    BLAST happens to clear its identity-times-coverage bar. One did not
+    (``A1C3L3``, found by ``verify_soft_label_leak.py``). An accession match is
+    the same protein whatever the sequence differences, so it is removed
+    unconditionally.
     """
     from colab.caid3_eval import parse_caid_reference_fasta
 
@@ -526,12 +550,20 @@ def drop_caid_targets(
             targets.append(t)
     target_ids = {t["id"] for t in targets}
     target_seqs = {t["sequence"] for t in targets}
+    amap = accession_map or {}
+    target_accs = {amap[i] for i in target_ids if i in amap}
+    target_accs |= {i for i in target_ids if not str(i).startswith("DP")}
 
-    kept, n_id = [], 0
+    kept, n_id, n_acc = [], 0, 0
     exact_removed = []
     for r in rows:
         if r["id"] in target_ids or r["sequence"] in target_seqs:
             n_id += 1
+            exact_removed.append(r["id"])
+            continue
+        if r.get("uniprot_acc") and r["uniprot_acc"] in target_accs:
+            n_id += 1
+            n_acc += 1
             exact_removed.append(r["id"])
             continue
         kept.append(r)
@@ -576,6 +608,8 @@ def drop_caid_targets(
         "n_before": len(rows),
         "n_removed": len(rows) - len(kept),
         "n_id_overlap": n_id,
+        "n_accession_removed": n_acc,
+        "accession_map_used": bool(amap),
         "n_homology_removed": len(homologous),
         "min_identity": min_identity,
         "reference": paths if len(paths) > 1 else paths[0],
@@ -999,10 +1033,12 @@ def main(argv=None) -> int:
     elif not args.no_caid_filter:
         rows, leak = drop_caid_targets(
             rows, args.caid_reference, args.leak_identity,
-            allow_missing_homology=args.allow_missing_homology_filter)
+            allow_missing_homology=args.allow_missing_homology_filter,
+            accession_map=disprot_accession_map(entries))
         print(f"CAID leak-free: removed {leak['n_removed']} / {leak['n_before']} "
               f"proteins at identity>={args.leak_identity} "
-              f"({leak['n_id_overlap']} exact id/sequence hits)")
+              f"({leak['n_id_overlap']} exact id/sequence/accession hits, "
+              f"{leak.get('n_accession_removed', 0)} by accession alone)")
         # PREREGISTRATION_11 promises this check, and promises it on the right
         # set. The soft-label cache is keyed by accession over the whole
         # pdb_missing universe and does overlap the benchmark (141 of 319 CAID3

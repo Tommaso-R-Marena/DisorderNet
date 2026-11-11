@@ -14,8 +14,9 @@ no GPU and no training — and reports the two numbers the pre-registration
 commits to:
 
   * how many benchmark accessions carry a soft target *before* the filter
-    (expected to be non-zero; the pre-registration says ~141, and a zero here
-    means the join is broken again rather than that the cache is clean), and
+    (expected to be non-zero — 292 of 624 across the five references in the
+    first run; a zero means the join is broken again, not that the cache is
+    clean), and
   * how many survive it (must be 0).
 
 Run it on a compute node, never a login node; it needs BLAST for the homology
@@ -34,6 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from colab.caid3_eval import parse_caid_reference_fasta          # noqa: E402
 from rockfish.train_multitask import (                           # noqa: E402
     build_union,
+    disprot_accession_map,
     chunk_long_rows,
     drop_caid_targets,
     load_disprot,
@@ -77,11 +79,7 @@ def main() -> int:
 
     # The join the original check got wrong: references are DisProt ids, the
     # cache is UniProt accessions.
-    dp_to_acc = {}
-    for e in entries:
-        dp, acc = e.get("disprot_id"), (e.get("acc") or "").strip()
-        if dp and acc:
-            dp_to_acc[dp] = acc
+    dp_to_acc = disprot_accession_map(entries)
 
     ref_accs, ref_seqs, unmapped = set(), set(), set()
     for path in args.caid_reference:
@@ -106,13 +104,14 @@ def main() -> int:
         print("FAIL: no benchmark accession resolved; the join is broken.")
         return 2
     if not before:
-        print("FAIL: zero overlap before the filter. The pre-registration "
-              "records ~141; zero means the join is broken, not that the "
-              "cache is clean.")
+        print("FAIL: zero overlap before the filter. The first run found "
+              "292; zero means the join is broken, not that the cache is "
+              "clean.")
         return 2
 
     kept, leak = drop_caid_targets(rows, args.caid_reference,
-                                   args.leak_identity)
+                                   args.leak_identity,
+                                   accession_map=dp_to_acc)
     print(f"drop_caid_targets removed {leak['n_removed']:,} / "
           f"{leak['n_before']:,} ({leak['n_id_overlap']} exact)")
 
@@ -130,6 +129,7 @@ def main() -> int:
         "removed": leak["n_removed"],
         "n_before": leak["n_before"],
         "exact_hits": leak["n_id_overlap"],
+        "accession_removed": leak.get("n_accession_removed", 0),
         "pass": not still_here,
     }
     if args.out:
