@@ -167,3 +167,86 @@ class TestTheLeakCheckCanActuallyFail:
             "with no DisProt mapping nothing resolves, and the run must refuse "
             "rather than print a passing check"
         )
+
+
+class TestTheHardLabelSurvivesTheMerge:
+    """A soft target must never reach a metric, including via `merge_task_rows`.
+
+    The first soft-label arm (31214999) trained fold 1 for 103 minutes and then
+    died with ``ValueError: continuous format is not supported`` from
+    ``roc_auc_score``. Both metric sites already called ``hard_labels``; the
+    fault was upstream. ``merge_task_rows`` copies a task across when a
+    pdb_missing row joins a DisProt row of the same sequence, and it copied
+    ``task_labels`` — the fractional target — without ``task_labels_hard``.
+    DisProt rows have no hard labels of their own, so the merged row had none
+    at all and ``hard_labels`` fell through to the soft values.
+    """
+
+    @staticmethod
+    def _rows():
+        base = [{"id": "DP1", "sequence": "MKVMKV", "length": 6,
+                 "uniprot_acc": "A1",
+                 "task_labels": {"linker": np.array([0, 1, 0, 0, 1, 0],
+                                                    dtype=np.int8)},
+                 "task_evidence": {"linker": np.ones(6, bool)}}]
+        extra = [{"id": "MB:A1", "sequence": "MKVMKV", "length": 6,
+                  "uniprot_acc": "A1",
+                  "task_labels": {"disorder_pdb": np.array(
+                      [0.0, 0.4, 1.0, 0.25, 0.0, 1.0], dtype=np.float32)},
+                  "task_labels_hard": {"disorder_pdb": np.array(
+                      [0, 0, 1, 0, 0, 1], dtype=np.int8)},
+                  "task_evidence": {"disorder_pdb": np.ones(6, bool)}}]
+        return base, extra
+
+    def test_merged_row_keeps_a_binary_label(self):
+        from rockfish.train_multitask import merge_task_rows
+
+        base, extra = self._rows()
+        merged = merge_task_rows(base, extra, ("linker", "disorder_pdb"))
+        assert len(merged) == 1, "same sequence should merge into one row"
+
+        y = hard_labels(merged[0], "disorder_pdb")
+        assert set(np.unique(y)) <= {0, 1}, (
+            f"hard_labels returned a continuous target {np.unique(y)} — this is "
+            "exactly what roc_auc_score rejects"
+        )
+        tgt = merged[0]["task_labels"]["disorder_pdb"]
+        assert ((tgt > 0) & (tgt < 1)).any(), "soft target was lost in the merge"
+
+    def test_the_merged_label_is_the_right_one(self):
+        from rockfish.train_multitask import merge_task_rows
+
+        base, extra = self._rows()
+        merged = merge_task_rows(base, extra, ("linker", "disorder_pdb"))
+        np.testing.assert_array_equal(
+            hard_labels(merged[0], "disorder_pdb"),
+            np.array([0, 0, 1, 0, 0, 1], dtype=np.int8))
+
+    def test_merging_does_not_mutate_the_source_rows(self):
+        from rockfish.train_multitask import merge_task_rows
+
+        base, extra = self._rows()
+        merge_task_rows(base, extra, ("linker", "disorder_pdb"))
+        assert "task_labels_hard" not in base[0]
+        assert set(extra[0]["task_labels_hard"]) == {"disorder_pdb"}
+
+    def test_a_fractional_target_without_a_hard_label_is_refused(self):
+        """Fail in seconds at data prep, not after an hour of training."""
+        from rockfish.train_multitask import assert_hard_labels_available
+
+        orphan = [{"id": "MB:A2", "length": 3,
+                   "task_labels": {"disorder_pdb": np.array(
+                       [0.0, 0.5, 1.0], dtype=np.float32)},
+                   "task_evidence": {"disorder_pdb": np.ones(3, bool)}}]
+        with pytest.raises(SystemExit, match="task_labels_hard"):
+            assert_hard_labels_available(orphan, ("disorder_pdb",))
+
+    def test_an_all_hard_run_is_unaffected(self):
+        """Without --soft-labels nothing is fractional and nothing is required."""
+        from rockfish.train_multitask import assert_hard_labels_available
+
+        rows = [{"id": "MB:A3", "length": 3,
+                 "task_labels": {"disorder_pdb": np.array(
+                     [0.0, 1.0, 1.0], dtype=np.float32)},
+                 "task_evidence": {"disorder_pdb": np.ones(3, bool)}}]
+        assert_hard_labels_available(rows, ("disorder_pdb",))

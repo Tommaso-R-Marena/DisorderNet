@@ -297,6 +297,8 @@ def merge_task_rows(base: list[dict], extra: list[dict],
             merged = dict(row)
             merged["task_labels"] = dict(row["task_labels"])
             merged["task_evidence"] = dict(row["task_evidence"])
+            if "task_labels_hard" in row:
+                merged["task_labels_hard"] = dict(row["task_labels_hard"])
             by_seq[key] = merged
         else:
             tgt = by_seq[key]
@@ -304,6 +306,16 @@ def merge_task_rows(base: list[dict], extra: list[dict],
                 if t not in tgt["task_labels"]:
                     tgt["task_labels"][t] = lab
                     tgt["task_evidence"][t] = row["task_evidence"][t]
+                    # The hard label has to travel with the target it belongs
+                    # to. It did not, and the consequence was not a wrong
+                    # number but a crash two hours in: a pdb_missing row
+                    # merging into a DisProt row brought its fractional
+                    # disorder_pdb target across while its 0/1 labels stayed
+                    # behind, so hard_labels() fell through to the soft values
+                    # and roc_auc_score was handed a continuous y_true.
+                    hard = row.get("task_labels_hard")
+                    if hard is not None and t in hard:
+                        tgt.setdefault("task_labels_hard", {})[t] = hard[t]
 
     out = []
     for row in by_seq.values():
@@ -313,7 +325,35 @@ def merge_task_rows(base: list[dict], extra: list[dict],
                 row["task_labels"][t] = np.zeros(n, dtype=np.int8)
                 row["task_evidence"][t] = np.zeros(n, dtype=bool)
         out.append(row)
+    assert_hard_labels_available(out, all_tasks)
     return out
+
+
+def assert_hard_labels_available(rows: list[dict], tasks) -> None:
+    """Every fractional target must have a 0/1 label beside it.
+
+    Checked here, on the whole merged union, because the alternative is finding
+    out from sklearn: the first soft-label run trained fold 1 for 103 minutes
+    and then died on ``continuous format is not supported`` when the pooled
+    disorder_pdb AUC was computed. The invariant is cheap to test and the
+    failure it prevents is expensive, so it is tested once per run rather than
+    per call in the evaluation loop.
+    """
+    for row in rows:
+        for t in tasks:
+            lab = row["task_labels"].get(t)
+            if lab is None or lab.dtype.kind not in "fc":
+                continue                      # integer labels are already hard
+            frac = lab[(lab > 0) & (lab < 1)]
+            if frac.size == 0:
+                continue                      # float-typed but still 0/1
+            hard = (row.get("task_labels_hard") or {}).get(t)
+            if hard is None:
+                raise SystemExit(
+                    f"row {row.get('id')!r} carries a fractional target for "
+                    f"task {t!r} with no task_labels_hard entry. Every metric, "
+                    f"class-balance statistic and stratified split would then "
+                    f"see a target that is not a class.")
 
 
 def attach_structure(rows: list[dict], cache_dir: str) -> None:
