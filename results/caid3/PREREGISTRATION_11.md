@@ -216,3 +216,61 @@ Identical backbone, folds, epochs, structure dimension, task set, references and
 holdout salt; submitted in the same window. `mt_control` is retained as a
 secondary reference point but the registered comparison is `mt_soft` against
 `mt_hard`.
+
+### Second attempt: neither arm is scorable, and the pair is rerun
+
+Nothing from this pair has been scored. Three things were found, in order, and
+each one is reported here rather than repaired silently.
+
+**1. The leak verification failed.** `verify_soft_label_leak.py` (job
+31215505) resolved 624 benchmark accessions across the five references (42
+DisProt ids had no accession in the dump), found **292** carrying a soft target
+before the filter — the 141 quoted above was CAID3 alone — and found **one that
+survived `drop_caid_targets`: `A1C3L3`**. The invariant this section states is
+"must be 0", so the run failed it.
+
+The residual is not soft-label-specific. `drop_caid_targets`' exact step
+compared each row's id with the references' DisProt ids, and every MobiDB row is
+`MB:`-prefixed, so for 21,966 of the 22,914 proteins the exact step could never
+fire and BLAST's identity-times-coverage bar was the only defence. This is the
+same cross-namespace comparison as the first version of the leak check, one
+function earlier. It therefore applies equally to **both arms** and to every
+earlier multi-task run that used the `pdb_missing` source: their training sets
+contained at most one benchmark protein out of 624. That is too small to move a
+pooled number, but it is a leak and is recorded as one. The filter now also
+removes any row whose UniProt accession maps to a benchmark DisProt id
+(`disprot_accession_map`, commit `11be073`), and
+`tests/test_windowed_training.py::TestLeakFilterMatchesAcrossIdNamespaces` pins
+both the old leaking behaviour and the fix.
+
+**2. The soft arm crashed after fold 1** (31214999, `FAILED` at 2 h 11 min):
+`ValueError: continuous format is not supported` from `roc_auc_score`. Both
+metric sites already used `hard_labels`; the fault was upstream, in
+`merge_task_rows`, which carried a pdb_missing row's fractional target into a
+DisProt row of the same sequence without its `task_labels_hard`. The four
+non-`disorder_pdb` fold-1 AUCs it printed are not reported. Fixed in `e86087b`,
+with a data-prep assertion that refuses any fractional target lacking a hard
+label, so the same fault now costs seconds rather than two hours.
+
+**3. The control's outcome was not retrieved.** `mt_hard` (31215000) was last
+seen `RUNNING` at 7 h 50 min, in fold 2 or later. Cluster access ended before it
+finished, and its result has not been read.
+
+**What follows for the registered comparison.** The pair is rerun, **both
+arms**, from `11be073` or later. Keeping 31215000 as the control would compare a
+soft arm trained under the fixed filter with a hard arm trained under the old
+one, and two arms that differ in their training set as well as in the target is
+the confound the matched design exists to remove. 31215000 joins `mt_control`
+as a secondary reference point and is not the registered control. The
+endpoints, floors and stopping rule above are unchanged, since nothing has been
+scored: no number from either arm has been looked at against an endpoint.
+
+| arm | job | status |
+|---|---:|---|
+| `mt_soft` | 31214999 | failed after fold 1 (merge bug) — superseded |
+| `mt_hard` | 31215000 | outcome not retrieved — demoted to secondary reference |
+| leak verification | 31215505 | **FAIL**, 1 survivor (`A1C3L3`) — filter fixed |
+| `mt_soft`, `mt_hard` rerun | — | to be submitted from `11be073`+, as a pair |
+
+Before the rerun is scored, `verify_soft_label_leak.py` is run against the same
+inputs and must report a non-zero count before the filter and **0** after it.
